@@ -6,6 +6,7 @@ create table if not exists public.rooms (
   host_id text not null default 'geography',
   current_round integer not null default 1 check (current_round between 1 and 12),
   phase text not null default 'setup' check (phase in ('setup', 'open', 'closed', 'ended', 'expired')),
+  mode text not null default 'individual' check (mode in ('individual', 'team')),
   base_rate numeric(5, 2) not null default 3.5,
   exchange_rate integer not null default 1350,
   is_paused boolean not null default false,
@@ -15,6 +16,7 @@ create table if not exists public.rooms (
 );
 
 alter table public.rooms add column if not exists exchange_rate integer not null default 1350;
+alter table public.rooms add column if not exists mode text not null default 'individual';
 
 create table if not exists public.players (
   id uuid primary key default gen_random_uuid(),
@@ -27,6 +29,23 @@ create table if not exists public.players (
   joined_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (room_id, nickname)
+);
+
+create table if not exists public.team_accounts (
+  id uuid primary key default gen_random_uuid(),
+  room_id uuid not null references public.rooms(id) on delete cascade,
+  team_key text not null,
+  team_name text not null,
+  cash bigint not null default 100000000,
+  deposit bigint not null default 0,
+  deposit_interest_earned bigint not null default 0,
+  portfolio jsonb not null default '{}'::jsonb,
+  trade_holder text,
+  trade_holder_expires_at timestamptz,
+  negative_rounds integer not null default 0,
+  bankrupt boolean not null default false,
+  updated_at timestamptz not null default now(),
+  unique (room_id, team_key)
 );
 
 create table if not exists public.assets (
@@ -147,6 +166,9 @@ begin
   if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'players') then
     alter publication supabase_realtime add table public.players;
   end if;
+  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'team_accounts') then
+    alter publication supabase_realtime add table public.team_accounts;
+  end if;
   if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'assets') then
     alter publication supabase_realtime add table public.assets;
   end if;
@@ -185,6 +207,11 @@ create trigger touch_players_updated_at
 before update on public.players
 for each row execute function public.touch_updated_at();
 
+drop trigger if exists touch_team_accounts_updated_at on public.team_accounts;
+create trigger touch_team_accounts_updated_at
+before update on public.team_accounts
+for each row execute function public.touch_updated_at();
+
 drop trigger if exists touch_assets_updated_at on public.assets;
 create trigger touch_assets_updated_at
 before update on public.assets
@@ -202,6 +229,7 @@ for each row execute function public.touch_updated_at();
 
 alter table public.rooms enable row level security;
 alter table public.players enable row level security;
+alter table public.team_accounts enable row level security;
 alter table public.assets enable row level security;
 alter table public.portfolios enable row level security;
 alter table public.round_events enable row level security;
@@ -214,6 +242,8 @@ drop policy if exists "classroom prototype rooms read" on public.rooms;
 drop policy if exists "classroom prototype rooms write" on public.rooms;
 drop policy if exists "classroom prototype players read" on public.players;
 drop policy if exists "classroom prototype players write" on public.players;
+drop policy if exists "classroom prototype team accounts read" on public.team_accounts;
+drop policy if exists "classroom prototype team accounts write" on public.team_accounts;
 drop policy if exists "classroom prototype assets read" on public.assets;
 drop policy if exists "classroom prototype assets write" on public.assets;
 drop policy if exists "classroom prototype portfolios read" on public.portfolios;
@@ -234,6 +264,9 @@ create policy "classroom prototype rooms write" on public.rooms for all using (t
 
 create policy "classroom prototype players read" on public.players for select using (true);
 create policy "classroom prototype players write" on public.players for all using (true) with check (true);
+
+create policy "classroom prototype team accounts read" on public.team_accounts for select using (true);
+create policy "classroom prototype team accounts write" on public.team_accounts for all using (true) with check (true);
 
 create policy "classroom prototype assets read" on public.assets for select using (true);
 create policy "classroom prototype assets write" on public.assets for all using (true) with check (true);

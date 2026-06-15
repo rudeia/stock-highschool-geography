@@ -94,6 +94,37 @@ function fromPlayerRow(row) {
   };
 }
 
+function toTeamRow(roomId, team) {
+  return {
+    room_id: roomId,
+    team_key: team.key,
+    team_name: team.name,
+    cash: Math.round(team.cash ?? 0),
+    deposit: Math.round(team.deposit ?? 0),
+    deposit_interest_earned: Math.round(team.depositInterestEarned ?? 0),
+    portfolio: team.portfolio ?? {},
+    trade_holder: team.tradeHolder ?? null,
+    trade_holder_expires_at: team.tradeHolderExpiresAt ? toIso(team.tradeHolderExpiresAt) : null,
+    negative_rounds: team.negativeRounds ?? 0,
+    bankrupt: Boolean(team.bankrupt),
+  };
+}
+
+function fromTeamRow(row) {
+  return {
+    key: row.team_key,
+    name: row.team_name,
+    cash: Number(row.cash ?? 0),
+    deposit: Number(row.deposit ?? 0),
+    depositInterestEarned: Number(row.deposit_interest_earned ?? 0),
+    portfolio: row.portfolio ?? {},
+    tradeHolder: row.trade_holder ?? null,
+    tradeHolderExpiresAt: row.trade_holder_expires_at ? new Date(row.trade_holder_expires_at).getTime() : null,
+    negativeRounds: Number(row.negative_rounds ?? 0),
+    bankrupt: Boolean(row.bankrupt),
+  };
+}
+
 function fromSubmissionRow(row) {
   return {
     id: row.id,
@@ -121,26 +152,29 @@ async function fetchRoomBundle(query) {
     throw roomError;
   }
 
-  const [assetsResult, eventsResult, playersResult] = await Promise.all([
+  const [assetsResult, eventsResult, playersResult, teamsResult] = await Promise.all([
     supabase.from('assets').select('*').eq('room_id', room.id).order('name', { ascending: true }),
     supabase.from('round_events').select('*').eq('room_id', room.id).order('created_at', { ascending: true }),
     supabase.from('players').select('*').eq('room_id', room.id).order('joined_at', { ascending: true }),
+    supabase.from('team_accounts').select('*').eq('room_id', room.id).order('team_key', { ascending: true }),
   ]);
 
   if (assetsResult.error) throw assetsResult.error;
   if (eventsResult.error) throw eventsResult.error;
   if (playersResult.error) throw playersResult.error;
+  if (teamsResult.error && teamsResult.error.code !== '42P01') throw teamsResult.error;
 
   return {
     room,
     assets: assetsResult.data.map(fromAssetRow),
     events: eventsResult.data.map(fromEventRow),
     players: playersResult.data.map(fromPlayerRow),
+    teams: teamsResult.error ? [] : teamsResult.data.map(fromTeamRow),
     submissions: [],
   };
 }
 
-export async function createRemoteRoom({ pin, now, baseRate, exchangeRate = 1350, assets }) {
+export async function createRemoteRoom({ pin, now, baseRate, exchangeRate = 1350, assets, mode = 'individual', teams = [] }) {
   if (!supabaseConfigured) return null;
 
   const { data: existing } = await supabase.from('rooms').select('id').eq('pin', pin).maybeSingle();
@@ -154,6 +188,7 @@ export async function createRemoteRoom({ pin, now, baseRate, exchangeRate = 1350
       pin,
       current_round: 1,
       phase: 'setup',
+      mode,
       base_rate: baseRate,
       exchange_rate: exchangeRate,
       is_paused: false,
@@ -167,6 +202,11 @@ export async function createRemoteRoom({ pin, now, baseRate, exchangeRate = 1350
 
   const { error: assetsError } = await supabase.from('assets').insert(assets.map((asset) => toAssetRow(room.id, asset)));
   if (assetsError) throw assetsError;
+
+  if (teams.length) {
+    const { error: teamsError } = await supabase.from('team_accounts').upsert(teams.map((team) => toTeamRow(room.id, team)), { onConflict: 'room_id,team_key' });
+    if (teamsError) throw teamsError;
+  }
 
   return fetchRemoteRoomById(room.id);
 }
@@ -238,6 +278,26 @@ export async function upsertRemotePlayer(roomId, player) {
   return fromPlayerRow(data);
 }
 
+export async function upsertRemoteTeamAccount(roomId, team) {
+  if (!supabaseConfigured || !roomId || !team?.key) return null;
+  const { data, error } = await supabase
+    .from('team_accounts')
+    .upsert(toTeamRow(roomId, team), { onConflict: 'room_id,team_key' })
+    .select()
+    .single();
+  if (error) throw error;
+  return fromTeamRow(data);
+}
+
+export async function upsertRemoteTeamAccounts(roomId, teams) {
+  if (!supabaseConfigured || !roomId || !teams?.length) return null;
+  const { error } = await supabase
+    .from('team_accounts')
+    .upsert(teams.map((team) => toTeamRow(roomId, team)), { onConflict: 'room_id,team_key' });
+  if (error) throw error;
+  return true;
+}
+
 export async function fetchRemoteSubmissions(roomId) {
   if (!supabaseConfigured || !roomId) return [];
   const { data, error } = await supabase
@@ -296,6 +356,7 @@ export function subscribeRemoteRoom(roomId, onChange) {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'assets', filter: `room_id=eq.${roomId}` }, onChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'round_events', filter: `room_id=eq.${roomId}` }, onChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'players', filter: `room_id=eq.${roomId}` }, onChange)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'team_accounts', filter: `room_id=eq.${roomId}` }, onChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'final_submissions', filter: `room_id=eq.${roomId}` }, onChange)
     .subscribe();
 

@@ -45,6 +45,8 @@ import {
   updateRemoteRoom,
   upsertRemoteAssets,
   upsertRemotePlayer,
+  upsertRemoteTeamAccount,
+  upsertRemoteTeamAccounts,
   upsertRemoteSubmission,
 } from './lib/supabaseRoomStore.js';
 
@@ -71,6 +73,11 @@ const HOST_CREDENTIALS = {
   id: 'geography',
   password: '72727272',
 };
+const TEAM_TRADE_LOCK_MS = 60_000;
+const teamTemplates = Array.from({ length: 8 }, (_, index) => ({
+  key: `team-${index + 1}`,
+  name: `${index + 1}모둠`,
+}));
 
 const phaseLabels = {
   setup: '라운드 준비',
@@ -1335,6 +1342,52 @@ function getHoldingRows(portfolio, assets) {
     .filter(Boolean);
 }
 
+function createDefaultTeamAccounts() {
+  return teamTemplates.map((team) => ({
+    ...team,
+    cash: INITIAL_CASH,
+    deposit: 0,
+    depositInterestEarned: 0,
+    portfolio: {},
+    tradeHolder: null,
+    tradeHolderExpiresAt: null,
+    negativeRounds: 0,
+    bankrupt: false,
+  }));
+}
+
+function isTeamTradeLockActive(team, nickname) {
+  return Boolean(
+    team?.tradeHolder
+      && team.tradeHolder === nickname.trim()
+      && team.tradeHolderExpiresAt
+      && team.tradeHolderExpiresAt > Date.now(),
+  );
+}
+
+function cleanTeamTradeLock(team) {
+  if (!team?.tradeHolderExpiresAt || team.tradeHolderExpiresAt > Date.now()) return team;
+  return { ...team, tradeHolder: null, tradeHolderExpiresAt: null };
+}
+
+function getTeamParticipantRows(teamAccounts, assets) {
+  return teamAccounts.map((team) => {
+    const cleanTeam = cleanTeamTradeLock(team);
+    const holdingsValue = getPortfolioValue(cleanTeam.portfolio, assets);
+    const totalAsset = cleanTeam.cash + cleanTeam.deposit + holdingsValue;
+    return {
+      id: cleanTeam.key,
+      name: cleanTeam.name,
+      cash: cleanTeam.cash,
+      deposit: cleanTeam.deposit,
+      totalAsset,
+      returnRate: ((totalAsset - INITIAL_CASH) / INITIAL_CASH) * 100,
+      holdings: getHoldingRows(cleanTeam.portfolio, assets).map(({ asset, shares }) => `${asset.name} ${shares.toLocaleString('ko-KR')}주`),
+      bankrupt: cleanTeam.bankrupt,
+    };
+  });
+}
+
 function getAssetBucket(asset) {
   if (asset.type === 'futures') return '선물';
   if (asset.type === 'bond') return '채권';
@@ -1520,7 +1573,7 @@ function TeacherStudentMonitor({ players, activeStudent, assets }) {
   };
 
   const monitoredStudents = [
-    activeStudent,
+    ...(activeStudent.name.includes('(대기)') ? [] : [activeStudent]),
     ...players.map((player) => {
       const holdingNames = (sampleHoldings[player.id] ?? []).map((id) => assets.find((asset) => asset.id === id)?.name).filter(Boolean);
       return {
@@ -2175,6 +2228,7 @@ function HostView({
   roomPin,
   round,
   phase,
+  roomMode,
   isPaused,
   assets,
   players,
@@ -2190,6 +2244,7 @@ function HostView({
   submissions,
   gameFinished,
   onCreateRoom,
+  onRoomModeChange,
   onIssueDraftChange,
   onStartRound,
   onCloseRound,
@@ -2254,6 +2309,21 @@ function HostView({
             게임 종료
           </button>
         </div>
+
+        <section className="mode-panel" aria-label="수업 방식 설정">
+          <div>
+            <strong>수업 방식</strong>
+            <span>{phase === 'setup' ? '라운드 준비 중에만 변경할 수 있습니다.' : '라운드 진행 중에는 변경할 수 없습니다.'}</span>
+          </div>
+          <div className="segmented-control">
+            <button className={roomMode === 'individual' ? 'active' : ''} type="button" onClick={() => onRoomModeChange('individual')} disabled={phase !== 'setup'}>
+              개인 투자
+            </button>
+            <button className={roomMode === 'team' ? 'active' : ''} type="button" onClick={() => onRoomModeChange('team')} disabled={phase !== 'setup'}>
+              모둠 투자
+            </button>
+          </div>
+        </section>
 
         <section className="macro-panel" aria-label="거시 지표">
           <div>
@@ -2341,10 +2411,14 @@ function HostView({
         <IssueTicker events={currentRoundEvents} phase={phase} />
         <RoundExplanation summary={latestRoundSummary} assets={assets} />
         <CloseDashboard phase={phase} players={players} />
-        <TeacherStudentMonitor players={players} activeStudent={activeStudent} assets={assets} />
+        <TeacherStudentMonitor
+          players={players}
+          activeStudent={roomMode === 'team' ? buildStudentSnapshot({ id: 'team-mode', name: '모둠 계좌 (대기)', totalAsset: 0, holdings: [] }) : activeStudent}
+          assets={assets}
+        />
         <TeacherSubmissionPanel
           players={players}
-          activeStudent={activeStudent}
+          activeStudent={roomMode === 'team' ? buildStudentSnapshot({ id: 'team-mode', name: '모둠 계좌 (대기)', totalAsset: 0, holdings: [] }) : activeStudent}
           submissions={submissions}
           gameFinished={gameFinished}
           onDownloadSubmissions={onDownloadSubmissions}
@@ -2406,6 +2480,7 @@ function StudentView({
   roomPin,
   round,
   phase,
+  roomMode,
   assets,
   newsFeed,
   portfolio,
@@ -2427,6 +2502,13 @@ function StudentView({
   setNickname,
   joined,
   setJoined,
+  teamAccounts,
+  selectedTeamKey,
+  setSelectedTeamKey,
+  activeTeam,
+  teamTradeAllowed,
+  onClaimTeamTrade,
+  onReleaseTeamTrade,
   selectedAssetId,
   setSelectedAssetId,
   tradeAmount,
@@ -2451,6 +2533,10 @@ function StudentView({
   const propertyAsset = assets.find((asset) => asset.type === 'property');
   const canTradeStocks = phase === 'open' && !gameFinished;
   const canMoveDeposit = !gameFinished;
+  const teamMode = roomMode === 'team';
+  const teamTradeLockedByOther = teamMode && activeTeam?.tradeHolder && !teamTradeAllowed;
+  const canUseAccount = !teamMode || (teamTradeAllowed && !activeTeam?.bankrupt);
+  const tradeDisabledReason = activeTeam?.bankrupt ? '모둠 파산' : teamTradeLockedByOther ? `${activeTeam.tradeHolder} 거래 중` : '거래권 필요';
 
   if (!joined) {
     return (
@@ -2471,6 +2557,24 @@ function StudentView({
             닉네임
             <input value={nickname} onChange={(event) => setNickname(event.target.value)} placeholder="예: 지민" aria-label="닉네임" />
           </label>
+          {teamMode ? (
+            <div className="team-picker" aria-label="모둠 선택">
+              <span>모둠 선택</span>
+              <div>
+                {teamAccounts.map((team) => (
+                  <button
+                    className={selectedTeamKey === team.key ? 'active' : ''}
+                    type="button"
+                    key={team.key}
+                    onClick={() => setSelectedTeamKey(team.key)}
+                    disabled={team.bankrupt}
+                  >
+                    {team.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
           <button className="command primary wide" type="button" onClick={() => setJoined(true)} disabled={!nickname.trim() || roomFull}>
             <LogIn size={19} aria-hidden="true" />
             {roomFull ? '정원 마감' : '입장하기'}
@@ -2500,6 +2604,30 @@ function StudentView({
             <span>{newsFeed[0]?.detail ?? '교사의 첫 뉴스가 오면 여기에 표시됩니다.'}</span>
           </div>
         </section>
+
+        {teamMode ? (
+          <section className={activeTeam?.bankrupt ? 'team-trade-panel bankrupt' : 'team-trade-panel'} aria-label="모둠 거래권">
+            <div>
+              <span>공유 계좌</span>
+              <strong>{activeTeam?.name ?? '모둠'} · {activeTeam?.bankrupt ? '파산' : teamTradeAllowed ? '거래 가능' : '거래 대기'}</strong>
+              <p>
+                {activeTeam?.bankrupt
+                  ? '2라운드 연속 잔고 문제가 발생해 거래가 중단되었습니다.'
+                  : activeTeam?.tradeHolder
+                    ? `${activeTeam.tradeHolder} 학생이 거래권을 가지고 있습니다.`
+                    : '거래권을 잡은 학생만 한 번 거래할 수 있습니다.'}
+              </p>
+            </div>
+            <div className="team-trade-actions">
+              <button className="command primary" type="button" onClick={onClaimTeamTrade} disabled={activeTeam?.bankrupt || teamTradeAllowed || Boolean(activeTeam?.tradeHolder)}>
+                거래권 잡기
+              </button>
+              <button className="command secondary" type="button" onClick={onReleaseTeamTrade} disabled={!teamTradeAllowed}>
+                반납
+              </button>
+            </div>
+          </section>
+        ) : null}
 
         <IssueTicker events={currentRoundEvents} phase={phase} compact />
         {phase === 'closed' ? <RoundExplanation summary={latestRoundSummary} assets={assets} compact /> : null}
@@ -2586,11 +2714,11 @@ function StudentView({
             </button>
           </div>
           <div className="trade-actions compact">
-            <button className="save" type="button" onClick={onDeposit} disabled={!canMoveDeposit}>
-              예금하기
+            <button className="save" type="button" onClick={onDeposit} disabled={!canMoveDeposit || !canUseAccount}>
+              {teamMode && !canUseAccount ? tradeDisabledReason : '예금하기'}
             </button>
-            <button className="withdraw" type="button" onClick={onWithdrawDeposit} disabled={!canMoveDeposit}>
-              해지하기
+            <button className="withdraw" type="button" onClick={onWithdrawDeposit} disabled={!canMoveDeposit || !canUseAccount}>
+              {teamMode && !canUseAccount ? tradeDisabledReason : '해지하기'}
             </button>
           </div>
         </section>
@@ -2647,11 +2775,11 @@ function StudentView({
           </div>
 
           <div className="trade-actions">
-            <button className="buy" type="button" onClick={onBuy} disabled={!canTradeStocks || selectedAsset.delisted}>
-              {gameFinished ? '종료' : phase !== 'open' ? '장 시작 대기' : selectedAsset.delisted ? '거래중단' : '매수'}
+            <button className="buy" type="button" onClick={onBuy} disabled={!canTradeStocks || selectedAsset.delisted || !canUseAccount}>
+              {gameFinished ? '종료' : phase !== 'open' ? '장 시작 대기' : selectedAsset.delisted ? '거래중단' : teamMode && !canUseAccount ? tradeDisabledReason : '매수'}
             </button>
-            <button className="sell" type="button" onClick={onSell} disabled={!canTradeStocks || selectedAsset.delisted}>
-              {phase !== 'open' && !gameFinished ? '장 시작 대기' : '매도'}
+            <button className="sell" type="button" onClick={onSell} disabled={!canTradeStocks || selectedAsset.delisted || !canUseAccount}>
+              {phase !== 'open' && !gameFinished ? '장 시작 대기' : teamMode && !canUseAccount ? tradeDisabledReason : '매도'}
             </button>
           </div>
         </section>
@@ -2671,6 +2799,7 @@ export function App() {
   const [roomExpired, setRoomExpired] = useState(false);
   const [round, setRound] = useState(1);
   const [phase, setPhase] = useState('setup');
+  const [roomMode, setRoomMode] = useState('individual');
   const [isPaused, setIsPaused] = useState(false);
   const [baseRate, setBaseRate] = useState(INITIAL_BASE_RATE);
   const [exchangeRate, setExchangeRate] = useState(INITIAL_EXCHANGE_RATE);
@@ -2689,6 +2818,8 @@ export function App() {
   const [depositPrincipal, setDepositPrincipal] = useState(0);
   const [depositInterestEarned, setDepositInterestEarned] = useState(0);
   const [portfolio, setPortfolio] = useState({});
+  const [teamAccounts, setTeamAccounts] = useState(createDefaultTeamAccounts);
+  const [selectedTeamKey, setSelectedTeamKey] = useState(teamTemplates[0].key);
   const [selectedAssetId, setSelectedAssetId] = useState(initialTradableAssets[0].id);
   const [tradeAmount, setTradeAmount] = useState('10000000');
   const [depositAmount, setDepositAmount] = useState('10000000');
@@ -2707,19 +2838,30 @@ export function App() {
   const currentRoundEvents = triggeredEventsByRound[round] ?? [];
   const expiresAt = roomCreatedAt + ROOM_TTL_MS;
   const gameFinished = phase === 'ended' || (round === TOTAL_ROUNDS && phase === 'closed');
+  const teamMode = roomMode === 'team';
+  const activeTeam = cleanTeamTradeLock(teamAccounts.find((team) => team.key === selectedTeamKey) ?? teamAccounts[0]);
+  const teamTradeAllowed = teamMode ? isTeamTradeLockActive(activeTeam, nickname) : true;
+  const teamParticipantRows = teamMode ? getTeamParticipantRows(teamAccounts, assets) : [];
+  const displayedPlayers = teamMode ? teamParticipantRows : players;
   const { playerCount, roomFull } = getRoomCapacityState({
     basePlayerCount: joined ? players.filter((player) => player.name !== nickname).length : players.length,
     joined,
     maxPlayers: MAX_PLAYERS_PER_ROOM,
   });
-  const studentHoldingsValue = getPortfolioValue(portfolio, assets);
-  const studentTotalAsset = cash + deposit + studentHoldingsValue;
-  const submittedReport = submissions.find((submission) => submission.nickname === nickname.trim());
+  const effectiveCash = teamMode ? activeTeam.cash : cash;
+  const effectiveDeposit = teamMode ? activeTeam.deposit : deposit;
+  const effectiveDepositInterestEarned = teamMode ? activeTeam.depositInterestEarned : depositInterestEarned;
+  const effectivePortfolio = teamMode ? activeTeam.portfolio : portfolio;
+  const studentDisplayName = teamMode && joined ? `${activeTeam.name} · ${nickname}` : nickname;
+  const reportNickname = teamMode ? activeTeam.name : nickname.trim();
+  const studentHoldingsValue = getPortfolioValue(effectivePortfolio, assets);
+  const studentTotalAsset = effectiveCash + effectiveDeposit + studentHoldingsValue;
+  const submittedReport = submissions.find((submission) => submission.nickname === reportNickname);
   const activeStudent = buildStudentSnapshot({
-    id: 'active-student',
-    name: joined ? nickname : `${nickname || '학생'} (대기)`,
+    id: teamMode ? activeTeam.key : 'active-student',
+    name: joined ? studentDisplayName : `${nickname || '학생'} (대기)`,
     totalAsset: studentTotalAsset,
-    holdings: getHoldingRows(portfolio, assets).map(({ asset, shares }) => `${asset.name} ${shares.toLocaleString('ko-KR')}주`),
+    holdings: getHoldingRows(effectivePortfolio, assets).map(({ asset, shares }) => `${asset.name} ${shares.toLocaleString('ko-KR')}주`),
   });
 
   const applyRemoteRoomBundle = useCallback((bundle) => {
@@ -2737,6 +2879,7 @@ export function App() {
     setRoomExpired(isExpired);
     setRound(remoteRound);
     setPhase(isExpired ? 'expired' : bundle.room.phase);
+    setRoomMode(bundle.room.mode ?? 'individual');
     setIsPaused(bundle.room.is_paused);
     setBaseRate(Number(bundle.room.base_rate));
     setExchangeRate(Number(bundle.room.exchange_rate ?? INITIAL_EXCHANGE_RATE));
@@ -2744,6 +2887,7 @@ export function App() {
     setTriggeredEventsByRound(groupedEvents);
     setLatestRoundSummary(resolvedCurrentEvents.length ? { round: remoteRound, events: resolvedCurrentEvents, delistedAssets: [] } : null);
     setPlayers(bundle.players);
+    if (bundle.teams?.length) setTeamAccounts(bundle.teams);
     setSyncStatus('실시간 수업 연결 중');
   }, []);
 
@@ -2810,13 +2954,13 @@ export function App() {
     if (!supabaseConfigured || !remoteRoomId || !joined || !nickname.trim()) return;
     const remotePlayer = {
       name: nickname.trim(),
-      cash,
-      deposit,
+      cash: effectiveCash,
+      deposit: effectiveDeposit,
       totalAsset: studentTotalAsset,
       returnRate: ((studentTotalAsset - INITIAL_CASH) / INITIAL_CASH) * 100,
     };
     upsertRemotePlayer(remoteRoomId, remotePlayer).catch((error) => setSyncStatus(`학생 정보 저장 실패: ${error.message}`));
-  }, [cash, deposit, joined, nickname, remoteRoomId, studentTotalAsset]);
+  }, [effectiveCash, effectiveDeposit, joined, nickname, remoteRoomId, studentTotalAsset]);
 
   function pushNews(title, detail, targetRound = round) {
     setNewsFeed((current) => [{ id: `${Date.now()}-${title}`, round: targetRound, title, detail }, ...current].slice(0, 6));
@@ -2846,6 +2990,61 @@ export function App() {
     ]);
   }
 
+  function syncTeamAccount(nextTeam) {
+    if (!remoteRoomId) return;
+    upsertRemoteTeamAccount(remoteRoomId, nextTeam).catch((error) => setSyncStatus(`모둠 계좌 저장 실패: ${error.message}`));
+  }
+
+  function updateActiveTeamAccount(updater, { sync = true } = {}) {
+    setTeamAccounts((current) =>
+      current.map((team) => {
+        if (team.key !== selectedTeamKey) return cleanTeamTradeLock(team);
+        const nextTeam = updater(cleanTeamTradeLock(team));
+        if (sync) window.setTimeout(() => syncTeamAccount(nextTeam), 0);
+        return nextTeam;
+      }),
+    );
+  }
+
+  function releaseTeamTradeLock(team) {
+    return teamMode ? { ...team, tradeHolder: null, tradeHolderExpiresAt: null } : team;
+  }
+
+  function canUseTeamAccount() {
+    return !teamMode || (activeTeam && !activeTeam.bankrupt && teamTradeAllowed);
+  }
+
+  function handleClaimTeamTrade() {
+    if (!teamMode || !joined || !nickname.trim() || activeTeam.bankrupt) return;
+    updateActiveTeamAccount((team) => ({
+      ...team,
+      tradeHolder: nickname.trim(),
+      tradeHolderExpiresAt: Date.now() + TEAM_TRADE_LOCK_MS,
+    }));
+  }
+
+  function handleReleaseTeamTrade() {
+    if (!teamMode || !teamTradeAllowed) return;
+    updateActiveTeamAccount((team) => ({ ...team, tradeHolder: null, tradeHolderExpiresAt: null }));
+  }
+
+  async function handleRoomModeChange(nextMode) {
+    if (phase !== 'setup') return;
+    setRoomMode(nextMode);
+    const nextTeams = teamAccounts.length ? teamAccounts : createDefaultTeamAccounts();
+    if (!teamAccounts.length) setTeamAccounts(nextTeams);
+    if (remoteRoomId) {
+      try {
+        await Promise.all([
+          updateRemoteRoom(remoteRoomId, { mode: nextMode }),
+          upsertRemoteTeamAccounts(remoteRoomId, nextTeams),
+        ]);
+      } catch (error) {
+        setSyncStatus(`수업 방식 저장 실패: ${error.message}`);
+      }
+    }
+  }
+
   function handleReflectionChange(key, value) {
     setReflection((current) => ({ ...current, [key]: value }));
   }
@@ -2859,6 +3058,7 @@ export function App() {
     const nextPin = String(Math.floor(100000 + Math.random() * 900000));
     const now = Date.now();
     const nextAssets = createRandomizedAssets();
+    const nextTeams = createDefaultTeamAccounts();
     const nextRoom = buildNewRoomState({
       pin: nextPin,
       now,
@@ -2874,6 +3074,7 @@ export function App() {
     setRoomExpired(nextRoom.roomExpired);
     setRound(nextRoom.round);
     setPhase(nextRoom.phase);
+    setRoomMode(roomMode);
     setIsPaused(nextRoom.isPaused);
     setBaseRate(nextRoom.baseRate);
     setExchangeRate(INITIAL_EXCHANGE_RATE);
@@ -2888,6 +3089,8 @@ export function App() {
     setDepositPrincipal(0);
     setDepositInterestEarned(0);
     setPortfolio(nextRoom.portfolio);
+    setTeamAccounts(nextTeams);
+    setSelectedTeamKey(teamTemplates[0].key);
     setSelectedAssetId(nextRoom.selectedAssetId);
     setTradeAmount(nextRoom.tradeAmount);
     setDepositAmount(nextRoom.depositAmount);
@@ -2905,6 +3108,8 @@ export function App() {
         baseRate: INITIAL_BASE_RATE,
         exchangeRate: INITIAL_EXCHANGE_RATE,
         assets: nextAssets,
+        mode: roomMode,
+        teams: roomMode === 'team' ? nextTeams : [],
       });
       if (bundle) applyRemoteRoomBundle(bundle);
     } catch (error) {
@@ -3025,9 +3230,29 @@ export function App() {
     const nextAssets = moveAssetsLocally(assets, combinedImpact, delistedAssets.map((asset) => asset.id), round);
     const depositInterest = Math.round(deposit * (getDepositRate(nextBaseRate) / 100 / 4));
     const nextDeposit = deposit + depositInterest;
+    const nextTeamAccounts = teamAccounts.map((team) => {
+      const cleanTeam = cleanTeamTradeLock(team);
+      if (cleanTeam.bankrupt) return cleanTeam;
+      const teamDepositInterest = Math.round(cleanTeam.deposit * (getDepositRate(nextBaseRate) / 100 / 4));
+      const nextTeamDeposit = cleanTeam.deposit + teamDepositInterest;
+      const nextNegativeRounds = cleanTeam.cash < 0 || cleanTeam.cash + nextTeamDeposit < 0 ? (cleanTeam.negativeRounds ?? 0) + 1 : 0;
+      const bankrupt = nextNegativeRounds >= 2;
+      return {
+        ...cleanTeam,
+        cash: bankrupt ? 0 : cleanTeam.cash,
+        deposit: bankrupt ? 0 : nextTeamDeposit,
+        depositInterestEarned: bankrupt ? cleanTeam.depositInterestEarned : cleanTeam.depositInterestEarned + teamDepositInterest,
+        portfolio: bankrupt ? {} : cleanTeam.portfolio,
+        tradeHolder: null,
+        tradeHolderExpiresAt: null,
+        negativeRounds: nextNegativeRounds,
+        bankrupt,
+      };
+    });
 
     setAssets(nextAssets);
     setDeposit(nextDeposit);
+    setTeamAccounts(nextTeamAccounts);
     if (depositInterest > 0) {
       setDepositInterestEarned((current) => current + depositInterest);
       addTradeLog('예금 이자', `${round}라운드 분기 복리 이자 +${formatWon(depositInterest)}`);
@@ -3072,6 +3297,7 @@ export function App() {
           }),
           upsertRemoteAssets(remoteRoomId, nextAssets),
           updateRemoteIssues(remoteRoomId, resolvedEvents, round),
+          upsertRemoteTeamAccounts(remoteRoomId, nextTeamAccounts),
         ]);
       } catch (error) {
         setSyncStatus(`장 마감 저장 실패: ${error.message}`);
@@ -3099,11 +3325,11 @@ export function App() {
   async function handleSubmitReport() {
     if (!gameFinished || !joined || submittedReport) return;
     const report = buildFinalSubmissionReport({
-      nickname: nickname.trim(),
-      cash,
-      deposit,
-      depositInterestEarned,
-      portfolio,
+      nickname: reportNickname,
+      cash: effectiveCash,
+      deposit: effectiveDeposit,
+      depositInterestEarned: effectiveDepositInterestEarned,
+      portfolio: effectivePortfolio,
       assets,
       tradeLogs,
       roundLogs,
@@ -3146,47 +3372,96 @@ export function App() {
 
   function handleBuy() {
     if (roomExpired || gameFinished || phase !== 'open' || selectedAsset.delisted || selectedAsset.price <= 0) return;
-    const amount = Math.min(parseAmount(tradeAmount), cash);
+    if (!canUseTeamAccount()) return;
+    const sourceCash = teamMode ? activeTeam.cash : cash;
+    const amount = Math.min(parseAmount(tradeAmount), sourceCash);
     const shares = Math.floor(amount / selectedAsset.price);
     if (shares <= 0) return;
     const cost = shares * selectedAsset.price;
-    setCash((current) => current - cost);
-    setPortfolio((current) => ({ ...current, [selectedAsset.id]: (current[selectedAsset.id] ?? 0) + shares }));
+    if (teamMode) {
+      updateActiveTeamAccount((team) =>
+        releaseTeamTradeLock({
+          ...team,
+          cash: team.cash - cost,
+          portfolio: { ...team.portfolio, [selectedAsset.id]: (team.portfolio[selectedAsset.id] ?? 0) + shares },
+        }),
+      );
+    } else {
+      setCash((current) => current - cost);
+      setPortfolio((current) => ({ ...current, [selectedAsset.id]: (current[selectedAsset.id] ?? 0) + shares }));
+    }
     addTradeLog('매수', `${selectedAsset.name} ${shares.toLocaleString('ko-KR')}주 · ${formatWon(cost)}`);
   }
 
   function handleSell() {
     if (roomExpired || gameFinished || phase !== 'open' || selectedAsset.delisted || selectedAsset.price <= 0) return;
+    if (!canUseTeamAccount()) return;
     const amount = parseAmount(tradeAmount);
-    const owned = portfolio[selectedAsset.id] ?? 0;
+    const sourcePortfolio = teamMode ? activeTeam.portfolio : portfolio;
+    const owned = sourcePortfolio[selectedAsset.id] ?? 0;
     const shares = Math.min(owned, Math.floor(amount / selectedAsset.price));
     if (shares <= 0) return;
-    setCash((current) => current + shares * selectedAsset.price);
-    setPortfolio((current) => ({ ...current, [selectedAsset.id]: owned - shares }));
-    addTradeLog('매도', `${selectedAsset.name} ${shares.toLocaleString('ko-KR')}주 · ${formatWon(shares * selectedAsset.price)}`);
+    const revenue = shares * selectedAsset.price;
+    if (teamMode) {
+      updateActiveTeamAccount((team) =>
+        releaseTeamTradeLock({
+          ...team,
+          cash: team.cash + revenue,
+          portfolio: { ...team.portfolio, [selectedAsset.id]: owned - shares },
+        }),
+      );
+    } else {
+      setCash((current) => current + revenue);
+      setPortfolio((current) => ({ ...current, [selectedAsset.id]: owned - shares }));
+    }
+    addTradeLog('매도', `${selectedAsset.name} ${shares.toLocaleString('ko-KR')}주 · ${formatWon(revenue)}`);
   }
 
   function handleDeposit() {
     if (roomExpired || gameFinished) return;
-    const amount = Math.min(parseAmount(depositAmount), cash);
+    if (!canUseTeamAccount()) return;
+    const sourceCash = teamMode ? activeTeam.cash : cash;
+    const amount = Math.min(parseAmount(depositAmount), sourceCash);
     if (amount <= 0) return;
-    setCash((current) => current - amount);
-    setDeposit((current) => current + amount);
-    setDepositPrincipal((current) => current + amount);
+    if (teamMode) {
+      updateActiveTeamAccount((team) =>
+        releaseTeamTradeLock({
+          ...team,
+          cash: team.cash - amount,
+          deposit: team.deposit + amount,
+        }),
+      );
+    } else {
+      setCash((current) => current - amount);
+      setDeposit((current) => current + amount);
+      setDepositPrincipal((current) => current + amount);
+    }
     addTradeLog('예금', `${formatWon(amount)} 예치`);
   }
 
   function handleWithdrawDeposit() {
     if (roomExpired || gameFinished) return;
-    const amount = Math.min(parseAmount(depositAmount), deposit);
+    if (!canUseTeamAccount()) return;
+    const sourceDeposit = teamMode ? activeTeam.deposit : deposit;
+    const amount = Math.min(parseAmount(depositAmount), sourceDeposit);
     if (amount <= 0) return;
-    const withdrawRatio = deposit > 0 ? amount / deposit : 0;
-    const principalReduction = Math.min(depositPrincipal, Math.round(depositPrincipal * withdrawRatio));
-    const interestReduction = Math.min(depositInterestEarned, Math.max(0, amount - principalReduction));
-    setDeposit((current) => current - amount);
-    setDepositPrincipal((current) => Math.max(0, current - principalReduction));
-    setDepositInterestEarned((current) => Math.max(0, current - interestReduction));
-    setCash((current) => current + amount);
+    if (teamMode) {
+      updateActiveTeamAccount((team) =>
+        releaseTeamTradeLock({
+          ...team,
+          cash: team.cash + amount,
+          deposit: team.deposit - amount,
+        }),
+      );
+    } else {
+      const withdrawRatio = deposit > 0 ? amount / deposit : 0;
+      const principalReduction = Math.min(depositPrincipal, Math.round(depositPrincipal * withdrawRatio));
+      const interestReduction = Math.min(depositInterestEarned, Math.max(0, amount - principalReduction));
+      setDeposit((current) => current - amount);
+      setDepositPrincipal((current) => Math.max(0, current - principalReduction));
+      setDepositInterestEarned((current) => Math.max(0, current - interestReduction));
+      setCash((current) => current + amount);
+    }
     addTradeLog('예금 해지', `${formatWon(amount)} 인출`);
   }
 
@@ -3217,9 +3492,10 @@ export function App() {
           roomPin={roomPin}
           round={round}
           phase={phase}
+          roomMode={roomMode}
           isPaused={isPaused}
           assets={assets}
-          players={players}
+          players={displayedPlayers}
           newsFeed={newsFeed}
           baseRate={baseRate}
           exchangeRate={exchangeRate}
@@ -3232,6 +3508,7 @@ export function App() {
           submissions={submissions}
           gameFinished={gameFinished}
           onCreateRoom={createNewRoom}
+          onRoomModeChange={handleRoomModeChange}
           onIssueDraftChange={setIssueDraft}
           onStartRound={handleStartRound}
           onCloseRound={handleCloseRound}
@@ -3260,12 +3537,13 @@ export function App() {
           roomPin={roomPin}
           round={round}
           phase={phase}
+          roomMode={roomMode}
           assets={assets}
           newsFeed={newsFeed}
-          portfolio={portfolio}
-          cash={cash}
-          deposit={deposit}
-          depositInterestEarned={depositInterestEarned}
+          portfolio={effectivePortfolio}
+          cash={effectiveCash}
+          deposit={effectiveDeposit}
+          depositInterestEarned={effectiveDepositInterestEarned}
           baseRate={baseRate}
           exchangeRate={exchangeRate}
           tradeLogs={tradeLogs}
@@ -3281,6 +3559,13 @@ export function App() {
           setNickname={setNickname}
           joined={joined}
           setJoined={setJoined}
+          teamAccounts={teamAccounts}
+          selectedTeamKey={selectedTeamKey}
+          setSelectedTeamKey={setSelectedTeamKey}
+          activeTeam={activeTeam}
+          teamTradeAllowed={teamTradeAllowed}
+          onClaimTeamTrade={handleClaimTeamTrade}
+          onReleaseTeamTrade={handleReleaseTeamTrade}
           selectedAssetId={selectedAssetId}
           setSelectedAssetId={setSelectedAssetId}
           tradeAmount={tradeAmount}
