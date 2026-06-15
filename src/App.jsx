@@ -1257,6 +1257,12 @@ function RoundExplanation({ summary, assets, compact = false }) {
                   <span>{event.failureDetail}</span>
                 </p>
               ) : null}
+              {event.conflictLabel && event.didApply ? (
+                <p className="expectation-note">
+                  <strong>{event.conflictLabel}</strong>
+                  <span>상충 이슈 중 이 경향성이 실제로 우세하게 반영되었습니다.</span>
+                </p>
+              ) : null}
               <em>{event.discussionPrompt}</em>
             </article>
           );
@@ -2268,6 +2274,54 @@ const eventPresetFilters = [
   { label: '원자재 수업', category: 'commodity' },
 ];
 
+const eventConflictGroups = [
+  { label: '금리 방향 충돌', eventIds: ['rate-up', 'rate-down'] },
+  { label: '부동산 완화와 금리 긴축 충돌', eventIds: ['property-ease', 'rate-up'] },
+  { label: '위험자산 선호와 위험 회피 충돌', eventIds: ['us-rally', 'war-risk', 'election-risk', 'us-regulation'] },
+  { label: '수출 호재와 공급망 갈등 충돌', eventIds: ['korea-export', 'korea-us-chip-tension'] },
+];
+
+function getEventTemplateKey(event) {
+  return event.templateId ?? event.id?.split('-')?.[0] ?? event.id;
+}
+
+function getConflictOutcomeMap(events) {
+  const outcome = {};
+  eventConflictGroups.forEach((group) => {
+    const matched = events.filter((event) => group.eventIds.includes(getEventTemplateKey(event)));
+    if (matched.length < 2) return;
+    const winner = matched[Math.floor(Math.random() * matched.length)];
+    matched.forEach((event) => {
+      outcome[event.id] = {
+        didApply: event.id === winner.id,
+        label: group.label,
+        winnerTitle: winner.title,
+      };
+    });
+  });
+  return outcome;
+}
+
+function pickRandomRoundIssues({ round, now, count = 3 }) {
+  return [...scenarioEvents]
+    .sort(() => Math.random() - 0.5)
+    .slice(0, count)
+    .map((event, index) => {
+      const issueOption = event.issueOptions[Math.floor(Math.random() * event.issueOptions.length)];
+      return {
+        ...buildRegisteredIssue({
+          event,
+          issueOption,
+          issueDraft: '',
+          round,
+          now: now + index,
+          defaultProbability: DEFAULT_EVENT_PROBABILITY,
+        }),
+        published: true,
+      };
+    });
+}
+
 function HostView({
   roomPin,
   round,
@@ -2301,6 +2355,10 @@ function HostView({
   onRegisterIssue,
   onCancelIssue,
   onClearIssues,
+  startIssueChoiceOpen,
+  onStartWithoutIssues,
+  onStartWithRandomIssues,
+  onCloseStartIssueChoice,
   onDownloadSubmissions,
 }) {
   const propertyAsset = assets.find((asset) => asset.type === 'property');
@@ -2342,7 +2400,7 @@ function HostView({
             <Play size={19} aria-hidden="true" />
             게임 시작
           </button>
-          <button className="command primary" type="button" onClick={onStartRound} disabled={roomExpired || !gameStarted || phase !== 'setup' || currentRoundEvents.length === 0}>
+          <button className="command primary" type="button" onClick={onStartRound} disabled={roomExpired || !gameStarted || phase !== 'setup'}>
             <Play size={19} aria-hidden="true" />
             라운드 시작
           </button>
@@ -2377,6 +2435,29 @@ function HostView({
             </button>
           </div>
         </section>
+
+        {startIssueChoiceOpen ? (
+          <section className="choice-modal-backdrop" aria-label="이슈 없이 라운드 시작 선택">
+            <div className="choice-modal">
+              <div>
+                <p className="eyebrow">이슈 미선택</p>
+                <h2>이슈 선택을 안하시겠습니까?</h2>
+                <p>이슈 없이 진행하면 이번 라운드는 생활 소득과 기본 시장 변동만 반영됩니다. 랜덤 이슈를 선택하면 3개 이슈가 자동으로 공개됩니다.</p>
+              </div>
+              <div className="choice-actions">
+                <button className="command secondary" type="button" onClick={onStartWithoutIssues}>
+                  이슈 없이 장 시작
+                </button>
+                <button className="command primary" type="button" onClick={onStartWithRandomIssues}>
+                  랜덤 이슈 3가지 선정
+                </button>
+                <button className="command secondary" type="button" onClick={onCloseStartIssueChoice}>
+                  돌아가기
+                </button>
+              </div>
+            </div>
+          </section>
+        ) : null}
 
         <section className="macro-panel" aria-label="거시 지표">
           <div>
@@ -2914,6 +2995,7 @@ export function App() {
   const [triggeredEventsByRound, setTriggeredEventsByRound] = useState({});
   const [latestRoundSummary, setLatestRoundSummary] = useState(null);
   const [issueDraft, setIssueDraft] = useState('');
+  const [startIssueChoiceOpen, setStartIssueChoiceOpen] = useState(false);
   const [newsFeed, setNewsFeed] = useState([
     { id: 'opening', round: 1, title: '수업 대기', detail: '교사가 게임 시작을 누르면 초기 자본 1억 원이 지급됩니다.' },
   ]);
@@ -2928,6 +3010,7 @@ export function App() {
   const [deposit, setDeposit] = useState(0);
   const [depositPrincipal, setDepositPrincipal] = useState(0);
   const [depositInterestEarned, setDepositInterestEarned] = useState(0);
+  const [initialCapitalGranted, setInitialCapitalGranted] = useState(false);
   const [portfolio, setPortfolio] = useState({});
   const [teamAccounts, setTeamAccounts] = useState(createDefaultTeamAccounts);
   const [selectedTeamKey, setSelectedTeamKey] = useState(teamTemplates[0].key);
@@ -3099,6 +3182,28 @@ export function App() {
     return () => window.clearTimeout(timer);
   }, [gameStarted, joined, phase, round, salaryPaidRounds, teamMode]);
 
+  useEffect(() => {
+    if (!gameStarted || !joined || teamMode || initialCapitalGranted) return;
+    const timer = window.setTimeout(() => {
+      setCash((current) => (current > 0 ? current : INITIAL_CASH));
+      setInitialCapitalGranted(true);
+      setTradeLogs((current) => {
+        if (current.some((log) => log.type === '초기 자본')) return current;
+        return [
+          buildTradeLog({
+            round,
+            type: '초기 자본',
+            detail: `게임 시작 초기 자본 +${formatWon(INITIAL_CASH)}`,
+            sequence: current.length,
+            now: Date.now(),
+          }),
+          ...current,
+        ];
+      });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [gameStarted, initialCapitalGranted, joined, round, teamMode]);
+
   function pushNews(title, detail, targetRound = round) {
     setNewsFeed((current) => [{ id: `${Date.now()}-${title}`, round: targetRound, title, detail }, ...current].slice(0, 6));
   }
@@ -3241,6 +3346,7 @@ export function App() {
       setNickname(trimmedName);
       if (gameStarted && !teamMode) {
         setCash((current) => (current > 0 ? current : INITIAL_CASH));
+        setInitialCapitalGranted(true);
       }
       setStudentJoinError('');
       setJoined(true);
@@ -3254,6 +3360,7 @@ export function App() {
     const fundedTeams = fundTeamAccounts(teamAccounts.length ? teamAccounts : createDefaultTeamAccounts());
     setGameStarted(true);
     setCash(INITIAL_CASH);
+    setInitialCapitalGranted(true);
     setDeposit(0);
     setDepositPrincipal(0);
     setDepositInterestEarned(0);
@@ -3352,6 +3459,7 @@ export function App() {
     setTriggeredEventsByRound(nextRoom.triggeredEventsByRound);
     setLatestRoundSummary(nextRoom.latestRoundSummary);
     setIssueDraft(nextRoom.issueDraft);
+    setStartIssueChoiceOpen(false);
     setNewsFeed(nextRoom.newsFeed);
     setPlayers(nextRoom.players);
     setJoined(false);
@@ -3362,6 +3470,7 @@ export function App() {
     setDeposit(nextRoom.deposit);
     setDepositPrincipal(0);
     setDepositInterestEarned(0);
+    setInitialCapitalGranted(false);
     setPortfolio(nextRoom.portfolio);
     setTeamAccounts(nextTeams);
     setSelectedTeamKey(teamTemplates[0].key);
@@ -3442,9 +3551,19 @@ export function App() {
     }
   }
 
-  async function handleStartRound() {
-    if (roomExpired || !gameStarted || !currentRoundEvents.length || phase !== 'setup') return;
-    const publishedEvents = currentRoundEvents.map((event) => ({ ...event, published: true }));
+  async function handleStartRound(startMode = 'normal') {
+    if (roomExpired || !gameStarted || phase !== 'setup') return;
+    if (!currentRoundEvents.length && startMode === 'normal') {
+      setStartIssueChoiceOpen(true);
+      return;
+    }
+    let publishedEvents = currentRoundEvents.map((event) => ({ ...event, published: true }));
+    if (startMode === 'random') {
+      publishedEvents = pickRandomRoundIssues({ round, now: Date.now(), count: 3 });
+    }
+    if (startMode === 'none') {
+      publishedEvents = [];
+    }
     const salariedPlayers = players.map((player) => ({
       ...player,
       cash: (player.cash ?? 0) + ROUND_SALARY,
@@ -3456,19 +3575,27 @@ export function App() {
       ...current,
       [round]: publishedEvents,
     }));
+    setStartIssueChoiceOpen(false);
     if (teamMode) {
       setTeamAccounts(salariedTeams);
     } else {
       setPlayers(salariedPlayers);
     }
     setPhase('open');
-    pushNews(`${round}라운드 이슈 공개`, `${currentRoundEvents.length}개 이슈가 공개되었습니다. 생활 소득 ${formatWon(ROUND_SALARY)}이 지급됩니다.`);
+    const startNewsDetail = publishedEvents.length
+      ? `${publishedEvents.length}개 이슈가 공개되었습니다. 생활 소득 ${formatWon(ROUND_SALARY)}이 지급됩니다.`
+      : `선택 이슈 없이 장이 시작되었습니다. 생활 소득 ${formatWon(ROUND_SALARY)}과 기본 시장 변동만 반영됩니다.`;
+    pushNews(`${round}라운드 장 시작`, startNewsDetail);
     if (remoteRoomId) {
       try {
         const remoteUpdates = [
           updateRemoteRoom(remoteRoomId, { phase: 'open' }),
-          updateRemoteIssues(remoteRoomId, publishedEvents, round),
         ];
+        if (startMode === 'random') {
+          remoteUpdates.push(...publishedEvents.map((event) => insertRemoteIssue(remoteRoomId, event, round)));
+        } else if (publishedEvents.length) {
+          remoteUpdates.push(updateRemoteIssues(remoteRoomId, publishedEvents, round));
+        }
         if (teamMode) {
           remoteUpdates.push(upsertRemoteTeamAccounts(remoteRoomId, salariedTeams));
         } else {
@@ -3485,16 +3612,24 @@ export function App() {
     if (roomExpired || phase !== 'open') return;
 
     const eventsForResolution = currentRoundEvents.filter((event) => event.published);
+    const conflictOutcomeMap = getConflictOutcomeMap(eventsForResolution);
     const initialResolvedEvents = eventsForResolution.map((event) => {
-      const didApply = Math.random() < (event.probability ?? DEFAULT_EVENT_PROBABILITY);
+      const conflictOutcome = conflictOutcomeMap[event.id];
+      const didApply = conflictOutcome ? conflictOutcome.didApply : Math.random() < (event.probability ?? DEFAULT_EVENT_PROBABILITY);
       const outcomeType = didApply ? (Math.random() < 0.7 ? 'event' : 'expectation') : 'failed';
       return {
         ...event,
         resolved: true,
         didApply,
         outcomeType,
+        conflictLabel: conflictOutcome?.label,
+        conflictWinnerTitle: conflictOutcome?.winnerTitle,
         expectationTitle: `${event.title} 실제 발표 전 기대감 선반영`,
         expectationDetail: '실제 이벤트가 확정되지는 않았지만, 투자자들이 가능성을 먼저 반영하면서 가격이 움직였습니다.',
+        failureTitle: conflictOutcome && !didApply ? `${event.title} 상충 이슈로 영향 제한` : event.failureTitle,
+        failureDetail: conflictOutcome && !didApply
+          ? `${conflictOutcome.label} 상황에서 '${conflictOutcome.winnerTitle}' 쪽 경향성이 더 강하게 확인되어 이 이슈는 가격에 반영되지 않았습니다.`
+          : event.failureDetail,
       };
     });
 
@@ -3841,6 +3976,10 @@ export function App() {
           onRegisterIssue={handleRegisterIssue}
           onCancelIssue={handleCancelIssue}
           onClearIssues={handleClearIssues}
+          startIssueChoiceOpen={startIssueChoiceOpen}
+          onStartWithoutIssues={() => handleStartRound('none')}
+          onStartWithRandomIssues={() => handleStartRound('random')}
+          onCloseStartIssueChoice={() => setStartIssueChoiceOpen(false)}
           onDownloadSubmissions={handleDownloadSubmissions}
         />
       ) : null}

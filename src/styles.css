@@ -409,6 +409,46 @@ p {
   font-weight: 900;
 }
 
+.choice-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(15, 23, 42, 0.42);
+}
+
+.choice-modal {
+  display: grid;
+  gap: 1.1rem;
+  width: min(520px, 100%);
+  border: 1px solid #d7dee8;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 1.25rem;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.22);
+}
+
+.choice-modal h2 {
+  margin: 0;
+  color: #111827;
+  font-size: 1.35rem;
+  line-height: 1.25;
+}
+
+.choice-modal p:not(.eyebrow) {
+  margin: 0.45rem 0 0;
+  color: #64748b;
+  line-height: 1.6;
+}
+
+.choice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
 .projector-preview {
   display: grid;
   gap: 1rem;
