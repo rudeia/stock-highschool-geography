@@ -7,6 +7,7 @@ import {
   ChartNoAxesCombined,
   ChevronRight,
   Clock3,
+  Download,
   Globe2,
   Landmark,
   LogIn,
@@ -34,6 +35,7 @@ import {
 import { supabaseConfigured } from './lib/supabaseClient.js';
 import {
   createRemoteRoom,
+  fetchRemoteSubmissions,
   fetchRemoteRoomById,
   fetchRemoteRoomByPin,
   groupEventsByRound,
@@ -43,6 +45,7 @@ import {
   updateRemoteRoom,
   upsertRemoteAssets,
   upsertRemotePlayer,
+  upsertRemoteSubmission,
 } from './lib/supabaseRoomStore.js';
 
 const INITIAL_CASH = 100_000_000;
@@ -54,11 +57,15 @@ const DEFAULT_EVENT_PROBABILITY = 0.75;
 const DELISTING_START_ROUND = 9;
 const DELISTING_PROBABILITY = 0.2;
 const STRONG_NEGATIVE_IMPACT = -0.07;
-const MIN_EVENT_IMPACT = 0.1;
+const MIN_EVENT_IMPACT = 0.15;
 const MIN_REPEATED_EVENT_IMPACT = 0.5;
+const MIN_TRIPLE_EVENT_IMPACT = 0.7;
+const MIN_EXTREME_EVENT_IMPACT = 0.9;
+const DIRECT_REPEATED_IMPACT_THRESHOLD = 0.08;
 const MIN_INDIRECT_REPEATED_EVENT_IMPACT = 0.05;
 const MAX_INDIRECT_REPEATED_EVENT_IMPACT = 0.12;
 const PASSIVE_MARKET_MOVE = 0.05;
+const INITIAL_EXCHANGE_RATE = 1350;
 const ROOM_TTL_MS = 24 * 60 * 60 * 1000;
 const HOST_CREDENTIALS = {
   id: 'geography',
@@ -99,7 +106,7 @@ function createRandomizedAssets() {
     return {
       ...asset,
       price,
-      history: [Math.round(price * 0.96), Math.round(price * 0.985), price],
+      history: [price, price, price],
     };
   });
 }
@@ -641,6 +648,96 @@ const scenarioEvents = [
     ],
     impact: { argBond: -0.22, usBond: 0.08, sp500: -0.03, kospi: -0.04, bank: -0.03 },
   },
+  {
+    id: 'war-risk',
+    title: '지정학적 긴장 확대',
+    detail: '주요 지역의 군사적 긴장이 높아지며 원자재, 항공, 안전자산 변동성이 커졌습니다.',
+    principle: '전쟁 위험은 공급망과 물류를 흔들고, 투자자는 위험자산을 줄이고 안전자산을 찾을 수 있습니다.',
+    affectedAssets: ['원유 선물 변동성 확대', '항공주 부담 가능성', '미국 국채 선호 가능성', '글로벌 ETF 부담 가능성'],
+    discussionPrompt: '전쟁 위험이 기업 실적과 투자 심리에 동시에 영향을 주는 이유는 무엇일까요?',
+    financialLinks: ['안전자산 선호', '물류비', '유류비', '공급망'],
+    issueOptions: [
+      {
+        title: '중동 지역 군사 긴장 고조',
+        detail: '주요 산유 지역의 군사적 긴장이 높아지며 원유 공급과 해상 운송 우려가 커졌습니다.',
+        failureTitle: '중동 긴장 완화 합의',
+        failureDetail: '외교 협의가 진전되며 군사 충돌 우려가 낮아졌습니다.',
+      },
+      {
+        title: '해상 운송로 봉쇄 우려',
+        detail: '주요 해상 운송로가 불안해질 수 있다는 보도가 나오며 물류비 상승 우려가 확대됐습니다.',
+        failureTitle: '운송로 정상 운항 확인',
+        failureDetail: '국제 감시단이 주요 운송로가 정상 운영 중이라고 확인했습니다.',
+      },
+      {
+        title: '방산·에너지 안보 이슈 부각',
+        detail: '각국이 에너지 안보와 전략 물자 확보를 강조하며 시장 불확실성이 커졌습니다.',
+        failureTitle: '안보 이슈 시장 영향 제한',
+        failureDetail: '구체적인 충돌이나 공급 차질이 확인되지 않아 시장 영향은 제한됐습니다.',
+      },
+    ],
+    impact: { oilFut: 0.18, oil: 0.12, air: -0.15, usBond: 0.08, sp500: -0.06, kospi: -0.05, grainFut: 0.06 },
+  },
+  {
+    id: 'election-risk',
+    title: '정치 불확실성 확대',
+    detail: '선거와 정책 갈등으로 규제, 세금, 재정 지출 방향이 불확실해졌습니다.',
+    principle: '정치 불확실성은 기업의 투자 계획과 국가 신용위험, 환율 흐름에 영향을 줄 수 있습니다.',
+    affectedAssets: ['국내 지수 변동성 확대', '은행·건설 정책 민감도 확대', '신흥국 채권 부담 가능성'],
+    discussionPrompt: '정치 뉴스가 기업의 실제 매출이 바뀌기 전에도 가격에 반영되는 이유는 무엇일까요?',
+    financialLinks: ['정책 민감도', '규제 위험', '국가 부채', '환율'],
+    issueOptions: [
+      {
+        title: '주요 선거 결과 불확실성 확대',
+        detail: '경제 정책 방향이 크게 달라질 수 있다는 전망이 나오며 투자자들이 관망세를 보였습니다.',
+        failureTitle: '정책 연속성 확인',
+        failureDetail: '주요 후보들이 핵심 경제정책의 연속성을 강조하며 불확실성이 줄었습니다.',
+      },
+      {
+        title: '기업 규제 강화 법안 논의',
+        detail: '대기업과 플랫폼에 대한 규제 강화 법안이 논의되며 일부 성장 산업 부담이 커졌습니다.',
+        failureTitle: '규제 법안 처리 지연',
+        failureDetail: '정치권 협의가 늦어지며 단기 시장 영향은 제한됐습니다.',
+      },
+      {
+        title: '재정 지출 확대 논쟁',
+        detail: '대규모 재정 지출 가능성이 제기되며 금리와 국가부채 우려가 함께 커졌습니다.',
+        failureTitle: '재정 지출안 축소',
+        failureDetail: '재정 건전성 우려로 지출안 규모가 조정됐습니다.',
+      },
+    ],
+    impact: { kospi: -0.08, bank: -0.06, infra: -0.06, realty: -0.04, argBond: -0.08, usBond: 0.04 },
+  },
+  {
+    id: 'argentina-reform',
+    title: '아르헨티나 개혁안 충돌',
+    detail: '아르헨티나의 재정 개혁과 통화 안정 정책을 둘러싼 정치 갈등이 커졌습니다.',
+    principle: '저신용 국가 채권은 높은 이자 기대가 있지만, 정치·환율·재정 문제가 생기면 가격 변동 가능성이 매우 커집니다.',
+    affectedAssets: ['아르헨티나 국채 변동성 확대', '신흥국 위험 회피', '미국 국채 선호 가능성'],
+    discussionPrompt: '국가가 발행한 채권도 왜 주식처럼 위험해질 수 있을까요?',
+    financialLinks: ['국가 신용등급', '통화가치', '재정적자', 'IMF 협상'],
+    issueOptions: [
+      {
+        title: '아르헨티나 재정 개혁안 의회 부결',
+        detail: '재정 지출을 줄이려던 개혁안이 의회에서 막히며 국가 신용위험 우려가 커졌습니다.',
+        failureTitle: '개혁안 수정 통과',
+        failureDetail: '수정안이 의회를 통과하며 재정 불안 우려가 일부 완화됐습니다.',
+      },
+      {
+        title: '페소화 급락 우려 확대',
+        detail: '통화가치 하락과 외환보유고 감소 우려가 커지며 채권 상환 능력에 의문이 제기됐습니다.',
+        failureTitle: '외환시장 안정 조치 발표',
+        failureDetail: '중앙은행의 안정 조치와 외화 유입 소식으로 통화 급락 우려가 줄었습니다.',
+      },
+      {
+        title: '국가 신용등급 하향',
+        detail: '신용평가사가 재정과 정치 불확실성을 이유로 국가 신용등급을 낮췄습니다.',
+        failureTitle: '신용등급 전망 유지',
+        failureDetail: '신용평가사가 등급을 유지하며 추가 하락 우려가 진정됐습니다.',
+      },
+    ],
+    impact: { argBond: -0.24, usBond: 0.06, sp500: -0.03, kospi: -0.03, grainFut: 0.04 },
+  },
 ];
 
 const mockPlayers = [
@@ -681,7 +778,7 @@ function formatDateTime(value) {
 
 function getJoinUrl(roomPin) {
   const origin = typeof window === 'undefined' ? '' : window.location.origin;
-  return `${origin}/?view=student&pin=${roomPin}`;
+  return `${origin}/?view=student&pin=${roomPin}&entry=qr`;
 }
 
 function getInitialRoomPin() {
@@ -692,7 +789,14 @@ function getInitialRoomPin() {
 
 function getInitialView() {
   if (typeof window === 'undefined') return 'home';
-  return new URLSearchParams(window.location.search).get('view') === 'student' ? 'student' : 'home';
+  const params = new URLSearchParams(window.location.search);
+  return params.get('view') === 'student' && params.get('entry') === 'qr' ? 'student' : 'home';
+}
+
+function getInitialStudentEntryAllowed() {
+  if (typeof window === 'undefined') return false;
+  const params = new URLSearchParams(window.location.search);
+  return params.get('view') === 'student' && params.get('entry') === 'qr';
 }
 
 function getPortfolioValue(portfolio, assets) {
@@ -725,15 +829,22 @@ function normalizeEventImpact(impact = {}, minimumImpact = MIN_EVENT_IMPACT) {
   );
 }
 
-function normalizeRepeatedEventImpact(impact = {}) {
+function getRepeatedImpactFloor(count) {
+  if (count >= 4) return MIN_EXTREME_EVENT_IMPACT;
+  if (count >= 3) return MIN_TRIPLE_EVENT_IMPACT;
+  return MIN_REPEATED_EVENT_IMPACT;
+}
+
+function normalizeRepeatedEventImpact(impact = {}, repeatedCount = 2) {
+  const repeatedFloor = getRepeatedImpactFloor(repeatedCount);
   return Object.fromEntries(
     Object.entries(impact).map(([assetId, value]) => {
       if (value === 0) return [assetId, 0];
       const direction = value > 0 ? 1 : -1;
       const absoluteImpact = Math.abs(value);
-      const isDirectAsset = absoluteImpact >= MIN_EVENT_IMPACT;
+      const isDirectAsset = absoluteImpact >= DIRECT_REPEATED_IMPACT_THRESHOLD;
       const adjustedValue = isDirectAsset
-        ? Math.max(absoluteImpact, MIN_REPEATED_EVENT_IMPACT)
+        ? Math.max(absoluteImpact, repeatedFloor)
         : Math.min(
             Math.max(absoluteImpact, MIN_INDIRECT_REPEATED_EVENT_IMPACT),
             MAX_INDIRECT_REPEATED_EVENT_IMPACT,
@@ -750,6 +861,42 @@ function getAppliedEventTypeCounts(events) {
     acc[eventKey] = (acc[eventKey] ?? 0) + 1;
     return acc;
   }, {});
+}
+
+const eventMacroImpacts = {
+  'rate-up': { baseRateDelta: 0.5, propertyMove: -0.04, exchangeMove: 0.01 },
+  'rate-down': { baseRateDelta: -0.5, propertyMove: 0.04, exchangeMove: -0.01 },
+  'deposit-special': { baseRateDelta: 0.2, propertyMove: -0.02, exchangeMove: 0 },
+  'property-ease': { baseRateDelta: 0, propertyMove: 0.06, exchangeMove: 0 },
+  'us-rally': { baseRateDelta: 0, propertyMove: 0.01, exchangeMove: -0.015 },
+  'korea-export': { baseRateDelta: 0, propertyMove: 0.01, exchangeMove: -0.01 },
+  rare: { baseRateDelta: 0, propertyMove: -0.01, exchangeMove: 0.02 },
+  housing: { baseRateDelta: 0, propertyMove: 0.04, exchangeMove: 0 },
+  'us-regulation': { baseRateDelta: 0, propertyMove: -0.01, exchangeMove: 0.01 },
+  'fx-spike': { baseRateDelta: 0, propertyMove: -0.01, exchangeMove: 0.06 },
+  'korea-us-chip-tension': { baseRateDelta: 0, propertyMove: -0.01, exchangeMove: 0.02 },
+  'oil-supply-shock': { baseRateDelta: 0.1, propertyMove: -0.01, exchangeMove: 0.025 },
+  'grain-shock': { baseRateDelta: 0.1, propertyMove: -0.005, exchangeMove: 0.015 },
+  'us-yield-spike': { baseRateDelta: 0.3, propertyMove: -0.03, exchangeMove: 0.03 },
+  'em-credit-stress': { baseRateDelta: 0, propertyMove: -0.02, exchangeMove: 0.035 },
+  'war-risk': { baseRateDelta: 0.1, propertyMove: -0.025, exchangeMove: 0.04 },
+  'election-risk': { baseRateDelta: 0.05, propertyMove: -0.025, exchangeMove: 0.025 },
+  'argentina-reform': { baseRateDelta: 0, propertyMove: -0.01, exchangeMove: 0.025 },
+};
+
+function combineEventMacroImpacts(events) {
+  return events.reduce(
+    (acc, event) => {
+      if (!event.didApply) return acc;
+      const impact = event.macroImpact ?? eventMacroImpacts[getEventKey(event)] ?? {};
+      return {
+        baseRateDelta: acc.baseRateDelta + (impact.baseRateDelta ?? 0),
+        propertyMove: acc.propertyMove + (impact.propertyMove ?? 0),
+        exchangeMove: acc.exchangeMove + (impact.exchangeMove ?? 0),
+      };
+    },
+    { baseRateDelta: 0, propertyMove: 0, exchangeMove: 0 },
+  );
 }
 
 function combineResolvedImpacts(events) {
@@ -771,6 +918,60 @@ function combineResolvedImpacts(events) {
 
   return Object.values(groupedImpacts).reduce((acc, group) => {
     Object.entries(group).forEach(([assetId, value]) => {
+      acc[assetId] = (acc[assetId] ?? 0) + value;
+    });
+    return acc;
+  }, {});
+}
+
+function getRandomMacroDelta(max, decimals = 2) {
+  return Number(((Math.random() * 2 - 1) * max).toFixed(decimals));
+}
+
+function createMacroMove({ baseRate, propertyIndex, exchangeRate, eventMacroImpact = {} }) {
+  const randomBaseRateDelta = getRandomMacroDelta(0.2, 2);
+  const randomPropertyMove = getRandomMacroDelta(0.03, 3);
+  const randomExchangeMove = getRandomMacroDelta(0.04, 3);
+  const baseRateDelta = Number((randomBaseRateDelta + (eventMacroImpact.baseRateDelta ?? 0)).toFixed(2));
+  const propertyMove = Number((randomPropertyMove + (eventMacroImpact.propertyMove ?? 0)).toFixed(3));
+  const exchangeMove = Number((randomExchangeMove + (eventMacroImpact.exchangeMove ?? 0)).toFixed(3));
+  const nextBaseRate = Math.max(0, Number((baseRate + baseRateDelta).toFixed(2)));
+  const nextPropertyIndex = Math.max(80, Math.round(propertyIndex * (1 + propertyMove)));
+  const nextExchangeRate = Math.max(900, Math.round(exchangeRate * (1 + exchangeMove)));
+  const assetImpact = {
+    bank: baseRateDelta > 0 ? 0.03 : -0.03,
+    neo: baseRateDelta > 0 ? -0.03 : 0.03,
+    enter: baseRateDelta > 0 ? -0.03 : 0.03,
+    realty: propertyMove * 0.8 + (baseRateDelta > 0 ? -0.03 : 0.03),
+    infra: propertyMove * 0.5,
+    sp500: exchangeMove * 0.8,
+    kospi: exchangeMove > 0 ? 0.03 : -0.02,
+    air: exchangeMove > 0 ? -0.04 : 0.03,
+    food: exchangeMove > 0 ? -0.03 : 0.02,
+    usBond: baseRateDelta > 0 ? -0.03 : 0.03,
+    argBond: exchangeMove > 0 ? -0.04 : 0.02,
+  };
+
+  return {
+    baseRateDelta,
+    propertyMove,
+    exchangeMove,
+    nextBaseRate,
+    nextPropertyIndex,
+    nextExchangeRate,
+    assetImpact,
+    eventMacroImpact,
+    randomMacroImpact: {
+      baseRateDelta: randomBaseRateDelta,
+      propertyMove: randomPropertyMove,
+      exchangeMove: randomExchangeMove,
+    },
+  };
+}
+
+function combineImpacts(...impacts) {
+  return impacts.reduce((acc, impact = {}) => {
+    Object.entries(impact).forEach(([assetId, value]) => {
       acc[assetId] = (acc[assetId] ?? 0) + value;
     });
     return acc;
@@ -863,6 +1064,9 @@ function getSimpleExplanation(event) {
     'grain-shock': '곡물 공급 충격 = 식품 원가와 물가 불확실성 증가',
     'us-yield-spike': '미국 국채금리 급등 = 글로벌 돈값 상승',
     'em-credit-stress': '신흥국 신용위험 = 높은 이자 뒤의 상환 위험 부각',
+    'war-risk': '지정학적 긴장 = 공급망과 안전자산 선호 변화',
+    'election-risk': '정치 불확실성 = 정책 방향 예측 어려움',
+    'argentina-reform': '개혁안 충돌 = 국가 신용위험 확대',
   };
 
   return explanations[getEventKey(event)] ?? '뉴스가 투자자의 기대를 바꾸면 가격도 움직일 수 있습니다.';
@@ -885,6 +1089,9 @@ function getCausalChain(event) {
     'grain-shock': ['곡물 공급 우려', '식품 원가·물가 부담', '식량 민감 자산 변동성 확대'],
     'us-yield-spike': ['미국 금리 상승', '채권 가격·할인율 부담', '성장자산·고위험채 변동성 확대'],
     'em-credit-stress': ['상환 위험 부각', '위험자산 회피', '고위험 채권 부담·안전자산 선호'],
+    'war-risk': ['군사 긴장 확대', '원자재·물류 불안', '안전자산 선호와 위험자산 부담'],
+    'election-risk': ['정책 방향 불확실', '투자 심리 위축', '정책 민감 업종 변동성 확대'],
+    'argentina-reform': ['재정 개혁 불확실', '통화·신용위험 확대', '고위험 국채 부담'],
   };
 
   return chains[getEventKey(event)] ?? ['뉴스 발생', '기대 변화', '가격 변동'];
@@ -903,6 +1110,9 @@ function getFinancialLinks(event) {
     'us-regulation': ['국가노출', '규제 민감도', 'R&D 비중', '플랫폼 의존도'],
     'fx-spike': ['수출비중', '환율노출', '해외 비용', '달러 부채'],
     'korea-us-chip-tension': ['국가노출', '공급망', '수출규제', '반도체 의존도'],
+    'war-risk': ['안전자산 선호', '물류비', '유류비', '공급망'],
+    'election-risk': ['정책 민감도', '규제 위험', '국가 부채', '환율'],
+    'argentina-reform': ['국가 신용등급', '통화가치', '재정적자', 'IMF 협상'],
   };
 
   return event.financialLinks ?? links[getEventKey(event)] ?? ['부채비율', '현금보유', '원자재 의존도', '국가노출'];
@@ -956,6 +1166,26 @@ function RoundExplanation({ summary, assets, compact = false }) {
         <h2>{summary.round}라운드 해설</h2>
       </div>
       <div className="explain-list">
+        {summary.macroMove && !compact ? (
+          <article className="macro-summary">
+            <div className="explain-head">
+              <strong>거시 지표 변화</strong>
+              <b className="result-badge expectation">시장 환경 변화</b>
+              <span>선택된 이슈와 라운드별 시장 흐름이 함께 반영되어 금리, 부동산, 환율이 움직였습니다.</span>
+            </div>
+            <div className="impact-chips">
+              <span className={summary.macroMove.baseRateDelta >= 0 ? 'up-chip' : 'down-chip'}>
+                기준금리 {formatPercent(summary.macroMove.baseRateDelta)}
+              </span>
+              <span className={summary.macroMove.propertyMove >= 0 ? 'up-chip' : 'down-chip'}>
+                부동산지수 {formatPercent(summary.macroMove.propertyMove * 100)}
+              </span>
+              <span className={summary.macroMove.exchangeMove >= 0 ? 'up-chip' : 'down-chip'}>
+                원/달러 환율 {formatPercent(summary.macroMove.exchangeMove * 100)}
+              </span>
+            </div>
+          </article>
+        ) : null}
         {summary.delistedAssets?.length ? (
           <article className="delist-summary">
             <div className="explain-head">
@@ -1015,7 +1245,7 @@ function RoundExplanation({ summary, assets, compact = false }) {
               {event.repeatedVolatility ? (
                 <p className="volatility-note">
                   <strong>동일 유형 이슈 반복 적용</strong>
-                  <span>같은 유형의 이슈가 2회 이상 실제로 반영되어 시장 변동성이 크게 확대되었습니다.</span>
+                  <span>같은 유형의 이슈가 {event.repeatedCount ?? 2}회 실제로 반영되어 시장 변동성이 단계적으로 확대되었습니다.</span>
                 </p>
               ) : null}
               {event.didApply === false ? (
@@ -1105,6 +1335,86 @@ function getHoldingRows(portfolio, assets) {
     .filter(Boolean);
 }
 
+function getAssetBucket(asset) {
+  if (asset.type === 'futures') return '선물';
+  if (asset.type === 'bond') return '채권';
+  if (asset.type === 'etf') return asset.country === '미국' ? '해외 ETF' : '국내 ETF';
+  if (asset.type === 'property') return '부동산';
+  if (asset.type === 'stock') return asset.country === '미국' ? '해외 주식' : '국내 주식';
+  return assetTypeLabels[asset.type] ?? '기타';
+}
+
+function getInvestorType({ cashLikeAsset, holdingsValue, portfolioRows, totalAsset }) {
+  const cashLikeRatio = totalAsset > 0 ? cashLikeAsset / totalAsset : 0;
+  const buckets = portfolioRows.reduce((acc, row) => {
+    const bucket = getAssetBucket(row.asset);
+    acc[bucket] = (acc[bucket] ?? 0) + row.value;
+    return acc;
+  }, {});
+  const overseasValue = (buckets['해외 주식'] ?? 0) + (buckets['해외 ETF'] ?? 0);
+  const futuresValue = buckets['선물'] ?? 0;
+  const stableValue = cashLikeAsset + (buckets['채권'] ?? 0);
+  const domesticStockValue = buckets['국내 주식'] ?? 0;
+
+  if (totalAsset <= 0) return '파산 위험형 투자자';
+  if (futuresValue / totalAsset >= 0.3) return '고변동성 승부형 투자자';
+  if (overseasValue / totalAsset >= 0.45) return '글로벌 공격형 투자자';
+  if (stableValue / totalAsset >= 0.65) return '안정 추구형 투자자';
+  if (cashLikeRatio >= 0.55) return '현금 방어형 투자자';
+  if (domesticStockValue / totalAsset >= 0.45) return '국내 산업 분석형 투자자';
+  if (holdingsValue / totalAsset >= 0.75) return '공격적 성장형 투자자';
+  return '균형 분산형 투자자';
+}
+
+function buildFinalSubmissionReport({ nickname, cash, deposit, portfolio, assets, tradeLogs, roundLogs, reflection }) {
+  const portfolioRows = getHoldingRows(portfolio, assets);
+  const investmentAsset = portfolioRows.reduce((sum, row) => sum + row.value, 0);
+  const cashLikeAsset = cash + deposit;
+  const totalAsset = cashLikeAsset + investmentAsset;
+  const returnRate = ((totalAsset - INITIAL_CASH) / INITIAL_CASH) * 100;
+  const investorType = getInvestorType({ cashLikeAsset, holdingsValue: investmentAsset, portfolioRows, totalAsset });
+  const portfolioReport = portfolioRows.map(({ asset, shares, value }) => ({
+    name: asset.name,
+    country: asset.country,
+    type: assetTypeLabels[asset.type] ?? asset.type,
+    bucket: getAssetBucket(asset),
+    shares,
+    value,
+    ratio: totalAsset > 0 ? value / totalAsset : 0,
+  }));
+
+  return {
+    nickname,
+    totalAsset,
+    cash,
+    deposit,
+    cashLikeAsset,
+    investmentAsset,
+    returnRate,
+    investorType,
+    portfolio: portfolioReport,
+    tradeLogs,
+    roundLogs,
+    reflection,
+    submittedAt: Date.now(),
+  };
+}
+
+function escapeCsv(value) {
+  return `"${String(value ?? '').replaceAll('"', '""')}"`;
+}
+
+function downloadCsv(filename, rows) {
+  const csv = rows.map((row) => row.map(escapeCsv).join(',')).join('\n');
+  const blob = new Blob([`\ufeff${csv}`], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 function HoldingsDashboard({ portfolio, assets, onSelectAsset, onSetTradeAmount }) {
   const rows = getHoldingRows(portfolio, assets);
 
@@ -1142,6 +1452,59 @@ function HoldingsDashboard({ portfolio, assets, onSelectAsset, onSetTradeAmount 
       ) : (
         <p className="empty-note">아직 보유한 투자 상품이 없습니다.</p>
       )}
+    </section>
+  );
+}
+
+function PortfolioDonut({ cash, deposit, portfolio, assets }) {
+  const holdingRows = getHoldingRows(portfolio, assets);
+  const slices = [
+    { label: '현금', value: cash, color: '#94a3b8' },
+    { label: '예금', value: deposit, color: '#16a34a' },
+    ...holdingRows.map(({ asset, value }) => ({ label: asset.name, value, color: asset.color })),
+  ].filter((item) => item.value > 0);
+  const total = slices.reduce((sum, item) => sum + item.value, 0);
+  let offset = 25;
+
+  if (!total) return null;
+
+  return (
+    <section className="portfolio-donut-panel" aria-label="내 자산 구성 원 그래프">
+      <div className="panel-heading">
+        <BadgePercent size={20} aria-hidden="true" />
+        <h2>내 자산 구성</h2>
+      </div>
+      <div className="donut-layout">
+        <svg className="donut-chart" viewBox="0 0 42 42" role="img" aria-label="자산 구성 비율">
+          <circle cx="21" cy="21" r="15.915" fill="transparent" stroke="#e2e8f0" strokeWidth="6" />
+          {slices.map((slice) => {
+            const ratio = (slice.value / total) * 100;
+            const currentOffset = offset;
+            offset -= ratio;
+            return (
+              <circle
+                key={slice.label}
+                cx="21"
+                cy="21"
+                r="15.915"
+                fill="transparent"
+                stroke={slice.color}
+                strokeWidth="6"
+                strokeDasharray={`${ratio} ${100 - ratio}`}
+                strokeDashoffset={currentOffset}
+              />
+            );
+          })}
+        </svg>
+        <div className="donut-legend">
+          {slices.slice(0, 6).map((slice) => (
+            <span key={slice.label}>
+              <i style={{ background: slice.color }} />
+              {slice.label} {Math.round((slice.value / total) * 100)}%
+            </span>
+          ))}
+        </div>
+      </div>
     </section>
   );
 }
@@ -1189,6 +1552,105 @@ function TeacherStudentMonitor({ players, activeStudent, assets }) {
   );
 }
 
+function TeacherSubmissionPanel({ players, activeStudent, submissions, gameFinished, onDownloadSubmissions }) {
+  const activeStudentName = activeStudent.name.includes('(대기)') ? '' : activeStudent.name;
+  const participantNames = [...new Set([activeStudentName, ...players.map((player) => player.name)].filter(Boolean))];
+  const submittedNames = new Set(submissions.map((submission) => submission.nickname));
+  const submittedRows = [...submissions].sort((a, b) => b.totalAsset - a.totalAsset);
+  const missingNames = participantNames.filter((name) => !submittedNames.has(name));
+
+  return (
+    <section className="submission-panel" aria-label="최종 제출 현황">
+      <div className="panel-heading split">
+        <div>
+          <Download size={22} aria-hidden="true" />
+          <h2>최종 제출 현황</h2>
+        </div>
+        <span className="limit-pill">{submittedRows.length}/{participantNames.length}</span>
+      </div>
+      {!gameFinished ? <p className="empty-note">최종 라운드 종료 후 학생 제출과 다운로드를 사용할 수 있습니다.</p> : null}
+      <div className="submission-actions">
+        <button className="command secondary" type="button" onClick={() => window.print()} disabled={!gameFinished || !submittedRows.length}>
+          보고서 인쇄
+        </button>
+        <button className="command primary" type="button" onClick={onDownloadSubmissions} disabled={!gameFinished || !submittedRows.length}>
+          CSV 다운로드
+        </button>
+      </div>
+      <div className="submission-list">
+        {submittedRows.map((submission, index) => (
+          <article key={submission.nickname}>
+            <span>{index + 1}위</span>
+            <strong>{submission.nickname}</strong>
+            <em>{submission.investorType}</em>
+            <small>{formatWon(submission.totalAsset)} · {formatPercent(submission.returnRate)}</small>
+          </article>
+        ))}
+        {missingNames.map((name) => (
+          <article className="missing" key={name}>
+            <span>미제출</span>
+            <strong>{name}</strong>
+            <em>대기 중</em>
+            <small>학생 화면에서 최종 제출하기를 눌러야 합니다.</small>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function TeacherRankingPanel({ players, submissions, activeStudent, gameFinished }) {
+  const activeStudentRows = activeStudent.name.includes('(대기)')
+    ? []
+    : [{
+        nickname: activeStudent.name,
+        totalAsset: activeStudent.totalAsset,
+        cashLikeAsset: activeStudent.totalAsset,
+        investmentAsset: 0,
+        returnRate: ((activeStudent.totalAsset - INITIAL_CASH) / INITIAL_CASH) * 100,
+        investorType: '제출 전',
+      }];
+  const submittedRows = submissions.length
+    ? submissions
+    : [
+        ...activeStudentRows,
+        ...players.map((player) => ({
+          nickname: player.name,
+          totalAsset: player.totalAsset ?? Math.round(INITIAL_CASH * (1 + player.returnRate / 100)),
+          cashLikeAsset: player.cash ?? 0,
+          investmentAsset: Math.max(0, (player.totalAsset ?? Math.round(INITIAL_CASH * (1 + player.returnRate / 100))) - (player.cash ?? 0) - (player.deposit ?? 0)),
+          returnRate: player.returnRate,
+          investorType: '제출 전',
+        })),
+      ];
+
+  return (
+    <section className="ranking-panel">
+      <div className="panel-heading">
+        <Trophy size={22} aria-hidden="true" />
+        <h2>{gameFinished ? '최종 순위' : '실시간 수익률 랭킹'}</h2>
+      </div>
+      <ol className="ranking-list detailed">
+        {[...submittedRows].sort((a, b) => b.totalAsset - a.totalAsset).map((player, index) => {
+          const total = player.totalAsset || 1;
+          const cashRatio = ((player.cashLikeAsset ?? 0) / total) * 100;
+          const investmentRatio = ((player.investmentAsset ?? 0) / total) * 100;
+          return (
+            <li key={player.nickname}>
+              <span className="rank">{index + 1}</span>
+              <div>
+                <strong>{player.nickname}</strong>
+                <small>현금성 {cashRatio.toFixed(0)}% · 투자 {investmentRatio.toFixed(0)}%</small>
+              </div>
+              <em className={player.returnRate >= 0 ? 'up' : 'down'}>{gameFinished ? player.investorType : formatPercent(player.returnRate)}</em>
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
+}
+
 function HostLoginView({ login, error, onLoginChange, onSubmit }) {
   return (
     <main className="auth-screen">
@@ -1226,17 +1688,19 @@ function HostLoginView({ login, error, onLoginChange, onSubmit }) {
   );
 }
 
-function RoomExpiryNotice({ roomPin, expiresAt, expired, onCreateRoom }) {
+function RoomExpiryNotice({ roomPin, expiresAt, expired, canCreateRoom, onCreateRoom }) {
   return (
     <section className={expired ? 'expiry-notice expired' : 'expiry-notice'} aria-label="방 유지 시간">
       <div>
         <strong>{expired ? '방이 자동 폐기되었습니다.' : `방 ${roomPin} 유지 중`}</strong>
         <span>{expired ? '24시간이 지나 새 방 생성이 필요합니다.' : `${formatDateTime(expiresAt)}까지 유지됩니다.`}</span>
       </div>
-      <button className="command secondary" type="button" onClick={onCreateRoom}>
-        <Radio size={18} aria-hidden="true" />
-        새 방 생성
-      </button>
+      {canCreateRoom ? (
+        <button className="command secondary" type="button" onClick={onCreateRoom}>
+          <Radio size={18} aria-hidden="true" />
+          새 방 생성
+        </button>
+      ) : null}
     </section>
   );
 }
@@ -1318,11 +1782,14 @@ function FinalReport({
   tradeLogs,
   roundLogs,
   reflection,
+  submission,
+  onSubmitReport,
   onReflectionChange,
 }) {
   const holdingsValue = getPortfolioValue(portfolio, assets);
   const totalAsset = cash + deposit + holdingsValue;
   const returnRate = ((totalAsset - INITIAL_CASH) / INITIAL_CASH) * 100;
+  const investorType = submission?.investorType ?? buildFinalSubmissionReport({ nickname, cash, deposit, portfolio, assets, tradeLogs, roundLogs, reflection }).investorType;
 
   return (
     <section className="final-report" aria-label="나의 투자 결과 보고서">
@@ -1342,8 +1809,8 @@ function FinalReport({
           <strong>{nickname}</strong>
         </div>
         <div>
-          <span>최종 자산</span>
-          <strong>{formatWon(totalAsset)}</strong>
+          <span>현금성 자산</span>
+          <strong>{formatWon(cash + deposit)}</strong>
         </div>
         <div>
           <span>최종 수익률</span>
@@ -1351,10 +1818,21 @@ function FinalReport({
         </div>
       </div>
 
+      <div className="submission-box">
+        <div>
+          <span>투자 성향</span>
+          <strong>{investorType}</strong>
+          <p>최종 자산은 현금과 예금을 현금성 자산으로 합산해 계산합니다.</p>
+        </div>
+        <button className="command primary print-hide" type="button" onClick={onSubmitReport} disabled={Boolean(submission)}>
+          {submission ? '제출 완료' : '최종 제출하기'}
+        </button>
+      </div>
+
       <div className="report-section">
         <h3>최종 보유 현황</h3>
         <p>{getHoldingSummary(portfolio, assets)}</p>
-        <p>현금 {formatWon(cash)} · 예금 {formatWon(deposit)}</p>
+        <p>현금성 자산 {formatWon(cash + deposit)} · 투자 평가금 {formatWon(holdingsValue)} · 총자산 {formatWon(totalAsset)}</p>
       </div>
 
       <div className="report-section">
@@ -1437,15 +1915,23 @@ const macroGuideItems = {
     down: '내리면 대출 부실 우려와 소비 위축 우려가 커져 관련 업종이 부담을 받을 수 있습니다.',
     examples: ['건설/인프라', '은행', '소비심리', '대출'],
   },
+  exchangeRate: {
+    title: '원/달러 환율',
+    summary: '1달러를 사기 위해 필요한 원화 가격입니다. 환율이 오르면 원화 가치가 약해졌다는 뜻입니다.',
+    up: '오르면 수출 기업과 미국 자산 환산가치는 유리할 수 있지만, 항공·식품처럼 달러 비용이 큰 산업은 부담을 받을 수 있습니다.',
+    down: '내리면 수입 비용 부담은 줄지만, 수출 기업의 원화 환산 매출 기대는 약해질 수 있습니다.',
+    examples: ['해외 ETF', '항공', '식품', '수출주'],
+  },
 };
 
-function MacroGuide({ baseRate, depositRate, propertyAsset }) {
+function MacroGuide({ baseRate, depositRate, propertyAsset, exchangeRate }) {
   const [selectedGuide, setSelectedGuide] = useState('baseRate');
   const item = macroGuideItems[selectedGuide];
   const currentValue = {
     baseRate: `${baseRate.toFixed(1)}%`,
     depositRate: `${depositRate.toFixed(1)}%`,
     propertyIndex: propertyAsset ? formatWon(propertyAsset.price) : '-',
+    exchangeRate: `${exchangeRate.toLocaleString('ko-KR')}원`,
   }[selectedGuide];
 
   return (
@@ -1558,7 +2044,7 @@ function AssetLearningPanel({ asset }) {
   );
 }
 
-function AppHeader({ view, setView, hostAuthenticated }) {
+function AppHeader({ view, setView, hostAuthenticated, studentEntryAllowed }) {
   return (
     <header className="topbar">
       <button className="brand" type="button" onClick={() => setView('home')} aria-label="홈으로 이동">
@@ -1574,16 +2060,18 @@ function AppHeader({ view, setView, hostAuthenticated }) {
           <School size={18} aria-hidden="true" />
           교사
         </button>
-        <button className={view === 'student' ? 'active' : ''} type="button" data-role={classroomRoles.student} onClick={() => setView('student')}>
-          <Smartphone size={18} aria-hidden="true" />
-          학생
-        </button>
+        {studentEntryAllowed || view === 'student' ? (
+          <button className={view === 'student' ? 'active' : ''} type="button" data-role={classroomRoles.student} onClick={() => setView('student')}>
+            <Smartphone size={18} aria-hidden="true" />
+            학생
+          </button>
+        ) : null}
       </nav>
     </header>
   );
 }
 
-function HomeView({ setView, roomPin, round, playerCount, baseRate, expiresAt, roomExpired, syncStatus, onCreateRoom, hostAuthenticated }) {
+function HomeView({ setView, roomPin, round, playerCount, baseRate, exchangeRate, expiresAt, roomExpired, syncStatus, studentEntryAllowed, onCreateRoom, hostAuthenticated }) {
   return (
     <main className="home-view">
       <section className="hero-band">
@@ -1600,14 +2088,18 @@ function HomeView({ setView, roomPin, round, playerCount, baseRate, expiresAt, r
               교사용 대시보드
               <ChevronRight size={18} aria-hidden="true" />
             </button>
-            <button className="command secondary" type="button" onClick={() => setView('student')}>
-              <LogIn size={20} aria-hidden="true" />
-              학생 입장 화면
-            </button>
-            <button className="command secondary" type="button" onClick={onCreateRoom}>
-              <Radio size={20} aria-hidden="true" />
-              새 방 생성
-            </button>
+            {studentEntryAllowed ? (
+              <button className="command secondary" type="button" onClick={() => setView('student')}>
+                <LogIn size={20} aria-hidden="true" />
+                학생 입장 화면
+              </button>
+            ) : null}
+            {hostAuthenticated ? (
+              <button className="command secondary" type="button" onClick={onCreateRoom}>
+                <Radio size={20} aria-hidden="true" />
+                새 방 생성
+              </button>
+            ) : null}
           </div>
           <HeroMarketGraphic />
         </div>
@@ -1634,21 +2126,47 @@ function HomeView({ setView, roomPin, round, playerCount, baseRate, expiresAt, r
               <span>기준금리</span>
             </div>
             <div>
-              <PiggyBank size={19} aria-hidden="true" />
-              <strong>{getDepositRate(baseRate).toFixed(1)}%</strong>
-              <span>예금금리</span>
+              <Globe2 size={19} aria-hidden="true" />
+              <strong>{exchangeRate.toLocaleString('ko-KR')}원</strong>
+              <span>원/달러 환율</span>
             </div>
           </div>
           <p className="sync-note">
             {syncStatus}
           </p>
           <JoinQrCard roomPin={roomPin} />
-          <RoomExpiryNotice roomPin={roomPin} expiresAt={expiresAt} expired={roomExpired} onCreateRoom={onCreateRoom} />
+          <RoomExpiryNotice roomPin={roomPin} expiresAt={expiresAt} expired={roomExpired} canCreateRoom={hostAuthenticated} onCreateRoom={onCreateRoom} />
         </aside>
       </section>
     </main>
   );
 }
+
+const eventCategoryLabels = {
+  all: '전체',
+  rate: '금리/환율',
+  commodity: '원자재/식량',
+  geopolitics: '전쟁/정치',
+  bond: '채권/국가',
+  tech: '기술/수출',
+  property: '부동산/소비',
+};
+
+function getEventCategory(event) {
+  if (['rate-up', 'rate-down', 'deposit-special', 'fx-spike', 'us-yield-spike'].includes(event.id)) return 'rate';
+  if (['rare', 'oil-supply-shock', 'grain-shock'].includes(event.id)) return 'commodity';
+  if (['war-risk', 'election-risk'].includes(event.id)) return 'geopolitics';
+  if (['em-credit-stress', 'argentina-reform'].includes(event.id)) return 'bond';
+  if (['us-rally', 'korea-export', 'us-regulation', 'korea-us-chip-tension'].includes(event.id)) return 'tech';
+  if (['property-ease', 'housing'].includes(event.id)) return 'property';
+  return 'all';
+}
+
+const eventPresetFilters = [
+  { label: '고변동성', category: 'geopolitics' },
+  { label: '채권/환율 수업', category: 'bond' },
+  { label: '원자재 수업', category: 'commodity' },
+];
 
 function HostView({
   roomPin,
@@ -1659,12 +2177,15 @@ function HostView({
   players,
   newsFeed,
   baseRate,
+  exchangeRate,
   activeStudent,
   expiresAt,
   roomExpired,
   issueDraft,
   currentRoundEvents,
   latestRoundSummary,
+  submissions,
+  gameFinished,
   onCreateRoom,
   onIssueDraftChange,
   onStartRound,
@@ -1673,10 +2194,15 @@ function HostView({
   onTogglePause,
   onEndGame,
   onRegisterIssue,
+  onDownloadSubmissions,
 }) {
   const propertyAsset = assets.find((asset) => asset.type === 'property');
   const eventLimitReached = currentRoundEvents.length >= MAX_EVENTS_PER_ROUND;
   const canRegisterIssue = phase === 'setup' && !eventLimitReached && !roomExpired;
+  const [eventCategory, setEventCategory] = useState('all');
+  const filteredScenarioEvents = eventCategory === 'all'
+    ? scenarioEvents
+    : scenarioEvents.filter((event) => getEventCategory(event) === eventCategory);
 
   return (
     <main className="host-layout">
@@ -1692,7 +2218,7 @@ function HostView({
           </div>
         </div>
 
-        <RoomExpiryNotice roomPin={roomPin} expiresAt={expiresAt} expired={roomExpired} onCreateRoom={onCreateRoom} />
+        <RoomExpiryNotice roomPin={roomPin} expiresAt={expiresAt} expired={roomExpired} canCreateRoom onCreateRoom={onCreateRoom} />
         <JoinQrCard roomPin={roomPin} />
 
         <div className="control-strip">
@@ -1744,8 +2270,8 @@ function HostView({
           </div>
           <div>
             <Globe2 size={20} aria-hidden="true" />
-            <span>ETF</span>
-            <strong>S&P 500 · KOSPI</strong>
+            <span>원/달러 환율</span>
+            <strong>{exchangeRate.toLocaleString('ko-KR')}원</strong>
           </div>
         </section>
 
@@ -1774,8 +2300,22 @@ function HostView({
           ) : null}
           {eventLimitReached ? <p className="teacher-hint warning">이번 라운드 이벤트 한도에 도달했습니다. 다음 라운드에서 다시 선택할 수 있습니다.</p> : null}
           {phase !== 'setup' ? <p className="teacher-hint">장이 진행 중이거나 마감된 뒤에는 새 이슈를 등록할 수 없습니다.</p> : null}
+          <div className="event-filter-bar" aria-label="이슈 카테고리 선택">
+            {Object.entries(eventCategoryLabels).map(([key, label]) => (
+              <button className={eventCategory === key ? 'active' : ''} type="button" key={key} onClick={() => setEventCategory(key)}>
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="event-preset-bar" aria-label="추천 이슈 묶음">
+            {eventPresetFilters.map((preset) => (
+              <button type="button" key={preset.label} onClick={() => setEventCategory(preset.category)}>
+                {preset.label}
+              </button>
+            ))}
+          </div>
           <div className="event-grid">
-            {scenarioEvents.map((event) => (
+            {filteredScenarioEvents.map((event) => (
               <article className="event-button" key={event.id}>
                 <strong>{event.title}</strong>
                 <span>{event.detail}</span>
@@ -1799,6 +2339,13 @@ function HostView({
         <RoundExplanation summary={latestRoundSummary} assets={assets} />
         <CloseDashboard phase={phase} players={players} />
         <TeacherStudentMonitor players={players} activeStudent={activeStudent} assets={assets} />
+        <TeacherSubmissionPanel
+          players={players}
+          activeStudent={activeStudent}
+          submissions={submissions}
+          gameFinished={gameFinished}
+          onDownloadSubmissions={onDownloadSubmissions}
+        />
 
         <section className="market-board" aria-labelledby="market-heading">
           <div className="panel-heading">
@@ -1830,21 +2377,7 @@ function HostView({
       </section>
 
       <aside className="host-sidebar">
-        <section className="ranking-panel">
-          <div className="panel-heading">
-            <Trophy size={22} aria-hidden="true" />
-            <h2>실시간 수익률 랭킹</h2>
-          </div>
-          <ol className="ranking-list">
-            {[...players].sort((a, b) => b.returnRate - a.returnRate).map((player, index) => (
-              <li key={player.id}>
-                <span className="rank">{index + 1}</span>
-                <strong>{player.name}</strong>
-                {phase === 'closed' ? <em>{index + 1}위</em> : <em className={player.returnRate >= 0 ? 'up' : 'down'}>{formatPercent(player.returnRate)}</em>}
-              </li>
-            ))}
-          </ol>
-        </section>
+        <TeacherRankingPanel players={players} submissions={submissions} activeStudent={activeStudent} gameFinished={gameFinished} />
 
         <section className="news-panel">
           <div className="panel-heading">
@@ -1876,6 +2409,7 @@ function StudentView({
   cash,
   deposit,
   baseRate,
+  exchangeRate,
   tradeLogs,
   roundLogs,
   reflection,
@@ -1884,6 +2418,7 @@ function StudentView({
   currentRoundEvents,
   latestRoundSummary,
   gameFinished,
+  submittedReport,
   nickname,
   setNickname,
   joined,
@@ -1898,6 +2433,7 @@ function StudentView({
   onSell,
   onDeposit,
   onWithdrawDeposit,
+  onSubmitReport,
   onReflectionChange,
 }) {
   const selectedAsset = assets.find((asset) => asset.id === selectedAssetId) ?? assets[0];
@@ -1909,6 +2445,8 @@ function StudentView({
   const depositRate = getDepositRate(baseRate);
   const nextInterest = deposit * (depositRate / 100 / 4);
   const propertyAsset = assets.find((asset) => asset.type === 'property');
+  const canTradeStocks = phase === 'open' && !gameFinished;
+  const canMoveDeposit = !gameFinished;
 
   if (!joined) {
     return (
@@ -1971,6 +2509,8 @@ function StudentView({
             tradeLogs={tradeLogs}
             roundLogs={roundLogs}
             reflection={reflection}
+            submission={submittedReport}
+            onSubmitReport={onSubmitReport}
             onReflectionChange={onReflectionChange}
           />
         ) : null}
@@ -2013,9 +2553,9 @@ function StudentView({
           onSetTradeAmount={setTradeAmount}
         />
 
-        <MacroGuide baseRate={baseRate} depositRate={depositRate} propertyAsset={propertyAsset} />
+        <PortfolioDonut cash={cash} deposit={deposit} portfolio={portfolio} assets={assets} />
 
-        <AssetLearningPanel asset={selectedAsset} />
+        <MacroGuide baseRate={baseRate} depositRate={depositRate} propertyAsset={propertyAsset} exchangeRate={exchangeRate} />
 
         <section className="deposit-ticket" aria-labelledby="deposit-heading">
           <div>
@@ -2026,11 +2566,25 @@ function StudentView({
             예금 금액
             <input value={depositAmount} onChange={(event) => setDepositAmount(event.target.value)} inputMode="numeric" aria-label="예금 금액" />
           </label>
+          <div className="quick-actions">
+            <button type="button" onClick={() => setDepositAmount(String(Math.floor(cash / 2)))} disabled={!canMoveDeposit}>
+              현금 1/2
+            </button>
+            <button type="button" onClick={() => setDepositAmount(String(cash))} disabled={!canMoveDeposit}>
+              현금 전액
+            </button>
+            <button type="button" onClick={() => setDepositAmount(String(Math.floor(deposit / 2)))} disabled={!canMoveDeposit}>
+              예금 1/2
+            </button>
+            <button type="button" onClick={() => setDepositAmount(String(deposit))} disabled={!canMoveDeposit}>
+              예금 전액
+            </button>
+          </div>
           <div className="trade-actions compact">
-            <button className="save" type="button" onClick={onDeposit} disabled={gameFinished}>
+            <button className="save" type="button" onClick={onDeposit} disabled={!canMoveDeposit}>
               예금하기
             </button>
-            <button className="withdraw" type="button" onClick={onWithdrawDeposit} disabled={gameFinished}>
+            <button className="withdraw" type="button" onClick={onWithdrawDeposit} disabled={!canMoveDeposit}>
               해지하기
             </button>
           </div>
@@ -2050,6 +2604,8 @@ function StudentView({
             );
           })}
         </section>
+
+        <AssetLearningPanel asset={selectedAsset} />
 
         <section className="trade-ticket" aria-labelledby="trade-heading">
           <div className="ticket-head">
@@ -2086,11 +2642,11 @@ function StudentView({
           </div>
 
           <div className="trade-actions">
-            <button className="buy" type="button" onClick={onBuy} disabled={gameFinished || selectedAsset.delisted}>
-              {gameFinished ? '종료' : selectedAsset.delisted ? '거래중단' : '매수'}
+            <button className="buy" type="button" onClick={onBuy} disabled={!canTradeStocks || selectedAsset.delisted}>
+              {gameFinished ? '종료' : phase !== 'open' ? '장 시작 대기' : selectedAsset.delisted ? '거래중단' : '매수'}
             </button>
-            <button className="sell" type="button" onClick={onSell} disabled={gameFinished || selectedAsset.delisted}>
-              매도
+            <button className="sell" type="button" onClick={onSell} disabled={!canTradeStocks || selectedAsset.delisted}>
+              {phase !== 'open' && !gameFinished ? '장 시작 대기' : '매도'}
             </button>
           </div>
         </section>
@@ -2101,6 +2657,7 @@ function StudentView({
 
 export function App() {
   const [view, setView] = useState(getInitialView);
+  const [studentEntryAllowed] = useState(getInitialStudentEntryAllowed);
   const [hostAuthenticated, setHostAuthenticated] = useState(false);
   const [hostLogin, setHostLogin] = useState({ id: '', password: '' });
   const [hostLoginError, setHostLoginError] = useState('');
@@ -2111,6 +2668,7 @@ export function App() {
   const [phase, setPhase] = useState('setup');
   const [isPaused, setIsPaused] = useState(false);
   const [baseRate, setBaseRate] = useState(INITIAL_BASE_RATE);
+  const [exchangeRate, setExchangeRate] = useState(INITIAL_EXCHANGE_RATE);
   const [assets, setAssets] = useState(() => createRandomizedAssets());
   const [triggeredEventsByRound, setTriggeredEventsByRound] = useState({});
   const [latestRoundSummary, setLatestRoundSummary] = useState(null);
@@ -2130,8 +2688,9 @@ export function App() {
   const [tradeLogs, setTradeLogs] = useState([]);
   const [roundLogs, setRoundLogs] = useState([]);
   const [reflection, setReflection] = useState({ good: '', improve: '', next: '' });
+  const [submissions, setSubmissions] = useState([]);
   const [remoteRoomId, setRemoteRoomId] = useState(null);
-  const [syncStatus, setSyncStatus] = useState(supabaseConfigured ? 'Supabase 연결 준비 중' : '로컬 모드');
+  const [syncStatus, setSyncStatus] = useState(supabaseConfigured ? '실시간 수업 연결 준비 중' : '로컬 연습 모드');
   const remoteRefreshTimer = useRef(null);
 
   const selectedAsset = useMemo(
@@ -2148,6 +2707,7 @@ export function App() {
   });
   const studentHoldingsValue = getPortfolioValue(portfolio, assets);
   const studentTotalAsset = cash + deposit + studentHoldingsValue;
+  const submittedReport = submissions.find((submission) => submission.nickname === nickname.trim());
   const activeStudent = buildStudentSnapshot({
     id: 'active-student',
     name: joined ? nickname : `${nickname || '학생'} (대기)`,
@@ -2172,17 +2732,22 @@ export function App() {
     setPhase(isExpired ? 'expired' : bundle.room.phase);
     setIsPaused(bundle.room.is_paused);
     setBaseRate(Number(bundle.room.base_rate));
+    setExchangeRate(Number(bundle.room.exchange_rate ?? INITIAL_EXCHANGE_RATE));
     if (bundle.assets.length) setAssets(bundle.assets);
     setTriggeredEventsByRound(groupedEvents);
     setLatestRoundSummary(resolvedCurrentEvents.length ? { round: remoteRound, events: resolvedCurrentEvents, delistedAssets: [] } : null);
     setPlayers(bundle.players);
-    setSyncStatus('Supabase 실시간 연결 중');
+    setSyncStatus('실시간 수업 연결 중');
   }, []);
 
   const refreshRemoteRoom = useCallback(async (roomId = remoteRoomId) => {
     if (!supabaseConfigured || !roomId) return;
-    const bundle = await fetchRemoteRoomById(roomId);
+    const [bundle, remoteSubmissions] = await Promise.all([
+      fetchRemoteRoomById(roomId),
+      fetchRemoteSubmissions(roomId),
+    ]);
     if (bundle) applyRemoteRoomBundle(bundle);
+    setSubmissions(remoteSubmissions);
   }, [applyRemoteRoomBundle, remoteRoomId]);
 
   useEffect(() => {
@@ -2203,12 +2768,14 @@ export function App() {
     let cancelled = false;
 
     fetchRemoteRoomByPin(roomPin)
-      .then((bundle) => {
+      .then(async (bundle) => {
         if (cancelled || !bundle) return;
         applyRemoteRoomBundle(bundle);
+        const remoteSubmissions = await fetchRemoteSubmissions(bundle.room.id);
+        if (!cancelled) setSubmissions(remoteSubmissions);
       })
       .catch((error) => {
-        if (!cancelled) setSyncStatus(`Supabase 불러오기 실패: ${error.message}`);
+        if (!cancelled) setSyncStatus(`수업 연결 불러오기 실패: ${error.message}`);
       });
 
     return () => {
@@ -2222,7 +2789,7 @@ export function App() {
     const unsubscribe = subscribeRemoteRoom(remoteRoomId, () => {
       window.clearTimeout(remoteRefreshTimer.current);
       remoteRefreshTimer.current = window.setTimeout(() => {
-        refreshRemoteRoom(remoteRoomId).catch((error) => setSyncStatus(`Supabase 동기화 실패: ${error.message}`));
+        refreshRemoteRoom(remoteRoomId).catch((error) => setSyncStatus(`수업 연결 동기화 실패: ${error.message}`));
       }, 150);
     });
 
@@ -2241,7 +2808,7 @@ export function App() {
       totalAsset: studentTotalAsset,
       returnRate: ((studentTotalAsset - INITIAL_CASH) / INITIAL_CASH) * 100,
     };
-    upsertRemotePlayer(remoteRoomId, remotePlayer).catch((error) => setSyncStatus(`Supabase 학생 저장 실패: ${error.message}`));
+    upsertRemotePlayer(remoteRoomId, remotePlayer).catch((error) => setSyncStatus(`학생 정보 저장 실패: ${error.message}`));
   }, [cash, deposit, joined, nickname, remoteRoomId, studentTotalAsset]);
 
   function pushNews(title, detail, targetRound = round) {
@@ -2277,6 +2844,11 @@ export function App() {
   }
 
   async function createNewRoom() {
+    if (!hostAuthenticated) {
+      setView('host-login');
+      return;
+    }
+
     const nextPin = String(Math.floor(100000 + Math.random() * 900000));
     const now = Date.now();
     const nextAssets = createRandomizedAssets();
@@ -2297,6 +2869,7 @@ export function App() {
     setPhase(nextRoom.phase);
     setIsPaused(nextRoom.isPaused);
     setBaseRate(nextRoom.baseRate);
+    setExchangeRate(INITIAL_EXCHANGE_RATE);
     setAssets(nextRoom.assets);
     setTriggeredEventsByRound(nextRoom.triggeredEventsByRound);
     setLatestRoundSummary(nextRoom.latestRoundSummary);
@@ -2312,19 +2885,21 @@ export function App() {
     setTradeLogs(nextRoom.tradeLogs);
     setRoundLogs(nextRoom.roundLogs);
     setReflection(nextRoom.reflection);
+    setSubmissions([]);
 
     if (!supabaseConfigured) return;
-    setSyncStatus('Supabase에 새 방 저장 중');
+    setSyncStatus('새 수업 방 저장 중');
     try {
       const bundle = await createRemoteRoom({
         pin: nextPin,
         now,
         baseRate: INITIAL_BASE_RATE,
+        exchangeRate: INITIAL_EXCHANGE_RATE,
         assets: nextAssets,
       });
       if (bundle) applyRemoteRoomBundle(bundle);
     } catch (error) {
-      setSyncStatus(`Supabase 방 생성 실패: ${error.message}`);
+      setSyncStatus(`수업 방 생성 실패: ${error.message}`);
     }
   }
 
@@ -2339,7 +2914,7 @@ export function App() {
       try {
         await updateRemoteRoom(remoteRoomId, { current_round: nextRound, phase: 'setup' });
       } catch (error) {
-        setSyncStatus(`Supabase 라운드 이동 실패: ${error.message}`);
+        setSyncStatus(`라운드 이동 저장 실패: ${error.message}`);
       }
     }
   }
@@ -2366,7 +2941,7 @@ export function App() {
       try {
         await insertRemoteIssue(remoteRoomId, registeredEvent, round);
       } catch (error) {
-        setSyncStatus(`Supabase 이슈 저장 실패: ${error.message}`);
+        setSyncStatus(`이슈 저장 실패: ${error.message}`);
       }
     }
   }
@@ -2379,7 +2954,7 @@ export function App() {
       try {
         await updateRemoteRoom(remoteRoomId, { phase: 'open' });
       } catch (error) {
-        setSyncStatus(`Supabase 라운드 시작 실패: ${error.message}`);
+        setSyncStatus(`라운드 시작 저장 실패: ${error.message}`);
       }
     }
   }
@@ -2402,24 +2977,34 @@ export function App() {
 
     const appliedEventTypeCounts = getAppliedEventTypeCounts(initialResolvedEvents);
     const resolvedEvents = initialResolvedEvents.map((event) => {
-      const repeatedVolatility = event.didApply && (appliedEventTypeCounts[getEventKey(event)] ?? 0) >= 2;
+      const repeatedCount = appliedEventTypeCounts[getEventKey(event)] ?? 0;
+      const repeatedVolatility = event.didApply && repeatedCount >= 2;
       return {
         ...event,
         repeatedVolatility,
+        repeatedCount,
         resolvedImpact: event.didApply
           ? repeatedVolatility
-            ? normalizeRepeatedEventImpact(event.impact)
+            ? normalizeRepeatedEventImpact(event.impact, repeatedCount)
             : normalizeEventImpact(event.impact, MIN_EVENT_IMPACT)
           : {},
       };
     });
 
-    const combinedImpact = combineResolvedImpacts(resolvedEvents);
+    const eventImpact = combineResolvedImpacts(resolvedEvents);
+    const eventMacroImpact = combineEventMacroImpacts(resolvedEvents);
+    const propertyAsset = assets.find((asset) => asset.type === 'property');
+    const macroMove = createMacroMove({
+      baseRate,
+      propertyIndex: propertyAsset?.price ?? 250_000,
+      exchangeRate,
+      eventMacroImpact,
+    });
+    const nextBaseRate = macroMove.nextBaseRate;
+    const combinedImpact = combineImpacts(eventImpact, macroMove.assetImpact);
 
-    const baseRateDelta = resolvedEvents.reduce((sum, event) => sum + (event.outcomeType === 'event' ? event.baseRateDelta ?? 0 : 0), 0);
-    if (baseRateDelta) {
-      setBaseRate((current) => Math.max(0, Number((current + baseRateDelta).toFixed(1))));
-    }
+    setBaseRate(nextBaseRate);
+    setExchangeRate(macroMove.nextExchangeRate);
 
     const delistedAssets = round >= DELISTING_START_ROUND
       ? assets
@@ -2429,11 +3014,11 @@ export function App() {
       : [];
 
     const nextAssets = moveAssetsLocally(assets, combinedImpact, delistedAssets.map((asset) => asset.id), round);
-    const nextDeposit = Math.round(deposit * (1 + getDepositRate(baseRate + baseRateDelta) / 100 / 4));
+    const nextDeposit = Math.round(deposit * (1 + getDepositRate(nextBaseRate) / 100 / 4));
 
     setAssets(nextAssets);
     setDeposit(nextDeposit);
-    setLatestRoundSummary({ round, events: resolvedEvents, delistedAssets });
+    setLatestRoundSummary({ round, events: resolvedEvents, delistedAssets, macroMove });
     setPhase('closed');
     setRoundLogs((current) => [
       buildRoundLog({
@@ -2468,13 +3053,14 @@ export function App() {
         await Promise.all([
           updateRemoteRoom(remoteRoomId, {
             phase: 'closed',
-            base_rate: Number((baseRate + baseRateDelta).toFixed(1)),
+            base_rate: nextBaseRate,
+            exchange_rate: macroMove.nextExchangeRate,
           }),
           upsertRemoteAssets(remoteRoomId, nextAssets),
           updateRemoteIssues(remoteRoomId, resolvedEvents, round),
         ]);
       } catch (error) {
-        setSyncStatus(`Supabase 장 마감 저장 실패: ${error.message}`);
+        setSyncStatus(`장 마감 저장 실패: ${error.message}`);
       }
     }
   }
@@ -2487,7 +3073,7 @@ export function App() {
       try {
         await updateRemoteRoom(remoteRoomId, { phase: 'ended', is_paused: true });
       } catch (error) {
-        setSyncStatus(`Supabase 게임 종료 실패: ${error.message}`);
+        setSyncStatus(`게임 종료 저장 실패: ${error.message}`);
       }
     }
   }
@@ -2496,8 +3082,54 @@ export function App() {
     return Number(String(value).replaceAll(',', '').replace(/[^\d]/g, '')) || 0;
   }
 
+  async function handleSubmitReport() {
+    if (!gameFinished || !joined || submittedReport) return;
+    const report = buildFinalSubmissionReport({
+      nickname: nickname.trim(),
+      cash,
+      deposit,
+      portfolio,
+      assets,
+      tradeLogs,
+      roundLogs,
+      reflection,
+    });
+
+    setSubmissions((current) => [report, ...current.filter((item) => item.nickname !== report.nickname)]);
+    if (remoteRoomId) {
+      try {
+        const savedReport = await upsertRemoteSubmission(remoteRoomId, report);
+        if (savedReport) {
+          setSubmissions((current) => [savedReport, ...current.filter((item) => item.nickname !== savedReport.nickname)]);
+        }
+      } catch (error) {
+        setSyncStatus(`최종 제출 저장 실패: ${error.message}`);
+      }
+    }
+  }
+
+  function handleDownloadSubmissions() {
+    const rows = [
+      ['순위', '이름', '총자산', '현금성자산', '투자평가금', '수익률', '투자성향', '보유자산', '잘한점', '부족한점', '다음계획'],
+      ...[...submissions].sort((a, b) => b.totalAsset - a.totalAsset).map((submission, index) => [
+        index + 1,
+        submission.nickname,
+        submission.totalAsset,
+        submission.cashLikeAsset,
+        submission.investmentAsset,
+        `${submission.returnRate.toFixed(1)}%`,
+        submission.investorType,
+        submission.portfolio?.map((item) => `${item.name} ${item.shares}주 ${Math.round((item.ratio ?? 0) * 100)}%`).join(' / ') ?? '',
+        submission.reflection?.good ?? '',
+        submission.reflection?.improve ?? '',
+        submission.reflection?.next ?? '',
+      ]),
+    ];
+    downloadCsv(`market-class-${roomPin}-final-reports.csv`, rows);
+  }
+
   function handleBuy() {
-    if (roomExpired || gameFinished || selectedAsset.delisted || selectedAsset.price <= 0) return;
+    if (roomExpired || gameFinished || phase !== 'open' || selectedAsset.delisted || selectedAsset.price <= 0) return;
     const amount = Math.min(parseAmount(tradeAmount), cash);
     const shares = Math.floor(amount / selectedAsset.price);
     if (shares <= 0) return;
@@ -2508,7 +3140,7 @@ export function App() {
   }
 
   function handleSell() {
-    if (roomExpired || gameFinished || selectedAsset.delisted || selectedAsset.price <= 0) return;
+    if (roomExpired || gameFinished || phase !== 'open' || selectedAsset.delisted || selectedAsset.price <= 0) return;
     const amount = parseAmount(tradeAmount);
     const owned = portfolio[selectedAsset.id] ?? 0;
     const shares = Math.min(owned, Math.floor(amount / selectedAsset.price));
@@ -2538,7 +3170,7 @@ export function App() {
 
   return (
     <div className="app-shell">
-      <AppHeader view={view} setView={setView} hostAuthenticated={hostAuthenticated} />
+      <AppHeader view={view} setView={setView} hostAuthenticated={hostAuthenticated} studentEntryAllowed={studentEntryAllowed} />
       {view === 'home' ? (
         <HomeView
           setView={setView}
@@ -2546,9 +3178,11 @@ export function App() {
           round={round}
           playerCount={playerCount}
           baseRate={baseRate}
+          exchangeRate={exchangeRate}
           expiresAt={expiresAt}
           roomExpired={roomExpired}
           syncStatus={syncStatus}
+          studentEntryAllowed={studentEntryAllowed}
           onCreateRoom={createNewRoom}
           hostAuthenticated={hostAuthenticated}
         />
@@ -2566,12 +3200,15 @@ export function App() {
           players={players}
           newsFeed={newsFeed}
           baseRate={baseRate}
+          exchangeRate={exchangeRate}
           activeStudent={activeStudent}
           expiresAt={expiresAt}
           roomExpired={roomExpired}
           issueDraft={issueDraft}
           currentRoundEvents={currentRoundEvents}
           latestRoundSummary={latestRoundSummary}
+          submissions={submissions}
+          gameFinished={gameFinished}
           onCreateRoom={createNewRoom}
           onIssueDraftChange={setIssueDraft}
           onStartRound={handleStartRound}
@@ -2584,12 +3221,13 @@ export function App() {
               try {
                 await updateRemoteRoom(remoteRoomId, { is_paused: nextPaused });
               } catch (error) {
-                setSyncStatus(`Supabase 일시정지 저장 실패: ${error.message}`);
+                setSyncStatus(`일시정지 저장 실패: ${error.message}`);
               }
             }
           }}
           onEndGame={handleEndGame}
           onRegisterIssue={handleRegisterIssue}
+          onDownloadSubmissions={handleDownloadSubmissions}
         />
       ) : null}
       {view === 'host' && !hostAuthenticated ? (
@@ -2606,6 +3244,7 @@ export function App() {
           cash={cash}
           deposit={deposit}
           baseRate={baseRate}
+          exchangeRate={exchangeRate}
           tradeLogs={tradeLogs}
           roundLogs={roundLogs}
           reflection={reflection}
@@ -2614,6 +3253,7 @@ export function App() {
           currentRoundEvents={currentRoundEvents}
           latestRoundSummary={latestRoundSummary}
           gameFinished={gameFinished}
+          submittedReport={submittedReport}
           nickname={nickname}
           setNickname={setNickname}
           joined={joined}
@@ -2628,6 +3268,7 @@ export function App() {
           onSell={handleSell}
           onDeposit={handleDeposit}
           onWithdrawDeposit={handleWithdrawDeposit}
+          onSubmitReport={handleSubmitReport}
           onReflectionChange={handleReflectionChange}
         />
       ) : null}

@@ -238,8 +238,10 @@ p {
 .close-dashboard,
 .macro-guide,
 .asset-learning-panel,
+.portfolio-donut-panel,
 .holdings-panel,
 .student-monitor,
+.submission-panel,
 .asset-panel,
 .deposit-ticket,
 .trade-ticket,
@@ -605,8 +607,13 @@ p {
 .close-dashboard,
 .macro-guide,
 .asset-learning-panel,
+.portfolio-donut-panel,
 .holdings-panel,
 .student-monitor {
+  padding: 1rem;
+}
+
+.submission-panel {
   padding: 1rem;
 }
 
@@ -730,8 +737,41 @@ p {
 .event-button:hover,
 .mobile-stock-list button:hover,
 .quick-actions button:hover,
-.issue-options button:hover {
+.issue-options button:hover,
+.event-filter-bar button:hover,
+.event-preset-bar button:hover {
   border-color: #2563eb;
+}
+
+.event-filter-bar,
+.event-preset-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.65rem;
+}
+
+.event-filter-bar button,
+.event-preset-bar button {
+  min-height: 34px;
+  border: 1px solid #d8e0ea;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #475569;
+  padding: 0.4rem 0.58rem;
+  font-size: 0.78rem;
+  font-weight: 950;
+}
+
+.event-filter-bar button.active {
+  border-color: #2563eb;
+  background: #e0ecff;
+  color: #1d4ed8;
+}
+
+.event-preset-bar button {
+  background: #fff7ed;
+  color: #9a3412;
 }
 
 .event-button span {
@@ -781,7 +821,8 @@ p {
   gap: 0.75rem;
 }
 
-.macro-guide {
+.macro-guide,
+.portfolio-donut-panel {
   display: grid;
   gap: 0.7rem;
 }
@@ -794,7 +835,7 @@ p {
 
 .macro-guide-tabs {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0.35rem;
 }
 
@@ -914,9 +955,57 @@ p {
   color: #94a3b8;
 }
 
+.portfolio-donut-panel {
+  box-shadow: none;
+}
+
+.donut-layout {
+  display: grid;
+  grid-template-columns: 116px minmax(0, 1fr);
+  align-items: center;
+  gap: 0.9rem;
+}
+
+.donut-chart {
+  width: 116px;
+  height: 116px;
+  transform: rotate(-90deg);
+}
+
+.donut-chart circle {
+  transition: stroke-dasharray 0.2s ease;
+}
+
+.donut-legend {
+  display: grid;
+  gap: 0.38rem;
+}
+
+.donut-legend span {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.4rem;
+  color: #475569;
+  font-size: 0.8rem;
+  font-weight: 850;
+}
+
+.donut-legend i {
+  width: 0.65rem;
+  height: 0.65rem;
+  flex: 0 0 auto;
+  border-radius: 999px;
+}
+
 .student-monitor {
   display: grid;
   gap: 0.9rem;
+}
+
+.submission-panel {
+  display: grid;
+  gap: 0.8rem;
 }
 
 .student-monitor-list {
@@ -927,6 +1016,89 @@ p {
   margin: 0;
   color: #475569;
   font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.submission-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.submission-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.submission-list article {
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr) minmax(120px, auto);
+  gap: 0.45rem;
+  align-items: center;
+  border: 1px solid #e1e7ef;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 0.65rem;
+}
+
+.submission-list article.missing {
+  border-color: #fed7aa;
+  background: #fff7ed;
+}
+
+.submission-list span,
+.submission-list small {
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+
+.submission-list strong {
+  color: #101827;
+}
+
+.submission-list em {
+  color: #1d4ed8;
+  font-size: 0.78rem;
+  font-style: normal;
+  font-weight: 950;
+  text-align: right;
+}
+
+.submission-list small {
+  grid-column: 2 / -1;
+}
+
+.submission-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: #eff6ff;
+  padding: 0.75rem;
+}
+
+.submission-box > div {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.submission-box span {
+  color: #1d4ed8;
+  font-size: 0.78rem;
+  font-weight: 950;
+}
+
+.submission-box strong {
+  color: #101827;
+}
+
+.submission-box p {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.82rem;
   line-height: 1.45;
 }
 
@@ -1516,6 +1688,28 @@ textarea {
   font-weight: 950;
 }
 
+.ranking-list.detailed li {
+  align-items: start;
+}
+
+.ranking-list.detailed li > div {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.ranking-list.detailed small {
+  color: #64748b;
+  font-size: 0.76rem;
+  font-weight: 850;
+}
+
+.ranking-list.detailed em {
+  max-width: 108px;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
 .news-list {
   display: grid;
   gap: 0.7rem;
@@ -1918,9 +2112,15 @@ input {
   .preview-grid,
   .metric-grid,
   .signal-grid,
+  .macro-guide-tabs,
+  .donut-layout,
   .report-summary,
   .student-monitor-list {
     grid-template-columns: 1fr;
+  }
+
+  .donut-chart {
+    justify-self: center;
   }
 
   .stock-row {

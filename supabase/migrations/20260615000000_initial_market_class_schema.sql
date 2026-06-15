@@ -7,11 +7,14 @@ create table if not exists public.rooms (
   current_round integer not null default 1 check (current_round between 1 and 12),
   phase text not null default 'setup' check (phase in ('setup', 'open', 'closed', 'ended', 'expired')),
   base_rate numeric(5, 2) not null default 3.5,
+  exchange_rate integer not null default 1350,
   is_paused boolean not null default false,
   created_at timestamptz not null default now(),
   expires_at timestamptz not null default now() + interval '24 hours',
   updated_at timestamptz not null default now()
 );
+
+alter table public.rooms add column if not exists exchange_rate integer not null default 1350;
 
 create table if not exists public.players (
   id uuid primary key default gen_random_uuid(),
@@ -114,6 +117,25 @@ create table if not exists public.reflections (
   unique (room_id, player_id)
 );
 
+create table if not exists public.final_submissions (
+  id uuid primary key default gen_random_uuid(),
+  room_id uuid not null references public.rooms(id) on delete cascade,
+  nickname text not null,
+  total_asset bigint not null default 0,
+  cash bigint not null default 0,
+  deposit bigint not null default 0,
+  cash_like_asset bigint not null default 0,
+  investment_asset bigint not null default 0,
+  return_rate numeric(8, 2) not null default 0,
+  investor_type text not null default '',
+  portfolio jsonb not null default '[]'::jsonb,
+  trade_logs jsonb not null default '[]'::jsonb,
+  round_logs jsonb not null default '[]'::jsonb,
+  reflection jsonb not null default '{}'::jsonb,
+  submitted_at timestamptz not null default now(),
+  unique (room_id, nickname)
+);
+
 do $$
 begin
   if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'rooms') then
@@ -127,6 +149,9 @@ begin
   end if;
   if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'round_events') then
     alter publication supabase_realtime add table public.round_events;
+  end if;
+  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'final_submissions') then
+    alter publication supabase_realtime add table public.final_submissions;
   end if;
 end;
 $$;
@@ -180,6 +205,26 @@ alter table public.round_events enable row level security;
 alter table public.trade_logs enable row level security;
 alter table public.round_logs enable row level security;
 alter table public.reflections enable row level security;
+alter table public.final_submissions enable row level security;
+
+drop policy if exists "classroom prototype rooms read" on public.rooms;
+drop policy if exists "classroom prototype rooms write" on public.rooms;
+drop policy if exists "classroom prototype players read" on public.players;
+drop policy if exists "classroom prototype players write" on public.players;
+drop policy if exists "classroom prototype assets read" on public.assets;
+drop policy if exists "classroom prototype assets write" on public.assets;
+drop policy if exists "classroom prototype portfolios read" on public.portfolios;
+drop policy if exists "classroom prototype portfolios write" on public.portfolios;
+drop policy if exists "classroom prototype round events read" on public.round_events;
+drop policy if exists "classroom prototype round events write" on public.round_events;
+drop policy if exists "classroom prototype trade logs read" on public.trade_logs;
+drop policy if exists "classroom prototype trade logs write" on public.trade_logs;
+drop policy if exists "classroom prototype round logs read" on public.round_logs;
+drop policy if exists "classroom prototype round logs write" on public.round_logs;
+drop policy if exists "classroom prototype reflections read" on public.reflections;
+drop policy if exists "classroom prototype reflections write" on public.reflections;
+drop policy if exists "classroom prototype final submissions read" on public.final_submissions;
+drop policy if exists "classroom prototype final submissions write" on public.final_submissions;
 
 create policy "classroom prototype rooms read" on public.rooms for select using (true);
 create policy "classroom prototype rooms write" on public.rooms for all using (true) with check (true);
@@ -204,3 +249,6 @@ create policy "classroom prototype round logs write" on public.round_logs for al
 
 create policy "classroom prototype reflections read" on public.reflections for select using (true);
 create policy "classroom prototype reflections write" on public.reflections for all using (true) with check (true);
+
+create policy "classroom prototype final submissions read" on public.final_submissions for select using (true);
+create policy "classroom prototype final submissions write" on public.final_submissions for all using (true) with check (true);
