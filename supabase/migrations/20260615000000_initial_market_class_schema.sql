@@ -1,0 +1,189 @@
+create extension if not exists pgcrypto;
+
+create table if not exists public.rooms (
+  id uuid primary key default gen_random_uuid(),
+  pin text not null unique check (pin ~ '^[0-9]{6}$'),
+  host_id text not null default 'geography',
+  current_round integer not null default 1 check (current_round between 1 and 12),
+  phase text not null default 'setup' check (phase in ('setup', 'open', 'closed', 'ended', 'expired')),
+  base_rate numeric(5, 2) not null default 3.5,
+  is_paused boolean not null default false,
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null default now() + interval '24 hours',
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.players (
+  id uuid primary key default gen_random_uuid(),
+  room_id uuid not null references public.rooms(id) on delete cascade,
+  nickname text not null,
+  cash bigint not null default 100000000,
+  deposit bigint not null default 0,
+  total_asset bigint not null default 100000000,
+  return_rate numeric(8, 2) not null default 0,
+  joined_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (room_id, nickname)
+);
+
+create table if not exists public.assets (
+  id uuid primary key default gen_random_uuid(),
+  room_id uuid not null references public.rooms(id) on delete cascade,
+  asset_key text not null,
+  type text not null check (type in ('stock', 'etf', 'property')),
+  country text not null,
+  name text not null,
+  sector text not null,
+  color text not null,
+  price bigint not null check (price >= 0),
+  history bigint[] not null default '{}',
+  delisted boolean not null default false,
+  delisted_round integer,
+  updated_at timestamptz not null default now(),
+  unique (room_id, asset_key)
+);
+
+create table if not exists public.portfolios (
+  id uuid primary key default gen_random_uuid(),
+  room_id uuid not null references public.rooms(id) on delete cascade,
+  player_id uuid not null references public.players(id) on delete cascade,
+  asset_id uuid not null references public.assets(id) on delete cascade,
+  shares integer not null default 0 check (shares >= 0),
+  updated_at timestamptz not null default now(),
+  unique (player_id, asset_id)
+);
+
+create table if not exists public.round_events (
+  id uuid primary key default gen_random_uuid(),
+  room_id uuid not null references public.rooms(id) on delete cascade,
+  round integer not null check (round between 1 and 12),
+  template_id text not null,
+  title text not null,
+  detail text not null,
+  principle text not null,
+  affected_assets text[] not null default '{}',
+  discussion_prompt text not null default '',
+  impact jsonb not null default '{}'::jsonb,
+  probability numeric(4, 3) not null default 0.75,
+  resolved boolean not null default false,
+  did_apply boolean,
+  outcome_type text check (outcome_type in ('event', 'expectation', 'failed')),
+  resolved_impact jsonb not null default '{}'::jsonb,
+  failure_title text,
+  failure_detail text,
+  expectation_title text,
+  expectation_detail text,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.trade_logs (
+  id uuid primary key default gen_random_uuid(),
+  room_id uuid not null references public.rooms(id) on delete cascade,
+  player_id uuid not null references public.players(id) on delete cascade,
+  round integer not null check (round between 1 and 12),
+  type text not null check (type in ('buy', 'sell', 'deposit', 'withdraw')),
+  asset_id uuid references public.assets(id) on delete set null,
+  amount bigint not null default 0,
+  shares integer not null default 0,
+  detail text not null default '',
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.round_logs (
+  id uuid primary key default gen_random_uuid(),
+  room_id uuid not null references public.rooms(id) on delete cascade,
+  player_id uuid references public.players(id) on delete cascade,
+  round integer not null check (round between 1 and 12),
+  total_asset bigint not null default 0,
+  cash bigint not null default 0,
+  deposit bigint not null default 0,
+  holdings_summary text not null default '',
+  events_summary text not null default '',
+  created_at timestamptz not null default now(),
+  unique (room_id, player_id, round)
+);
+
+create table if not exists public.reflections (
+  id uuid primary key default gen_random_uuid(),
+  room_id uuid not null references public.rooms(id) on delete cascade,
+  player_id uuid not null references public.players(id) on delete cascade,
+  good text not null default '',
+  improve text not null default '',
+  next_plan text not null default '',
+  updated_at timestamptz not null default now(),
+  unique (room_id, player_id)
+);
+
+create or replace view public.active_rooms as
+select *
+from public.rooms
+where expires_at > now()
+  and phase <> 'expired';
+
+create or replace function public.touch_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
+drop trigger if exists touch_rooms_updated_at on public.rooms;
+create trigger touch_rooms_updated_at
+before update on public.rooms
+for each row execute function public.touch_updated_at();
+
+drop trigger if exists touch_players_updated_at on public.players;
+create trigger touch_players_updated_at
+before update on public.players
+for each row execute function public.touch_updated_at();
+
+drop trigger if exists touch_assets_updated_at on public.assets;
+create trigger touch_assets_updated_at
+before update on public.assets
+for each row execute function public.touch_updated_at();
+
+drop trigger if exists touch_portfolios_updated_at on public.portfolios;
+create trigger touch_portfolios_updated_at
+before update on public.portfolios
+for each row execute function public.touch_updated_at();
+
+drop trigger if exists touch_reflections_updated_at on public.reflections;
+create trigger touch_reflections_updated_at
+before update on public.reflections
+for each row execute function public.touch_updated_at();
+
+alter table public.rooms enable row level security;
+alter table public.players enable row level security;
+alter table public.assets enable row level security;
+alter table public.portfolios enable row level security;
+alter table public.round_events enable row level security;
+alter table public.trade_logs enable row level security;
+alter table public.round_logs enable row level security;
+alter table public.reflections enable row level security;
+
+create policy "classroom prototype rooms read" on public.rooms for select using (true);
+create policy "classroom prototype rooms write" on public.rooms for all using (true) with check (true);
+
+create policy "classroom prototype players read" on public.players for select using (true);
+create policy "classroom prototype players write" on public.players for all using (true) with check (true);
+
+create policy "classroom prototype assets read" on public.assets for select using (true);
+create policy "classroom prototype assets write" on public.assets for all using (true) with check (true);
+
+create policy "classroom prototype portfolios read" on public.portfolios for select using (true);
+create policy "classroom prototype portfolios write" on public.portfolios for all using (true) with check (true);
+
+create policy "classroom prototype round events read" on public.round_events for select using (true);
+create policy "classroom prototype round events write" on public.round_events for all using (true) with check (true);
+
+create policy "classroom prototype trade logs read" on public.trade_logs for select using (true);
+create policy "classroom prototype trade logs write" on public.trade_logs for all using (true) with check (true);
+
+create policy "classroom prototype round logs read" on public.round_logs for select using (true);
+create policy "classroom prototype round logs write" on public.round_logs for all using (true) with check (true);
+
+create policy "classroom prototype reflections read" on public.reflections for select using (true);
+create policy "classroom prototype reflections write" on public.reflections for all using (true) with check (true);

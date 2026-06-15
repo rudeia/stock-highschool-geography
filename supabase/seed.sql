@@ -1,0 +1,2 @@
+-- Seed data is intentionally empty for now.
+-- Each classroom room creates its own randomized asset set.
