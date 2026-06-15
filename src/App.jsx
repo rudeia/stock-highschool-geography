@@ -31,6 +31,8 @@ const DEFAULT_EVENT_PROBABILITY = 0.75;
 const DELISTING_START_ROUND = 9;
 const DELISTING_PROBABILITY = 0.2;
 const STRONG_NEGATIVE_IMPACT = -0.07;
+const MIN_EVENT_IMPACT = 0.1;
+const PASSIVE_MARKET_MOVE = 0.05;
 const ROOM_TTL_MS = 24 * 60 * 60 * 1000;
 const HOST_CREDENTIALS = {
   id: 'geography',
@@ -400,6 +402,21 @@ function getHoldingSummary(portfolio, assets) {
     : '보유 종목 없음';
 }
 
+function getPassiveMarketMove() {
+  return Number(((Math.random() * 2 - 1) * PASSIVE_MARKET_MOVE).toFixed(3));
+}
+
+function normalizeEventImpact(impact = {}) {
+  return Object.fromEntries(
+    Object.entries(impact).map(([assetId, value]) => {
+      if (value === 0) return [assetId, 0];
+      const direction = value > 0 ? 1 : -1;
+      const adjustedValue = direction * Math.max(Math.abs(value), MIN_EVENT_IMPACT);
+      return [assetId, Number(adjustedValue.toFixed(3))];
+    }),
+  );
+}
+
 function moveAssetsLocally(currentAssets, modifier = {}, delistedIds = [], roundNumber = 1) {
   return currentAssets.map((asset) => {
     if (asset.delisted) return asset;
@@ -413,7 +430,8 @@ function moveAssetsLocally(currentAssets, modifier = {}, delistedIds = [], round
       };
     }
     const eventImpact = modifier[asset.id] ?? 0;
-    const nextPrice = Math.max(1000, Math.round((asset.price * (1 + eventImpact)) / 100) * 100);
+    const marketMove = getPassiveMarketMove();
+    const nextPrice = Math.max(1000, Math.round((asset.price * (1 + marketMove + eventImpact)) / 100) * 100);
     return {
       ...asset,
       price: nextPrice,
@@ -1670,12 +1688,13 @@ export function App() {
     const resolvedEvents = currentRoundEvents.map((event) => {
       const didApply = Math.random() < (event.probability ?? DEFAULT_EVENT_PROBABILITY);
       const outcomeType = didApply ? (Math.random() < 0.7 ? 'event' : 'expectation') : 'failed';
+      const adjustedImpact = normalizeEventImpact(event.impact);
       return {
         ...event,
         resolved: true,
         didApply,
         outcomeType,
-        resolvedImpact: didApply ? event.impact : {},
+        resolvedImpact: didApply ? adjustedImpact : {},
         expectationTitle: `${event.title} 실제 발표 전 기대감 선반영`,
         expectationDetail: '실제 이벤트가 확정되지는 않았지만, 투자자들이 가능성을 먼저 반영하면서 가격이 움직였습니다.',
       };
@@ -1683,7 +1702,7 @@ export function App() {
 
     const combinedImpact = resolvedEvents.reduce((acc, event) => {
       if (!event.didApply) return acc;
-      Object.entries(event.impact).forEach(([assetId, value]) => {
+      Object.entries(event.resolvedImpact).forEach(([assetId, value]) => {
         acc[assetId] = (acc[assetId] ?? 0) + value;
       });
       return acc;
