@@ -22,6 +22,15 @@ import {
   Wallet,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
+import {
+  buildNewRoomState,
+  buildRegisteredIssue,
+  buildRoundLog,
+  buildStudentSnapshot,
+  buildTradeLog,
+  classroomRoles,
+  getRoomCapacityState,
+} from './lib/classroomStore.js';
 import { supabaseConfigured } from './lib/supabaseClient.js';
 
 const INITIAL_CASH = 100_000_000;
@@ -1097,11 +1106,11 @@ function AppHeader({ view, setView, hostAuthenticated }) {
       </button>
 
       <nav className="view-switch" aria-label="화면 전환">
-        <button className={view === 'host' || view === 'host-login' ? 'active' : ''} type="button" onClick={() => setView(hostAuthenticated ? 'host' : 'host-login')}>
+        <button className={view === 'host' || view === 'host-login' ? 'active' : ''} type="button" data-role={classroomRoles.host} onClick={() => setView(hostAuthenticated ? 'host' : 'host-login')}>
           <School size={18} aria-hidden="true" />
           교사
         </button>
-        <button className={view === 'student' ? 'active' : ''} type="button" onClick={() => setView('student')}>
+        <button className={view === 'student' ? 'active' : ''} type="button" data-role={classroomRoles.student} onClick={() => setView('student')}>
           <Smartphone size={18} aria-hidden="true" />
           학생
         </button>
@@ -1663,15 +1672,18 @@ export function App() {
   const currentRoundEvents = triggeredEventsByRound[round] ?? [];
   const expiresAt = roomCreatedAt + ROOM_TTL_MS;
   const gameFinished = phase === 'ended' || (round === TOTAL_ROUNDS && phase === 'closed');
-  const playerCount = players.length + (joined ? 1 : 0);
-  const roomFull = !joined && playerCount >= MAX_PLAYERS_PER_ROOM;
+  const { playerCount, roomFull } = getRoomCapacityState({
+    basePlayerCount: players.length,
+    joined,
+    maxPlayers: MAX_PLAYERS_PER_ROOM,
+  });
   const studentHoldingsValue = getPortfolioValue(portfolio, assets);
-  const activeStudent = {
+  const activeStudent = buildStudentSnapshot({
     id: 'active-student',
     name: joined ? nickname : `${nickname || '학생'} (대기)`,
     totalAsset: cash + deposit + studentHoldingsValue,
     holdings: getHoldingRows(portfolio, assets).map(({ asset, shares }) => `${asset.name} ${shares.toLocaleString('ko-KR')}주`),
-  };
+  });
 
   useEffect(() => {
     const checkExpiry = () => {
@@ -1703,12 +1715,13 @@ export function App() {
 
   function addTradeLog(type, detail) {
     setTradeLogs((current) => [
-      {
-        id: `${Date.now()}-${type}-${current.length}`,
+      buildTradeLog({
         round,
         type,
         detail,
-      },
+        sequence: current.length,
+        now: Date.now(),
+      }),
       ...current,
     ]);
   }
@@ -1719,28 +1732,38 @@ export function App() {
 
   function createNewRoom() {
     const nextPin = String(Math.floor(100000 + Math.random() * 900000));
-    setRoomPin(nextPin);
-    setRoomCreatedAt(Date.now());
-    setRoomExpired(false);
-    setRound(1);
-    setPhase('setup');
-    setIsPaused(false);
-    setBaseRate(INITIAL_BASE_RATE);
-    setAssets(createRandomizedAssets());
-    setTriggeredEventsByRound({});
-    setLatestRoundSummary(null);
-    setIssueDraft('');
-    setNewsFeed([{ id: `opening-${nextPin}`, round: 1, title: '새 방 생성', detail: '방마다 초기 가격 후보 3개 중 하나가 랜덤으로 배치되었습니다.' }]);
-    setPlayers(mockPlayers);
-    setCash(INITIAL_CASH);
-    setDeposit(0);
-    setPortfolio({});
-    setSelectedAssetId(initialTradableAssets[0].id);
-    setTradeAmount('10000000');
-    setDepositAmount('10000000');
-    setTradeLogs([]);
-    setRoundLogs([]);
-    setReflection({ good: '', improve: '', next: '' });
+    const nextRoom = buildNewRoomState({
+      pin: nextPin,
+      now: Date.now(),
+      initialBaseRate: INITIAL_BASE_RATE,
+      assets: createRandomizedAssets(),
+      players: mockPlayers,
+      initialCash: INITIAL_CASH,
+      initialAssetId: initialTradableAssets[0].id,
+    });
+
+    setRoomPin(nextRoom.roomPin);
+    setRoomCreatedAt(nextRoom.roomCreatedAt);
+    setRoomExpired(nextRoom.roomExpired);
+    setRound(nextRoom.round);
+    setPhase(nextRoom.phase);
+    setIsPaused(nextRoom.isPaused);
+    setBaseRate(nextRoom.baseRate);
+    setAssets(nextRoom.assets);
+    setTriggeredEventsByRound(nextRoom.triggeredEventsByRound);
+    setLatestRoundSummary(nextRoom.latestRoundSummary);
+    setIssueDraft(nextRoom.issueDraft);
+    setNewsFeed(nextRoom.newsFeed);
+    setPlayers(nextRoom.players);
+    setCash(nextRoom.cash);
+    setDeposit(nextRoom.deposit);
+    setPortfolio(nextRoom.portfolio);
+    setSelectedAssetId(nextRoom.selectedAssetId);
+    setTradeAmount(nextRoom.tradeAmount);
+    setDepositAmount(nextRoom.depositAmount);
+    setTradeLogs(nextRoom.tradeLogs);
+    setRoundLogs(nextRoom.roundLogs);
+    setReflection(nextRoom.reflection);
   }
 
   function handleNextRound() {
@@ -1755,17 +1778,14 @@ export function App() {
   function handleRegisterIssue(event, issueOption = null) {
     if (roomExpired || currentRoundEvents.length >= MAX_EVENTS_PER_ROUND) return;
 
-    const issueTitle = issueOption?.title ?? (issueDraft.trim() || event.title);
-    const registeredEvent = {
-      ...event,
-      id: `${event.id}-${round}-${Date.now()}`,
-      templateId: event.id,
-      title: issueTitle,
-      detail: issueOption?.detail ?? `${issueTitle} (${event.title} 유형)`,
-      failureTitle: issueOption?.failureTitle ?? `${issueTitle} 영향 제한`,
-      failureDetail: issueOption?.failureDetail ?? '후속 보도에서 이슈의 실제 영향이 크지 않은 것으로 확인됐습니다.',
-      probability: event.probability ?? DEFAULT_EVENT_PROBABILITY,
-    };
+    const registeredEvent = buildRegisteredIssue({
+      event,
+      issueOption,
+      issueDraft,
+      round,
+      now: Date.now(),
+      defaultProbability: DEFAULT_EVENT_PROBABILITY,
+    });
 
     setTriggeredEventsByRound((current) => ({
       ...current,
@@ -1826,13 +1846,13 @@ export function App() {
     setLatestRoundSummary({ round, events: resolvedEvents, delistedAssets });
     setPhase('closed');
     setRoundLogs((current) => [
-      {
-        id: `${round}-${Date.now()}`,
+      buildRoundLog({
         round,
+        now: Date.now(),
         totalAsset: getTotalAsset({ cash, deposit: nextDeposit, portfolio, assets: nextAssets }),
         holdings: getHoldingSummary(portfolio, nextAssets),
         events: resolvedEvents.map((event) => `${event.title}: ${getResultLabel(event, false)}`).join(' / '),
-      },
+      }),
       ...current.filter((item) => item.round !== round),
     ].sort((a, b) => a.round - b.round));
     const failedEvents = resolvedEvents.filter((event) => !event.didApply);
