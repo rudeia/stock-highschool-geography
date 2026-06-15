@@ -1366,7 +1366,7 @@ function getInvestorType({ cashLikeAsset, holdingsValue, portfolioRows, totalAss
   return '균형 분산형 투자자';
 }
 
-function buildFinalSubmissionReport({ nickname, cash, deposit, portfolio, assets, tradeLogs, roundLogs, reflection }) {
+function buildFinalSubmissionReport({ nickname, cash, deposit, depositInterestEarned = 0, portfolio, assets, tradeLogs, roundLogs, reflection }) {
   const portfolioRows = getHoldingRows(portfolio, assets);
   const investmentAsset = portfolioRows.reduce((sum, row) => sum + row.value, 0);
   const cashLikeAsset = cash + deposit;
@@ -1388,6 +1388,7 @@ function buildFinalSubmissionReport({ nickname, cash, deposit, portfolio, assets
     totalAsset,
     cash,
     deposit,
+    depositInterestEarned,
     cashLikeAsset,
     investmentAsset,
     returnRate,
@@ -1777,6 +1778,7 @@ function FinalReport({
   nickname,
   cash,
   deposit,
+  depositInterestEarned,
   portfolio,
   assets,
   tradeLogs,
@@ -1789,7 +1791,7 @@ function FinalReport({
   const holdingsValue = getPortfolioValue(portfolio, assets);
   const totalAsset = cash + deposit + holdingsValue;
   const returnRate = ((totalAsset - INITIAL_CASH) / INITIAL_CASH) * 100;
-  const investorType = submission?.investorType ?? buildFinalSubmissionReport({ nickname, cash, deposit, portfolio, assets, tradeLogs, roundLogs, reflection }).investorType;
+  const investorType = submission?.investorType ?? buildFinalSubmissionReport({ nickname, cash, deposit, depositInterestEarned, portfolio, assets, tradeLogs, roundLogs, reflection }).investorType;
 
   return (
     <section className="final-report" aria-label="나의 투자 결과 보고서">
@@ -1833,6 +1835,7 @@ function FinalReport({
         <h3>최종 보유 현황</h3>
         <p>{getHoldingSummary(portfolio, assets)}</p>
         <p>현금성 자산 {formatWon(cash + deposit)} · 투자 평가금 {formatWon(holdingsValue)} · 총자산 {formatWon(totalAsset)}</p>
+        <p>예금 이자 수익 {formatWon(depositInterestEarned)} · 예금은 라운드마다 이자가 원금에 더해지는 분기 복리로 계산됩니다.</p>
       </div>
 
       <div className="report-section">
@@ -2408,6 +2411,7 @@ function StudentView({
   portfolio,
   cash,
   deposit,
+  depositInterestEarned,
   baseRate,
   exchangeRate,
   tradeLogs,
@@ -2504,6 +2508,7 @@ function StudentView({
             nickname={nickname}
             cash={cash}
             deposit={deposit}
+            depositInterestEarned={depositInterestEarned}
             portfolio={portfolio}
             assets={assets}
             tradeLogs={tradeLogs}
@@ -2560,7 +2565,7 @@ function StudentView({
         <section className="deposit-ticket" aria-labelledby="deposit-heading">
           <div>
             <h2 id="deposit-heading">예금 계좌</h2>
-            <span>다음 라운드 예상 이자 {formatWon(nextInterest)}</span>
+            <span>분기 복리 적용 · 다음 라운드 예상 이자 {formatWon(nextInterest)}</span>
           </div>
           <label>
             예금 금액
@@ -2681,6 +2686,8 @@ export function App() {
   const [joined, setJoined] = useState(false);
   const [cash, setCash] = useState(INITIAL_CASH);
   const [deposit, setDeposit] = useState(0);
+  const [depositPrincipal, setDepositPrincipal] = useState(0);
+  const [depositInterestEarned, setDepositInterestEarned] = useState(0);
   const [portfolio, setPortfolio] = useState({});
   const [selectedAssetId, setSelectedAssetId] = useState(initialTradableAssets[0].id);
   const [tradeAmount, setTradeAmount] = useState('10000000');
@@ -2878,6 +2885,8 @@ export function App() {
     setPlayers(nextRoom.players);
     setCash(nextRoom.cash);
     setDeposit(nextRoom.deposit);
+    setDepositPrincipal(0);
+    setDepositInterestEarned(0);
     setPortfolio(nextRoom.portfolio);
     setSelectedAssetId(nextRoom.selectedAssetId);
     setTradeAmount(nextRoom.tradeAmount);
@@ -3014,10 +3023,15 @@ export function App() {
       : [];
 
     const nextAssets = moveAssetsLocally(assets, combinedImpact, delistedAssets.map((asset) => asset.id), round);
-    const nextDeposit = Math.round(deposit * (1 + getDepositRate(nextBaseRate) / 100 / 4));
+    const depositInterest = Math.round(deposit * (getDepositRate(nextBaseRate) / 100 / 4));
+    const nextDeposit = deposit + depositInterest;
 
     setAssets(nextAssets);
     setDeposit(nextDeposit);
+    if (depositInterest > 0) {
+      setDepositInterestEarned((current) => current + depositInterest);
+      addTradeLog('예금 이자', `${round}라운드 분기 복리 이자 +${formatWon(depositInterest)}`);
+    }
     setLatestRoundSummary({ round, events: resolvedEvents, delistedAssets, macroMove });
     setPhase('closed');
     setRoundLogs((current) => [
@@ -3088,6 +3102,7 @@ export function App() {
       nickname: nickname.trim(),
       cash,
       deposit,
+      depositInterestEarned,
       portfolio,
       assets,
       tradeLogs,
@@ -3110,13 +3125,14 @@ export function App() {
 
   function handleDownloadSubmissions() {
     const rows = [
-      ['순위', '이름', '총자산', '현금성자산', '투자평가금', '수익률', '투자성향', '보유자산', '잘한점', '부족한점', '다음계획'],
+      ['순위', '이름', '총자산', '현금성자산', '투자평가금', '예금이자수익', '수익률', '투자성향', '보유자산', '잘한점', '부족한점', '다음계획'],
       ...[...submissions].sort((a, b) => b.totalAsset - a.totalAsset).map((submission, index) => [
         index + 1,
         submission.nickname,
         submission.totalAsset,
         submission.cashLikeAsset,
         submission.investmentAsset,
+        submission.depositInterestEarned ?? 0,
         `${submission.returnRate.toFixed(1)}%`,
         submission.investorType,
         submission.portfolio?.map((item) => `${item.name} ${item.shares}주 ${Math.round((item.ratio ?? 0) * 100)}%`).join(' / ') ?? '',
@@ -3156,6 +3172,7 @@ export function App() {
     if (amount <= 0) return;
     setCash((current) => current - amount);
     setDeposit((current) => current + amount);
+    setDepositPrincipal((current) => current + amount);
     addTradeLog('예금', `${formatWon(amount)} 예치`);
   }
 
@@ -3163,7 +3180,12 @@ export function App() {
     if (roomExpired || gameFinished) return;
     const amount = Math.min(parseAmount(depositAmount), deposit);
     if (amount <= 0) return;
+    const withdrawRatio = deposit > 0 ? amount / deposit : 0;
+    const principalReduction = Math.min(depositPrincipal, Math.round(depositPrincipal * withdrawRatio));
+    const interestReduction = Math.min(depositInterestEarned, Math.max(0, amount - principalReduction));
     setDeposit((current) => current - amount);
+    setDepositPrincipal((current) => Math.max(0, current - principalReduction));
+    setDepositInterestEarned((current) => Math.max(0, current - interestReduction));
     setCash((current) => current + amount);
     addTradeLog('예금 해지', `${formatWon(amount)} 인출`);
   }
@@ -3243,6 +3265,7 @@ export function App() {
           portfolio={portfolio}
           cash={cash}
           deposit={deposit}
+          depositInterestEarned={depositInterestEarned}
           baseRate={baseRate}
           exchangeRate={exchangeRate}
           tradeLogs={tradeLogs}

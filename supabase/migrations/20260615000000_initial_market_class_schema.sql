@@ -124,6 +124,7 @@ create table if not exists public.final_submissions (
   total_asset bigint not null default 0,
   cash bigint not null default 0,
   deposit bigint not null default 0,
+  deposit_interest_earned bigint not null default 0,
   cash_like_asset bigint not null default 0,
   investment_asset bigint not null default 0,
   return_rate numeric(8, 2) not null default 0,
@@ -135,6 +136,8 @@ create table if not exists public.final_submissions (
   submitted_at timestamptz not null default now(),
   unique (room_id, nickname)
 );
+
+alter table public.final_submissions add column if not exists deposit_interest_earned bigint not null default 0;
 
 do $$
 begin
