@@ -51,10 +51,18 @@ VITE_SUPABASE_ANON_KEY=your-supabase-anon-key
 4. Project URL과 Publishable key를 Vercel 환경변수에 등록합니다.
 5. Vercel에서 다시 Deploy 합니다.
 
-## 5. 현재 단계의 한계
+## 5. Supabase 연동 범위
 
-현재 앱은 Supabase 테이블 설계와 연결 준비가 되어 있지만, 화면 상태의 대부분은 아직 브라우저 안에서 움직입니다.
-다음 단계에서 `rooms`, `players`, `assets`, `portfolios`, `round_events`, `trade_logs`, `round_logs`, `reflections` 테이블에 실제 읽기/쓰기를 연결하면 여러 기기 실시간 수업 운영이 가능해집니다.
+환경변수를 넣으면 아래 항목은 Supabase에 저장되고 Realtime으로 갱신됩니다.
+
+- 방 생성과 24시간 만료 정보
+- 현재 라운드, 장 진행 상태, 일시정지, 게임 종료
+- 방별 랜덤 초기 자산 가격과 장 마감 후 자산 가격
+- 교사가 등록한 라운드별 이슈와 장 마감 판정 결과
+- 학생 닉네임, 현금, 예금, 총자산, 수익률 기반 참여 목록
+
+학생별 상세 거래 로그, 포트폴리오 수량, 최종 회고는 현재 브라우저 화면 중심으로 동작합니다.
+실제 수업에서 학생별 포트폴리오까지 여러 기기에서 완전히 이어서 쓰려면 `portfolios`, `trade_logs`, `round_logs`, `reflections` 테이블 쓰기를 추가로 확장하면 됩니다.
 
 ## 6. 보안 메모
 

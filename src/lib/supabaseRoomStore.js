@@ -1,0 +1,241 @@
+import { supabase, supabaseConfigured } from './supabaseClient.js';
+
+function toIso(value) {
+  return new Date(value).toISOString();
+}
+
+function toAssetRow(roomId, asset) {
+  return {
+    room_id: roomId,
+    asset_key: asset.id,
+    type: asset.type,
+    country: asset.country,
+    name: asset.name,
+    sector: asset.sector,
+    color: asset.color,
+    price: asset.price,
+    history: asset.history ?? [],
+    delisted: Boolean(asset.delisted),
+    delisted_round: asset.delistedRound ?? null,
+  };
+}
+
+function fromAssetRow(row) {
+  return {
+    id: row.asset_key,
+    type: row.type,
+    country: row.country,
+    name: row.name,
+    sector: row.sector,
+    color: row.color,
+    price: Number(row.price),
+    history: row.history?.length ? row.history.map(Number) : [Number(row.price)],
+    delisted: row.delisted,
+    delistedRound: row.delisted_round ?? undefined,
+  };
+}
+
+function toEventRow(roomId, event, round) {
+  return {
+    room_id: roomId,
+    round,
+    template_id: event.templateId ?? event.id,
+    title: event.title,
+    detail: event.detail,
+    principle: event.principle,
+    affected_assets: event.affectedAssets ?? [],
+    discussion_prompt: event.discussionPrompt ?? '',
+    impact: event.impact ?? {},
+    probability: event.probability ?? 0.75,
+    resolved: Boolean(event.resolved),
+    did_apply: event.didApply ?? null,
+    outcome_type: event.outcomeType ?? null,
+    resolved_impact: event.resolvedImpact ?? {},
+    failure_title: event.failureTitle ?? null,
+    failure_detail: event.failureDetail ?? null,
+    expectation_title: event.expectationTitle ?? null,
+    expectation_detail: event.expectationDetail ?? null,
+  };
+}
+
+function fromEventRow(row) {
+  return {
+    id: row.id,
+    remoteId: row.id,
+    round: row.round,
+    templateId: row.template_id,
+    title: row.title,
+    detail: row.detail,
+    principle: row.principle,
+    affectedAssets: row.affected_assets ?? [],
+    discussionPrompt: row.discussion_prompt ?? '',
+    impact: row.impact ?? {},
+    probability: Number(row.probability ?? 0.75),
+    resolved: row.resolved,
+    didApply: row.did_apply ?? undefined,
+    outcomeType: row.outcome_type ?? undefined,
+    resolvedImpact: row.resolved_impact ?? {},
+    failureTitle: row.failure_title ?? undefined,
+    failureDetail: row.failure_detail ?? undefined,
+    expectationTitle: row.expectation_title ?? undefined,
+    expectationDetail: row.expectation_detail ?? undefined,
+  };
+}
+
+function fromPlayerRow(row) {
+  return {
+    id: row.id,
+    name: row.nickname,
+    returnRate: Number(row.return_rate ?? 0),
+    cash: Number(row.cash ?? 0),
+    deposit: Number(row.deposit ?? 0),
+    totalAsset: Number(row.total_asset ?? 0),
+    holdings: [],
+  };
+}
+
+async function fetchRoomBundle(query) {
+  const { data: room, error: roomError } = await query.single();
+  if (roomError) {
+    if (roomError.code === 'PGRST116') return null;
+    throw roomError;
+  }
+
+  const [assetsResult, eventsResult, playersResult] = await Promise.all([
+    supabase.from('assets').select('*').eq('room_id', room.id).order('name', { ascending: true }),
+    supabase.from('round_events').select('*').eq('room_id', room.id).order('created_at', { ascending: true }),
+    supabase.from('players').select('*').eq('room_id', room.id).order('joined_at', { ascending: true }),
+  ]);
+
+  if (assetsResult.error) throw assetsResult.error;
+  if (eventsResult.error) throw eventsResult.error;
+  if (playersResult.error) throw playersResult.error;
+
+  return {
+    room,
+    assets: assetsResult.data.map(fromAssetRow),
+    events: eventsResult.data.map(fromEventRow),
+    players: playersResult.data.map(fromPlayerRow),
+  };
+}
+
+export async function createRemoteRoom({ pin, now, baseRate, assets }) {
+  if (!supabaseConfigured) return null;
+
+  const { data: existing } = await supabase.from('rooms').select('id').eq('pin', pin).maybeSingle();
+  if (existing?.id) {
+    await supabase.from('rooms').delete().eq('id', existing.id);
+  }
+
+  const { data: room, error } = await supabase
+    .from('rooms')
+    .insert({
+      pin,
+      current_round: 1,
+      phase: 'setup',
+      base_rate: baseRate,
+      is_paused: false,
+      created_at: toIso(now),
+      expires_at: toIso(now + 24 * 60 * 60 * 1000),
+    })
+    .select()
+    .single();
+
+  if (error) throw error;
+
+  const { error: assetsError } = await supabase.from('assets').insert(assets.map((asset) => toAssetRow(room.id, asset)));
+  if (assetsError) throw assetsError;
+
+  return fetchRemoteRoomById(room.id);
+}
+
+export async function fetchRemoteRoomByPin(pin) {
+  if (!supabaseConfigured || !/^[0-9]{6}$/.test(pin)) return null;
+  return fetchRoomBundle(supabase.from('rooms').select('*').eq('pin', pin));
+}
+
+export async function fetchRemoteRoomById(roomId) {
+  if (!supabaseConfigured || !roomId) return null;
+  return fetchRoomBundle(supabase.from('rooms').select('*').eq('id', roomId));
+}
+
+export async function updateRemoteRoom(roomId, patch) {
+  if (!supabaseConfigured || !roomId) return null;
+  const { error } = await supabase.from('rooms').update(patch).eq('id', roomId);
+  if (error) throw error;
+  return true;
+}
+
+export async function upsertRemoteAssets(roomId, assets) {
+  if (!supabaseConfigured || !roomId) return null;
+  const { error } = await supabase
+    .from('assets')
+    .upsert(assets.map((asset) => toAssetRow(roomId, asset)), { onConflict: 'room_id,asset_key' });
+  if (error) throw error;
+  return true;
+}
+
+export async function insertRemoteIssue(roomId, event, round) {
+  if (!supabaseConfigured || !roomId) return null;
+  const { data, error } = await supabase.from('round_events').insert(toEventRow(roomId, event, round)).select().single();
+  if (error) throw error;
+  return fromEventRow(data);
+}
+
+export async function updateRemoteIssues(roomId, events, round) {
+  if (!supabaseConfigured || !roomId) return null;
+  await Promise.all(
+    events.map((event) => {
+      if (event.remoteId) {
+        return supabase.from('round_events').update(toEventRow(roomId, event, round)).eq('id', event.remoteId);
+      }
+      return supabase.from('round_events').insert(toEventRow(roomId, event, round));
+    }),
+  );
+  return true;
+}
+
+export async function upsertRemotePlayer(roomId, player) {
+  if (!supabaseConfigured || !roomId || !player?.name) return null;
+  const { data, error } = await supabase
+    .from('players')
+    .upsert(
+      {
+        room_id: roomId,
+        nickname: player.name,
+        cash: Math.round(player.cash ?? 0),
+        deposit: Math.round(player.deposit ?? 0),
+        total_asset: Math.round(player.totalAsset ?? 0),
+        return_rate: Number(player.returnRate ?? 0),
+      },
+      { onConflict: 'room_id,nickname' },
+    )
+    .select()
+    .single();
+  if (error) throw error;
+  return fromPlayerRow(data);
+}
+
+export function groupEventsByRound(events) {
+  return events.reduce((acc, event) => {
+    const round = event.round ?? 1;
+    acc[round] = [...(acc[round] ?? []), event];
+    return acc;
+  }, {});
+}
+
+export function subscribeRemoteRoom(roomId, onChange) {
+  if (!supabaseConfigured || !roomId) return () => {};
+
+  const channel = supabase
+    .channel(`market-class-room-${roomId}`)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms', filter: `id=eq.${roomId}` }, onChange)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'assets', filter: `room_id=eq.${roomId}` }, onChange)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'round_events', filter: `room_id=eq.${roomId}` }, onChange)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'players', filter: `room_id=eq.${roomId}` }, onChange)
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}

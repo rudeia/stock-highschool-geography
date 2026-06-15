@@ -114,6 +114,23 @@ create table if not exists public.reflections (
   unique (room_id, player_id)
 );
 
+do $$
+begin
+  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'rooms') then
+    alter publication supabase_realtime add table public.rooms;
+  end if;
+  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'players') then
+    alter publication supabase_realtime add table public.players;
+  end if;
+  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'assets') then
+    alter publication supabase_realtime add table public.assets;
+  end if;
+  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'round_events') then
+    alter publication supabase_realtime add table public.round_events;
+  end if;
+end;
+$$;
+
 create or replace view public.active_rooms as
 select *
 from public.rooms

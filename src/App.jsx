@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   BadgePercent,
@@ -32,6 +32,18 @@ import {
   getRoomCapacityState,
 } from './lib/classroomStore.js';
 import { supabaseConfigured } from './lib/supabaseClient.js';
+import {
+  createRemoteRoom,
+  fetchRemoteRoomById,
+  fetchRemoteRoomByPin,
+  groupEventsByRound,
+  insertRemoteIssue,
+  subscribeRemoteRoom,
+  updateRemoteIssues,
+  updateRemoteRoom,
+  upsertRemoteAssets,
+  upsertRemotePlayer,
+} from './lib/supabaseRoomStore.js';
 
 const INITIAL_CASH = 100_000_000;
 const TOTAL_ROUNDS = 12;
@@ -1571,7 +1583,7 @@ function AppHeader({ view, setView, hostAuthenticated }) {
   );
 }
 
-function HomeView({ setView, roomPin, round, playerCount, baseRate, expiresAt, roomExpired, onCreateRoom, hostAuthenticated }) {
+function HomeView({ setView, roomPin, round, playerCount, baseRate, expiresAt, roomExpired, syncStatus, onCreateRoom, hostAuthenticated }) {
   return (
     <main className="home-view">
       <section className="hero-band">
@@ -1628,7 +1640,7 @@ function HomeView({ setView, roomPin, round, playerCount, baseRate, expiresAt, r
             </div>
           </div>
           <p className="sync-note">
-            {supabaseConfigured ? 'Supabase 연결 정보가 감지되었습니다.' : '환경변수를 추가하면 Supabase Realtime으로 연결할 수 있습니다.'}
+            {syncStatus}
           </p>
           <JoinQrCard roomPin={roomPin} />
           <RoomExpiryNotice roomPin={roomPin} expiresAt={expiresAt} expired={roomExpired} onCreateRoom={onCreateRoom} />
@@ -2118,6 +2130,9 @@ export function App() {
   const [tradeLogs, setTradeLogs] = useState([]);
   const [roundLogs, setRoundLogs] = useState([]);
   const [reflection, setReflection] = useState({ good: '', improve: '', next: '' });
+  const [remoteRoomId, setRemoteRoomId] = useState(null);
+  const [syncStatus, setSyncStatus] = useState(supabaseConfigured ? 'Supabase 연결 준비 중' : '로컬 모드');
+  const remoteRefreshTimer = useRef(null);
 
   const selectedAsset = useMemo(
     () => assets.find((asset) => asset.id === selectedAssetId) ?? assets[0],
@@ -2127,17 +2142,48 @@ export function App() {
   const expiresAt = roomCreatedAt + ROOM_TTL_MS;
   const gameFinished = phase === 'ended' || (round === TOTAL_ROUNDS && phase === 'closed');
   const { playerCount, roomFull } = getRoomCapacityState({
-    basePlayerCount: players.length,
+    basePlayerCount: joined ? players.filter((player) => player.name !== nickname).length : players.length,
     joined,
     maxPlayers: MAX_PLAYERS_PER_ROOM,
   });
   const studentHoldingsValue = getPortfolioValue(portfolio, assets);
+  const studentTotalAsset = cash + deposit + studentHoldingsValue;
   const activeStudent = buildStudentSnapshot({
     id: 'active-student',
     name: joined ? nickname : `${nickname || '학생'} (대기)`,
-    totalAsset: cash + deposit + studentHoldingsValue,
+    totalAsset: studentTotalAsset,
     holdings: getHoldingRows(portfolio, assets).map(({ asset, shares }) => `${asset.name} ${shares.toLocaleString('ko-KR')}주`),
   });
+
+  const applyRemoteRoomBundle = useCallback((bundle) => {
+    if (!bundle?.room) return;
+    const remoteRound = bundle.room.current_round;
+    const groupedEvents = groupEventsByRound(bundle.events);
+    const remoteCurrentEvents = groupedEvents[remoteRound] ?? [];
+    const resolvedCurrentEvents = remoteCurrentEvents.filter((event) => event.resolved);
+    const createdAt = new Date(bundle.room.created_at).getTime();
+    const isExpired = new Date(bundle.room.expires_at).getTime() <= Date.now() || bundle.room.phase === 'expired';
+
+    setRemoteRoomId(bundle.room.id);
+    setRoomPin(bundle.room.pin);
+    setRoomCreatedAt(createdAt);
+    setRoomExpired(isExpired);
+    setRound(remoteRound);
+    setPhase(isExpired ? 'expired' : bundle.room.phase);
+    setIsPaused(bundle.room.is_paused);
+    setBaseRate(Number(bundle.room.base_rate));
+    if (bundle.assets.length) setAssets(bundle.assets);
+    setTriggeredEventsByRound(groupedEvents);
+    setLatestRoundSummary(resolvedCurrentEvents.length ? { round: remoteRound, events: resolvedCurrentEvents, delistedAssets: [] } : null);
+    setPlayers(bundle.players);
+    setSyncStatus('Supabase 실시간 연결 중');
+  }, []);
+
+  const refreshRemoteRoom = useCallback(async (roomId = remoteRoomId) => {
+    if (!supabaseConfigured || !roomId) return;
+    const bundle = await fetchRemoteRoomById(roomId);
+    if (bundle) applyRemoteRoomBundle(bundle);
+  }, [applyRemoteRoomBundle, remoteRoomId]);
 
   useEffect(() => {
     const checkExpiry = () => {
@@ -2151,6 +2197,52 @@ export function App() {
     const timer = window.setInterval(checkExpiry, 60_000);
     return () => window.clearInterval(timer);
   }, [expiresAt]);
+
+  useEffect(() => {
+    if (!supabaseConfigured || !/^[0-9]{6}$/.test(roomPin)) return undefined;
+    let cancelled = false;
+
+    fetchRemoteRoomByPin(roomPin)
+      .then((bundle) => {
+        if (cancelled || !bundle) return;
+        applyRemoteRoomBundle(bundle);
+      })
+      .catch((error) => {
+        if (!cancelled) setSyncStatus(`Supabase 불러오기 실패: ${error.message}`);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [applyRemoteRoomBundle, roomPin]);
+
+  useEffect(() => {
+    if (!supabaseConfigured || !remoteRoomId) return undefined;
+
+    const unsubscribe = subscribeRemoteRoom(remoteRoomId, () => {
+      window.clearTimeout(remoteRefreshTimer.current);
+      remoteRefreshTimer.current = window.setTimeout(() => {
+        refreshRemoteRoom(remoteRoomId).catch((error) => setSyncStatus(`Supabase 동기화 실패: ${error.message}`));
+      }, 150);
+    });
+
+    return () => {
+      window.clearTimeout(remoteRefreshTimer.current);
+      unsubscribe();
+    };
+  }, [refreshRemoteRoom, remoteRoomId]);
+
+  useEffect(() => {
+    if (!supabaseConfigured || !remoteRoomId || !joined || !nickname.trim()) return;
+    const remotePlayer = {
+      name: nickname.trim(),
+      cash,
+      deposit,
+      totalAsset: studentTotalAsset,
+      returnRate: ((studentTotalAsset - INITIAL_CASH) / INITIAL_CASH) * 100,
+    };
+    upsertRemotePlayer(remoteRoomId, remotePlayer).catch((error) => setSyncStatus(`Supabase 학생 저장 실패: ${error.message}`));
+  }, [cash, deposit, joined, nickname, remoteRoomId, studentTotalAsset]);
 
   function pushNews(title, detail, targetRound = round) {
     setNewsFeed((current) => [{ id: `${Date.now()}-${title}`, round: targetRound, title, detail }, ...current].slice(0, 6));
@@ -2184,14 +2276,16 @@ export function App() {
     setReflection((current) => ({ ...current, [key]: value }));
   }
 
-  function createNewRoom() {
+  async function createNewRoom() {
     const nextPin = String(Math.floor(100000 + Math.random() * 900000));
+    const now = Date.now();
+    const nextAssets = createRandomizedAssets();
     const nextRoom = buildNewRoomState({
       pin: nextPin,
-      now: Date.now(),
+      now,
       initialBaseRate: INITIAL_BASE_RATE,
-      assets: createRandomizedAssets(),
-      players: mockPlayers,
+      assets: nextAssets,
+      players: supabaseConfigured ? [] : mockPlayers,
       initialCash: INITIAL_CASH,
       initialAssetId: initialTradableAssets[0].id,
     });
@@ -2218,18 +2312,39 @@ export function App() {
     setTradeLogs(nextRoom.tradeLogs);
     setRoundLogs(nextRoom.roundLogs);
     setReflection(nextRoom.reflection);
+
+    if (!supabaseConfigured) return;
+    setSyncStatus('Supabase에 새 방 저장 중');
+    try {
+      const bundle = await createRemoteRoom({
+        pin: nextPin,
+        now,
+        baseRate: INITIAL_BASE_RATE,
+        assets: nextAssets,
+      });
+      if (bundle) applyRemoteRoomBundle(bundle);
+    } catch (error) {
+      setSyncStatus(`Supabase 방 생성 실패: ${error.message}`);
+    }
   }
 
-  function handleNextRound() {
+  async function handleNextRound() {
     if (roomExpired || round >= TOTAL_ROUNDS) return;
     const nextRound = Math.min(round + 1, TOTAL_ROUNDS);
     setRound(nextRound);
     setPhase('setup');
     setIssueDraft('');
     pushNews(`${nextRound}라운드 준비`, '교사가 새 이슈를 등록할 수 있습니다.', nextRound);
+    if (remoteRoomId) {
+      try {
+        await updateRemoteRoom(remoteRoomId, { current_round: nextRound, phase: 'setup' });
+      } catch (error) {
+        setSyncStatus(`Supabase 라운드 이동 실패: ${error.message}`);
+      }
+    }
   }
 
-  function handleRegisterIssue(event, issueOption = null) {
+  async function handleRegisterIssue(event, issueOption = null) {
     if (roomExpired || currentRoundEvents.length >= MAX_EVENTS_PER_ROUND) return;
 
     const registeredEvent = buildRegisteredIssue({
@@ -2246,15 +2361,30 @@ export function App() {
       [round]: [...(current[round] ?? []), registeredEvent],
     }));
     setIssueDraft('');
+
+    if (remoteRoomId) {
+      try {
+        await insertRemoteIssue(remoteRoomId, registeredEvent, round);
+      } catch (error) {
+        setSyncStatus(`Supabase 이슈 저장 실패: ${error.message}`);
+      }
+    }
   }
 
-  function handleStartRound() {
+  async function handleStartRound() {
     if (roomExpired || !currentRoundEvents.length || phase !== 'setup') return;
     setPhase('open');
     pushNews(`${round}라운드 이슈 공개`, `${currentRoundEvents.length}개 이슈가 공개되었습니다. 가격은 장 마감 후 반영됩니다.`);
+    if (remoteRoomId) {
+      try {
+        await updateRemoteRoom(remoteRoomId, { phase: 'open' });
+      } catch (error) {
+        setSyncStatus(`Supabase 라운드 시작 실패: ${error.message}`);
+      }
+    }
   }
 
-  function handleCloseRound() {
+  async function handleCloseRound() {
     if (roomExpired || phase !== 'open') return;
 
     const initialResolvedEvents = currentRoundEvents.map((event) => {
@@ -2332,12 +2462,34 @@ export function App() {
         returnRate: Number((player.returnRate + ((round + index) % 5 - 1.5) * 1.7).toFixed(1)),
       })),
     );
+
+    if (remoteRoomId) {
+      try {
+        await Promise.all([
+          updateRemoteRoom(remoteRoomId, {
+            phase: 'closed',
+            base_rate: Number((baseRate + baseRateDelta).toFixed(1)),
+          }),
+          upsertRemoteAssets(remoteRoomId, nextAssets),
+          updateRemoteIssues(remoteRoomId, resolvedEvents, round),
+        ]);
+      } catch (error) {
+        setSyncStatus(`Supabase 장 마감 저장 실패: ${error.message}`);
+      }
+    }
   }
 
-  function handleEndGame() {
+  async function handleEndGame() {
     setIsPaused(true);
     setPhase('ended');
     pushNews('게임 종료', '최종 수익률을 확인하고 자산 배분 판단을 회고합니다.');
+    if (remoteRoomId) {
+      try {
+        await updateRemoteRoom(remoteRoomId, { phase: 'ended', is_paused: true });
+      } catch (error) {
+        setSyncStatus(`Supabase 게임 종료 실패: ${error.message}`);
+      }
+    }
   }
 
   function parseAmount(value) {
@@ -2396,6 +2548,7 @@ export function App() {
           baseRate={baseRate}
           expiresAt={expiresAt}
           roomExpired={roomExpired}
+          syncStatus={syncStatus}
           onCreateRoom={createNewRoom}
           hostAuthenticated={hostAuthenticated}
         />
@@ -2424,7 +2577,17 @@ export function App() {
           onStartRound={handleStartRound}
           onCloseRound={handleCloseRound}
           onNextRound={handleNextRound}
-          onTogglePause={() => setIsPaused((current) => !current)}
+          onTogglePause={async () => {
+            const nextPaused = !isPaused;
+            setIsPaused(nextPaused);
+            if (remoteRoomId) {
+              try {
+                await updateRemoteRoom(remoteRoomId, { is_paused: nextPaused });
+              } catch (error) {
+                setSyncStatus(`Supabase 일시정지 저장 실패: ${error.message}`);
+              }
+            }
+          }}
           onEndGame={handleEndGame}
           onRegisterIssue={handleRegisterIssue}
         />
