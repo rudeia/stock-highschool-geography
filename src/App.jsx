@@ -44,6 +44,8 @@ const DELISTING_PROBABILITY = 0.2;
 const STRONG_NEGATIVE_IMPACT = -0.07;
 const MIN_EVENT_IMPACT = 0.1;
 const MIN_REPEATED_EVENT_IMPACT = 0.5;
+const MIN_INDIRECT_REPEATED_EVENT_IMPACT = 0.05;
+const MAX_INDIRECT_REPEATED_EVENT_IMPACT = 0.12;
 const PASSIVE_MARKET_MOVE = 0.05;
 const ROOM_TTL_MS = 24 * 60 * 60 * 1000;
 const HOST_CREDENTIALS = {
@@ -707,6 +709,24 @@ function normalizeEventImpact(impact = {}, minimumImpact = MIN_EVENT_IMPACT) {
       const direction = value > 0 ? 1 : -1;
       const adjustedValue = direction * Math.max(Math.abs(value), minimumImpact);
       return [assetId, Number(adjustedValue.toFixed(3))];
+    }),
+  );
+}
+
+function normalizeRepeatedEventImpact(impact = {}) {
+  return Object.fromEntries(
+    Object.entries(impact).map(([assetId, value]) => {
+      if (value === 0) return [assetId, 0];
+      const direction = value > 0 ? 1 : -1;
+      const absoluteImpact = Math.abs(value);
+      const isDirectAsset = absoluteImpact >= MIN_EVENT_IMPACT;
+      const adjustedValue = isDirectAsset
+        ? Math.max(absoluteImpact, MIN_REPEATED_EVENT_IMPACT)
+        : Math.min(
+            Math.max(absoluteImpact, MIN_INDIRECT_REPEATED_EVENT_IMPACT),
+            MAX_INDIRECT_REPEATED_EVENT_IMPACT,
+          );
+      return [assetId, Number((direction * adjustedValue).toFixed(3))];
     }),
   );
 }
@@ -2257,7 +2277,9 @@ export function App() {
         ...event,
         repeatedVolatility,
         resolvedImpact: event.didApply
-          ? normalizeEventImpact(event.impact, repeatedVolatility ? MIN_REPEATED_EVENT_IMPACT : MIN_EVENT_IMPACT)
+          ? repeatedVolatility
+            ? normalizeRepeatedEventImpact(event.impact)
+            : normalizeEventImpact(event.impact, MIN_EVENT_IMPACT)
           : {},
       };
     });
