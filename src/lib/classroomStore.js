@@ -88,11 +88,12 @@ export function buildRoundLog({ round, now, totalAsset, holdings, events }) {
   };
 }
 
-export function buildStudentSnapshot({ id, name, totalAsset, holdings }) {
+export function buildStudentSnapshot({ id, name, totalAsset, holdings, ...extra }) {
   return {
     id,
     name,
     totalAsset,
     holdings,
+    ...extra,
   };
 }

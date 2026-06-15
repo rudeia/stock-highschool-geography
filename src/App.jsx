@@ -58,6 +58,7 @@ const ROUND_SALARY = 3_000_000;
 const TOTAL_ROUNDS = 12;
 const MAX_PLAYERS_PER_ROOM = 40;
 const INITIAL_BASE_RATE = 3.5;
+const INITIAL_UNEMPLOYMENT_RATE = 3.5;
 const MAX_EVENTS_PER_ROUND = 5;
 const DEFAULT_EVENT_PROBABILITY = 0.75;
 const DELISTING_START_ROUND = 9;
@@ -102,6 +103,11 @@ const initialTradableAssets = [
   { id: 'bank', type: 'stock', country: '한국', name: '대한은행', sector: '금융', priceOptions: [37_000, 51_000, 68_000], color: '#475569' },
   { id: 'medi', type: 'stock', country: '미국', name: '메디케어', sector: '헬스케어', priceOptions: [142_000, 211_000, 286_000], color: '#0d9488' },
   { id: 'infra', type: 'stock', country: '한국', name: '한빛인프라', sector: '건설/인프라', priceOptions: [5_400, 8_700, 13_800], color: '#ea580c' },
+  { id: 'dogemars', type: 'stock', country: '미국', name: '도지인마스', sector: 'AI/우주 반도체', priceOptions: [92_000, 154_000, 238_000], color: '#9333ea' },
+  { id: 'riverbank', type: 'stock', country: '한국', name: '한강은행', sector: '금융', priceOptions: [24_000, 39_000, 57_000], color: '#64748b' },
+  { id: 'oceanair', type: 'stock', country: '한국', name: '오션항공', sector: '항공/물류', priceOptions: [7_600, 14_400, 22_800], color: '#0284c7' },
+  { id: 'purefood', type: 'stock', country: '한국', name: '바른푸드', sector: '식품/농산물', priceOptions: [14_500, 24_500, 38_000], color: '#65a30d' },
+  { id: 'metroinfra', type: 'stock', country: '한국', name: '메트로인프라', sector: '건설/인프라', priceOptions: [6_200, 11_600, 19_500], color: '#c2410c' },
   { id: 'sp500', type: 'etf', country: '미국', name: 'S&P 500 ETF', sector: '미국 대표지수', priceOptions: [48_000, 62_000, 76_000], color: '#1d4ed8' },
   { id: 'kospi', type: 'etf', country: '한국', name: 'KOSPI 200 ETF', sector: '한국 대표지수', priceOptions: [27_500, 34_500, 42_000], color: '#0f766e' },
   { id: 'realty', type: 'property', country: '한국', name: '도시부동산지수', sector: '주거/상업 부동산', priceOptions: [180_000, 250_000, 320_000], color: '#a16207' },
@@ -111,13 +117,41 @@ const initialTradableAssets = [
   { id: 'argBond', type: 'bond', country: '아르헨티나', name: '아르헨티나 국채', sector: '고위험 신흥국 국채', priceOptions: [24_000, 36_000, 52_000], color: '#be123c' },
 ];
 
+const financialProfileVariants = [
+  { key: 'stable', label: '재무 안정형', revenue: 0.96, margin: 1.08, debt: 0.72, cash: 1.28, rd: 0.92, credit: 0.78 },
+  { key: 'growth', label: '성장 투자형', revenue: 1.12, margin: 0.92, debt: 1.05, cash: 0.92, rd: 1.34, credit: 1.05 },
+  { key: 'leveraged', label: '고부채 확장형', revenue: 1.05, margin: 0.86, debt: 1.45, cash: 0.72, rd: 1.02, credit: 1.32 },
+];
+
+const financialBaseByAsset = {
+  neo: { revenue: 3.2, margin: 6.8, debt: 118, cash: 0.58, rd: 14, exportRatio: 42, commodityExposure: 72, laborSensitivity: 42, cyclicality: 72, policySensitivity: 62, creditRisk: 48 },
+  core: { revenue: 18.6, margin: 24.5, debt: 54, cash: 4.8, rd: 21, exportRatio: 68, commodityExposure: 42, laborSensitivity: 24, cyclicality: 58, policySensitivity: 72, creditRisk: 32 },
+  eco: { revenue: 1.8, margin: 5.4, debt: 132, cash: 0.31, rd: 9, exportRatio: 37, commodityExposure: 78, laborSensitivity: 38, cyclicality: 66, policySensitivity: 82, creditRisk: 55 },
+  oil: { revenue: 9.7, margin: 7.1, debt: 86, cash: 1.2, rd: 3, exportRatio: 31, commodityExposure: 92, laborSensitivity: 28, cyclicality: 72, policySensitivity: 48, creditRisk: 42 },
+  enter: { revenue: 5.4, margin: 11.2, debt: 72, cash: 0.94, rd: 6, exportRatio: 55, commodityExposure: 18, laborSensitivity: 38, cyclicality: 64, policySensitivity: 58, creditRisk: 38 },
+  food: { revenue: 2.6, margin: 4.9, debt: 95, cash: 0.42, rd: 5, exportRatio: 24, commodityExposure: 82, laborSensitivity: 44, cyclicality: 38, policySensitivity: 44, creditRisk: 42 },
+  air: { revenue: 1.4, margin: 3.2, debt: 214, cash: 0.26, rd: 1, exportRatio: 18, commodityExposure: 88, laborSensitivity: 66, cyclicality: 86, policySensitivity: 50, creditRisk: 78 },
+  bank: { revenue: 7.8, margin: 18.1, debt: 135, cash: 2.1, rd: 2, exportRatio: 6, commodityExposure: 8, laborSensitivity: 36, cyclicality: 52, policySensitivity: 74, creditRisk: 44 },
+  medi: { revenue: 8.1, margin: 16.7, debt: 61, cash: 1.7, rd: 18, exportRatio: 49, commodityExposure: 16, laborSensitivity: 30, cyclicality: 28, policySensitivity: 70, creditRisk: 30 },
+  infra: { revenue: 3.9, margin: 5.9, debt: 156, cash: 0.63, rd: 2, exportRatio: 11, commodityExposure: 76, laborSensitivity: 58, cyclicality: 82, policySensitivity: 76, creditRisk: 62 },
+  dogemars: { revenue: 6.8, margin: 13.6, debt: 96, cash: 1.36, rd: 24, exportRatio: 72, commodityExposure: 48, laborSensitivity: 24, cyclicality: 78, policySensitivity: 84, creditRisk: 46 },
+  riverbank: { revenue: 4.2, margin: 13.8, debt: 104, cash: 1.4, rd: 3, exportRatio: 4, commodityExposure: 6, laborSensitivity: 34, cyclicality: 58, policySensitivity: 78, creditRisk: 36 },
+  oceanair: { revenue: 1.1, margin: 2.7, debt: 246, cash: 0.18, rd: 1, exportRatio: 22, commodityExposure: 91, laborSensitivity: 72, cyclicality: 88, policySensitivity: 52, creditRisk: 84 },
+  purefood: { revenue: 1.9, margin: 6.2, debt: 64, cash: 0.52, rd: 6, exportRatio: 18, commodityExposure: 68, laborSensitivity: 42, cyclicality: 34, policySensitivity: 46, creditRisk: 28 },
+  metroinfra: { revenue: 2.8, margin: 4.8, debt: 188, cash: 0.34, rd: 2, exportRatio: 8, commodityExposure: 84, laborSensitivity: 64, cyclicality: 86, policySensitivity: 82, creditRisk: 70 },
+};
+
 function createRandomizedAssets() {
   return initialTradableAssets.map((asset) => {
     const price = asset.priceOptions[Math.floor(Math.random() * asset.priceOptions.length)];
+    const financials = createInitialFinancials(asset);
     return {
       ...asset,
       price,
       history: [price, price, price],
+      financialProfile: financials?.profile ?? null,
+      financials,
+      negativeStreak: 0,
     };
   });
 }
@@ -129,6 +163,96 @@ const assetTypeLabels = {
   futures: '선물',
   bond: '채권',
 };
+
+function clampNumber(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function randomRange(min, max, decimals = 2) {
+  return Number((min + Math.random() * (max - min)).toFixed(decimals));
+}
+
+function createInitialFinancials(asset) {
+  if (asset.type !== 'stock') return null;
+  const base = financialBaseByAsset[asset.id] ?? {
+    revenue: 2.5,
+    margin: 6,
+    debt: 100,
+    cash: 0.4,
+    rd: 5,
+    exportRatio: 25,
+    commodityExposure: 45,
+    laborSensitivity: 45,
+    cyclicality: 55,
+    policySensitivity: 50,
+    creditRisk: 45,
+  };
+  const variant = financialProfileVariants[Math.floor(Math.random() * financialProfileVariants.length)];
+  const revenue = clampNumber(base.revenue * variant.revenue * randomRange(0.92, 1.08), 0.3, 30);
+  const operatingMargin = clampNumber(base.margin * variant.margin + randomRange(-1.1, 1.1, 1), -4, 35);
+  const debtRatio = clampNumber(base.debt * variant.debt + randomRange(-12, 12, 1), 15, 320);
+  const cashReserve = clampNumber(base.cash * variant.cash * randomRange(0.86, 1.14), 0.05, 8);
+  const rdRatio = clampNumber(base.rd * variant.rd + randomRange(-1.2, 1.2, 1), 0.5, 32);
+  const creditRisk = clampNumber(base.creditRisk * variant.credit + randomRange(-5, 5, 1), 5, 95);
+
+  return {
+    profile: variant.label,
+    revenue: Number(revenue.toFixed(2)),
+    operatingMargin: Number(operatingMargin.toFixed(1)),
+    debtRatio: Math.round(debtRatio),
+    cashReserve: Number(cashReserve.toFixed(2)),
+    rdRatio: Number(rdRatio.toFixed(1)),
+    exportRatio: Math.round(clampNumber(base.exportRatio + randomRange(-7, 7, 1), 0, 95)),
+    commodityExposure: Math.round(clampNumber(base.commodityExposure + randomRange(-8, 8, 1), 0, 100)),
+    laborSensitivity: Math.round(clampNumber(base.laborSensitivity + randomRange(-7, 7, 1), 0, 100)),
+    cyclicality: Math.round(clampNumber(base.cyclicality + randomRange(-8, 8, 1), 0, 100)),
+    policySensitivity: Math.round(clampNumber(base.policySensitivity + randomRange(-7, 7, 1), 0, 100)),
+    creditRisk: Math.round(creditRisk),
+  };
+}
+
+function formatTrillion(value) {
+  if (value >= 1) return `${value.toFixed(1)}조 원`;
+  return `${Math.round(value * 10000).toLocaleString('ko-KR')}억 원`;
+}
+
+function exposureLabel(value) {
+  if (value >= 75) return '매우 높음';
+  if (value >= 55) return '높음';
+  if (value >= 35) return '보통';
+  return '낮음';
+}
+
+function getFinancialSignals(financials) {
+  const stability = financials.debtRatio <= 80 && financials.cashReserve / Math.max(financials.revenue, 0.1) >= 0.18
+    ? '높음'
+    : financials.debtRatio >= 170 || financials.creditRisk >= 70
+      ? '낮음'
+      : '보통';
+  const growth = financials.rdRatio >= 14 || financials.operatingMargin >= 13 ? '높음' : financials.rdRatio <= 3 && financials.operatingMargin <= 4 ? '낮음' : '보통';
+  const volatility = financials.cyclicality >= 75 || financials.commodityExposure >= 75 || financials.debtRatio >= 170
+    ? '높음'
+    : financials.cyclicality <= 35 && financials.debtRatio <= 80
+      ? '낮음'
+      : '보통';
+
+  return { stability, growth, volatility };
+}
+
+function buildFinancialMetrics(asset) {
+  if (!asset.financials) return null;
+  const financials = asset.financials;
+  return [
+    ['재무 유형', financials.profile],
+    ['매출', formatTrillion(financials.revenue)],
+    ['영업이익률', `${financials.operatingMargin.toFixed(1)}%`],
+    ['부채비율', `${financials.debtRatio}%`],
+    ['현금보유', formatTrillion(financials.cashReserve)],
+    ['R&D 비중', `${financials.rdRatio.toFixed(1)}%`],
+    ['수출비중', `${financials.exportRatio}%`],
+    ['원자재 의존도', exposureLabel(financials.commodityExposure)],
+  ];
+}
 
 const assetLearningProfiles = {
   neo: {
@@ -210,6 +334,46 @@ const assetLearningProfiles = {
     riskTags: ['정책민감', '고부채', '원자재민감', '부동산민감'],
     sensitivity: ['인프라 예산', '금리 변화', '철강·시멘트 가격', '부동산 정책'],
     prompt: '건설 기업은 수주가 늘어도 금리와 원자재 가격을 함께 봐야 하는 이유가 무엇일까요?',
+  },
+  dogemars: {
+    story: 'AI 서버용 칩과 우주 통신 장비를 함께 설계하는 미국 기술 기업입니다. 2014년 위성 데이터 처리 칩 회사로 출발해 AI 가속기와 저궤도 통신 반도체로 사업을 넓혔습니다.',
+    metrics: [['매출', '6.8조 원'], ['영업이익률', '13.6%'], ['부채비율', '96%'], ['현금보유', '1.4조 원'], ['R&D 비중', '24%'], ['수출비중', '72%'], ['원자재 의존도', '보통']],
+    signals: { stability: '보통', growth: '높음', volatility: '높음' },
+    riskTags: ['기술성장주', 'AI투자민감', '미국규제민감', '희토류민감'],
+    sensitivity: ['AI 투자 확대', '미국 기술 규제', '희토류 공급', '미국 국채금리'],
+    prompt: '기술주가 좋은 실적 기대에도 금리와 규제 뉴스에 크게 흔들리는 이유는 무엇일까요?',
+  },
+  riverbank: {
+    story: '중소기업 대출과 디지털 예금을 주력으로 하는 한국 은행입니다. 지역 기업금융에서 출발해 모바일 예금과 소상공인 대출 플랫폼으로 성장했습니다.',
+    metrics: [['매출', '4.2조 원'], ['영업이익률', '13.8%'], ['부채비율', '은행업 특성상 높음'], ['현금보유', '유동성 높음'], ['R&D 비중', '3%'], ['수출비중', '낮음'], ['원자재 의존도', '낮음']],
+    signals: { stability: '높음', growth: '보통', volatility: '보통' },
+    riskTags: ['금리민감', '예금경쟁민감', '신용위험민감', '부동산민감'],
+    sensitivity: ['기준금리', '예금 특판', '부동산 경기', '신용위험'],
+    prompt: '은행끼리도 예금 경쟁과 대출 부실 위험에 따라 움직임이 다를 수 있는 이유는 무엇일까요?',
+  },
+  oceanair: {
+    story: '동아시아 노선과 해상·항공 복합 물류를 운영하는 한국 항공 기업입니다. 화물 운송으로 시작해 저가 여객 노선까지 넓혔지만 유가와 환율 부담이 큽니다.',
+    metrics: [['매출', '1.1조 원'], ['영업이익률', '2.7%'], ['부채비율', '246%'], ['현금보유', '1,800억 원'], ['R&D 비중', '1%'], ['수출비중', '22%'], ['원자재 의존도', '매우 높음']],
+    signals: { stability: '낮음', growth: '보통', volatility: '높음' },
+    riskTags: ['고부채', '유가민감', '환율민감', '경기민감'],
+    sensitivity: ['산유국 감산', '환율 급등', '전쟁 위험', '실업률 상승'],
+    prompt: '항공 기업은 왜 매출보다 유류비와 부채 부담을 먼저 봐야 할 때가 있을까요?',
+  },
+  purefood: {
+    story: '곡물 가공식품과 학교 급식용 간편식을 만드는 한국 식품 기업입니다. 1989년 지역 제분소로 시작해 안정적인 내수 식품 브랜드로 자리 잡았습니다.',
+    metrics: [['매출', '1.9조 원'], ['영업이익률', '6.2%'], ['부채비율', '64%'], ['현금보유', '5,200억 원'], ['R&D 비중', '6%'], ['수출비중', '18%'], ['원자재 의존도', '높음']],
+    signals: { stability: '높음', growth: '보통', volatility: '보통' },
+    riskTags: ['곡물민감', '방어주', '물가민감', '환율민감'],
+    sensitivity: ['곡물 공급 충격', '원/달러 환율', '소비심리', '물가 변화'],
+    prompt: '식품 기업은 방어주 성격이 있어도 곡물 가격에는 왜 민감할까요?',
+  },
+  metroinfra: {
+    story: '도시철도, 교량, 복합역세권 개발을 담당하는 한국 인프라 기업입니다. 공공 토목공사 중심에서 민간 복합개발로 확장해 부동산 경기와 금리에 민감합니다.',
+    metrics: [['매출', '2.8조 원'], ['영업이익률', '4.8%'], ['부채비율', '188%'], ['현금보유', '3,400억 원'], ['R&D 비중', '2%'], ['수출비중', '8%'], ['원자재 의존도', '매우 높음']],
+    signals: { stability: '낮음', growth: '보통', volatility: '높음' },
+    riskTags: ['고부채', '정책민감', '부동산민감', '원자재민감'],
+    sensitivity: ['인프라 예산', '부동산 규제', '금리 변화', '철강·시멘트 가격'],
+    prompt: '비슷한 건설 기업이라도 부채비율이 높으면 금리 인상기에 왜 더 흔들릴까요?',
   },
   sp500: {
     story: '미국 대표 기업 묶음에 투자하는 ETF입니다. 한 기업이 아니라 미국 대형주의 평균적인 흐름을 따라가도록 설계되었습니다.',
@@ -298,7 +462,7 @@ const scenarioEvents = [
       },
     ],
     baseRateDelta: 0.5,
-    impact: { bank: 0.08, infra: -0.07, air: -0.05, enter: -0.04, neo: -0.03, realty: -0.08, kospi: -0.03, sp500: -0.02 },
+    impact: { bank: 0.08, riverbank: 0.07, infra: -0.07, metroinfra: -0.09, air: -0.05, oceanair: -0.08, enter: -0.04, dogemars: -0.07, neo: -0.03, realty: -0.08, kospi: -0.03, sp500: -0.02 },
   },
   {
     id: 'rate-down',
@@ -322,7 +486,7 @@ const scenarioEvents = [
       },
     ],
     baseRateDelta: -0.5,
-    impact: { realty: 0.09, infra: 0.05, neo: 0.04, enter: 0.04, bank: -0.04, kospi: 0.04, sp500: 0.03 },
+    impact: { realty: 0.09, infra: 0.05, metroinfra: 0.07, neo: 0.04, enter: 0.04, dogemars: 0.06, bank: -0.04, riverbank: -0.04, kospi: 0.04, sp500: 0.03 },
   },
   {
     id: 'deposit-special',
@@ -346,7 +510,7 @@ const scenarioEvents = [
       },
     ],
     baseRateDelta: 0.2,
-    impact: { bank: 0.05, enter: -0.02, neo: -0.02, realty: -0.03 },
+    impact: { bank: 0.05, riverbank: 0.06, enter: -0.02, dogemars: -0.03, neo: -0.02, realty: -0.03 },
   },
   {
     id: 'property-ease',
@@ -369,7 +533,7 @@ const scenarioEvents = [
         failureDetail: '정책 처리 일정이 늦어지며 기대감이 실제 가격에는 반영되지 못했습니다.',
       },
     ],
-    impact: { realty: 0.12, infra: 0.05, bank: 0.03, kospi: 0.02 },
+    impact: { realty: 0.12, infra: 0.05, metroinfra: 0.08, bank: 0.03, riverbank: 0.03, kospi: 0.02 },
   },
   {
     id: 'us-rally',
@@ -398,7 +562,7 @@ const scenarioEvents = [
         failureDetail: '투자 확대보다 비용 부담이 더 크게 해석되며 시장 영향은 제한됐습니다.',
       },
     ],
-    impact: { sp500: 0.1, core: 0.04, kospi: 0.02 },
+    impact: { sp500: 0.1, core: 0.04, dogemars: 0.09, enter: 0.04, kospi: 0.02 },
   },
   {
     id: 'korea-export',
@@ -421,7 +585,7 @@ const scenarioEvents = [
         failureDetail: '환율과 물류비 부담이 커지며 수출 증가의 긍정 효과가 약해졌습니다.',
       },
     ],
-    impact: { kospi: 0.09, core: 0.06, neo: 0.03, bank: 0.02 },
+    impact: { kospi: 0.09, core: 0.06, neo: 0.03, dogemars: 0.02, bank: 0.02, riverbank: 0.02 },
   },
   {
     id: 'rare',
@@ -444,7 +608,7 @@ const scenarioEvents = [
         failureDetail: '재고 물량이 충분하다는 발표가 나오며 가격 급등 우려가 완화됐습니다.',
       },
     ],
-    impact: { core: -0.11, neo: -0.08, eco: -0.04, oil: 0.04, kospi: -0.03 },
+    impact: { core: -0.11, dogemars: -0.1, neo: -0.08, eco: -0.04, oil: 0.04, kospi: -0.03 },
   },
   {
     id: 'housing',
@@ -467,7 +631,7 @@ const scenarioEvents = [
         failureDetail: '재정 부담 우려로 사업 규모가 조정되며 기대감이 약해졌습니다.',
       },
     ],
-    impact: { infra: 0.16, realty: 0.06, core: 0.05, bank: 0.03, eco: 0.02 },
+    impact: { infra: 0.16, metroinfra: 0.18, realty: 0.06, core: 0.05, dogemars: 0.04, bank: 0.03, riverbank: 0.02, eco: 0.02 },
   },
   {
     id: 'us-regulation',
@@ -490,7 +654,7 @@ const scenarioEvents = [
         failureDetail: '의회 논의가 길어지며 당장 기업 실적에 미치는 영향은 제한적이었습니다.',
       },
     ],
-    impact: { core: -0.1, enter: -0.08, medi: -0.07, sp500: -0.05, kospi: 0.01 },
+    impact: { core: -0.1, dogemars: -0.13, enter: -0.08, medi: -0.07, sp500: -0.05, kospi: 0.01 },
   },
   {
     id: 'fx-spike',
@@ -513,7 +677,7 @@ const scenarioEvents = [
         failureDetail: '후속 지표가 둔화되며 달러 강세 압력이 빠르게 줄었습니다.',
       },
     ],
-    impact: { neo: 0.04, core: 0.03, kospi: 0.03, sp500: 0.04, air: -0.08, food: -0.03 },
+    impact: { neo: 0.04, core: 0.03, dogemars: 0.04, kospi: 0.03, sp500: 0.04, air: -0.08, oceanair: -0.1, food: -0.03, purefood: -0.02 },
   },
   {
     id: 'korea-us-chip-tension',
@@ -536,7 +700,7 @@ const scenarioEvents = [
         failureDetail: '미국 정부가 당장 추가 규제를 검토하지 않는다고 밝히며 시장 영향이 줄었습니다.',
       },
     ],
-    impact: { core: -0.12, kospi: -0.05, neo: -0.04, sp500: -0.03 },
+    impact: { core: -0.12, dogemars: -0.14, kospi: -0.05, neo: -0.04, sp500: -0.03 },
   },
   {
     id: 'oil-supply-shock',
@@ -566,7 +730,7 @@ const scenarioEvents = [
         failureDetail: '일시적 통계 요인이 컸다는 분석이 나오며 공급 부족 우려가 약해졌습니다.',
       },
     ],
-    impact: { oilFut: 0.18, oil: 0.1, air: -0.12, food: -0.04, grainFut: 0.03, usBond: 0.02 },
+    impact: { oilFut: 0.18, oil: 0.1, air: -0.12, oceanair: -0.15, food: -0.04, purefood: -0.03, grainFut: 0.03, usBond: 0.02 },
   },
   {
     id: 'grain-shock',
@@ -596,7 +760,7 @@ const scenarioEvents = [
         failureDetail: '장기 공급 계약과 재고가 확인되며 비료 가격 충격이 제한됐습니다.',
       },
     ],
-    impact: { grainFut: 0.2, food: -0.11, argBond: 0.04, usBond: 0.02, kospi: -0.02 },
+    impact: { grainFut: 0.2, food: -0.11, purefood: -0.08, argBond: 0.04, usBond: 0.02, kospi: -0.02 },
   },
   {
     id: 'us-yield-spike',
@@ -627,7 +791,7 @@ const scenarioEvents = [
       },
     ],
     baseRateDelta: 0.3,
-    impact: { usBond: -0.12, sp500: -0.06, core: -0.07, enter: -0.05, argBond: -0.08, bank: 0.04 },
+    impact: { usBond: -0.12, sp500: -0.06, core: -0.07, dogemars: -0.11, enter: -0.05, argBond: -0.08, bank: 0.04, riverbank: 0.03 },
   },
   {
     id: 'em-credit-stress',
@@ -657,7 +821,7 @@ const scenarioEvents = [
         failureDetail: '신용평가사가 단기 등급 조정 가능성을 낮게 평가하며 시장 충격이 제한됐습니다.',
       },
     ],
-    impact: { argBond: -0.22, usBond: 0.08, sp500: -0.03, kospi: -0.04, bank: -0.03 },
+    impact: { argBond: -0.22, usBond: 0.08, sp500: -0.03, kospi: -0.04, bank: -0.03, riverbank: -0.03 },
   },
   {
     id: 'war-risk',
@@ -687,7 +851,7 @@ const scenarioEvents = [
         failureDetail: '구체적인 충돌이나 공급 차질이 확인되지 않아 시장 영향은 제한됐습니다.',
       },
     ],
-    impact: { oilFut: 0.18, oil: 0.12, air: -0.15, usBond: 0.08, sp500: -0.06, kospi: -0.05, grainFut: 0.06 },
+    impact: { oilFut: 0.18, oil: 0.12, air: -0.15, oceanair: -0.17, usBond: 0.08, sp500: -0.06, dogemars: -0.05, kospi: -0.05, grainFut: 0.06 },
   },
   {
     id: 'election-risk',
@@ -717,7 +881,7 @@ const scenarioEvents = [
         failureDetail: '재정 건전성 우려로 지출안 규모가 조정됐습니다.',
       },
     ],
-    impact: { kospi: -0.08, bank: -0.06, infra: -0.06, realty: -0.04, argBond: -0.08, usBond: 0.04 },
+    impact: { kospi: -0.08, bank: -0.06, riverbank: -0.05, infra: -0.06, metroinfra: -0.08, realty: -0.04, argBond: -0.08, usBond: 0.04 },
   },
   {
     id: 'argentina-reform',
@@ -810,6 +974,21 @@ function getTotalAsset({ cash, deposit, portfolio, assets }) {
   return cash + deposit + getPortfolioValue(portfolio, assets);
 }
 
+function getPaidRoundCount({ gameStarted, round, phase }) {
+  if (!gameStarted) return 0;
+  return phase === 'setup' ? Math.max(0, round - 1) : round;
+}
+
+function getInvestedPrincipal({ gameStarted, round, phase, memberCount = 1 }) {
+  if (!gameStarted) return 0;
+  return INITIAL_CASH + ROUND_SALARY * getPaidRoundCount({ gameStarted, round, phase }) * Math.max(1, memberCount);
+}
+
+function getInvestmentReturnRate(totalAsset, investedPrincipal) {
+  if (!investedPrincipal) return 0;
+  return ((totalAsset - investedPrincipal) / investedPrincipal) * 100;
+}
+
 function getHoldingSummary(portfolio, assets) {
   const rows = getHoldingRows(portfolio, assets);
   return rows.length
@@ -821,12 +1000,40 @@ function getPassiveMarketMove() {
   return Number(((Math.random() * 2 - 1) * PASSIVE_MARKET_MOVE).toFixed(3));
 }
 
-function normalizeEventImpact(impact = {}, minimumImpact = MIN_EVENT_IMPACT) {
+function getImpactBounds(asset, absoluteImpact) {
+  const isDirectAsset = absoluteImpact >= DIRECT_REPEATED_IMPACT_THRESHOLD;
+  if (!asset) return { min: isDirectAsset ? MIN_EVENT_IMPACT : 0.03, max: isDirectAsset ? 0.28 : 0.08 };
+  if (asset.type === 'stock' || asset.type === 'futures') {
+    return isDirectAsset ? { min: MIN_EVENT_IMPACT, max: 0.32 } : { min: 0.03, max: 0.08 };
+  }
+  if (asset.type === 'etf') {
+    return isDirectAsset ? { min: 0.05, max: 0.12 } : { min: 0.015, max: 0.055 };
+  }
+  if (asset.type === 'bond' || asset.type === 'property') {
+    return isDirectAsset ? { min: 0.04, max: 0.1 } : { min: 0.015, max: 0.05 };
+  }
+  return { min: 0.03, max: 0.08 };
+}
+
+function getRepeatedImpactBounds(asset, repeatedFloor, absoluteImpact) {
+  const isDirectAsset = absoluteImpact >= DIRECT_REPEATED_IMPACT_THRESHOLD;
+  if (isDirectAsset && (asset?.type === 'stock' || asset?.type === 'futures')) {
+    return { min: repeatedFloor, max: 0.95 };
+  }
+  if (isDirectAsset && asset?.type === 'etf') return { min: 0.08, max: Math.min(0.22, repeatedFloor * 0.28) };
+  if (isDirectAsset && (asset?.type === 'bond' || asset?.type === 'property')) return { min: 0.06, max: Math.min(0.18, repeatedFloor * 0.22) };
+  return { min: MIN_INDIRECT_REPEATED_EVENT_IMPACT, max: MAX_INDIRECT_REPEATED_EVENT_IMPACT };
+}
+
+function normalizeEventImpact(impact = {}, assets = []) {
+  const assetMap = Object.fromEntries(assets.map((asset) => [asset.id, asset]));
   return Object.fromEntries(
     Object.entries(impact).map(([assetId, value]) => {
       if (value === 0) return [assetId, 0];
       const direction = value > 0 ? 1 : -1;
-      const adjustedValue = direction * Math.max(Math.abs(value), minimumImpact);
+      const absoluteImpact = Math.abs(value);
+      const { min, max } = getImpactBounds(assetMap[assetId], absoluteImpact);
+      const adjustedValue = direction * clampNumber(absoluteImpact, min, max);
       return [assetId, Number(adjustedValue.toFixed(3))];
     }),
   );
@@ -838,20 +1045,16 @@ function getRepeatedImpactFloor(count) {
   return MIN_REPEATED_EVENT_IMPACT;
 }
 
-function normalizeRepeatedEventImpact(impact = {}, repeatedCount = 2) {
+function normalizeRepeatedEventImpact(impact = {}, repeatedCount = 2, assets = []) {
   const repeatedFloor = getRepeatedImpactFloor(repeatedCount);
+  const assetMap = Object.fromEntries(assets.map((asset) => [asset.id, asset]));
   return Object.fromEntries(
     Object.entries(impact).map(([assetId, value]) => {
       if (value === 0) return [assetId, 0];
       const direction = value > 0 ? 1 : -1;
       const absoluteImpact = Math.abs(value);
-      const isDirectAsset = absoluteImpact >= DIRECT_REPEATED_IMPACT_THRESHOLD;
-      const adjustedValue = isDirectAsset
-        ? Math.max(absoluteImpact, repeatedFloor)
-        : Math.min(
-            Math.max(absoluteImpact, MIN_INDIRECT_REPEATED_EVENT_IMPACT),
-            MAX_INDIRECT_REPEATED_EVENT_IMPACT,
-          );
+      const { min, max } = getRepeatedImpactBounds(assetMap[assetId], repeatedFloor, absoluteImpact);
+      const adjustedValue = clampNumber(absoluteImpact, min, max);
       return [assetId, Number((direction * adjustedValue).toFixed(3))];
     }),
   );
@@ -867,24 +1070,24 @@ function getAppliedEventTypeCounts(events) {
 }
 
 const eventMacroImpacts = {
-  'rate-up': { baseRateDelta: 0.5, propertyMove: -0.04, exchangeMove: 0.01 },
-  'rate-down': { baseRateDelta: -0.5, propertyMove: 0.04, exchangeMove: -0.01 },
-  'deposit-special': { baseRateDelta: 0.2, propertyMove: -0.02, exchangeMove: 0 },
-  'property-ease': { baseRateDelta: 0, propertyMove: 0.06, exchangeMove: 0 },
-  'us-rally': { baseRateDelta: 0, propertyMove: 0.01, exchangeMove: -0.015 },
-  'korea-export': { baseRateDelta: 0, propertyMove: 0.01, exchangeMove: -0.01 },
-  rare: { baseRateDelta: 0, propertyMove: -0.01, exchangeMove: 0.02 },
-  housing: { baseRateDelta: 0, propertyMove: 0.04, exchangeMove: 0 },
-  'us-regulation': { baseRateDelta: 0, propertyMove: -0.01, exchangeMove: 0.01 },
-  'fx-spike': { baseRateDelta: 0, propertyMove: -0.01, exchangeMove: 0.06 },
-  'korea-us-chip-tension': { baseRateDelta: 0, propertyMove: -0.01, exchangeMove: 0.02 },
-  'oil-supply-shock': { baseRateDelta: 0.1, propertyMove: -0.01, exchangeMove: 0.025 },
-  'grain-shock': { baseRateDelta: 0.1, propertyMove: -0.005, exchangeMove: 0.015 },
-  'us-yield-spike': { baseRateDelta: 0.3, propertyMove: -0.03, exchangeMove: 0.03 },
-  'em-credit-stress': { baseRateDelta: 0, propertyMove: -0.02, exchangeMove: 0.035 },
-  'war-risk': { baseRateDelta: 0.1, propertyMove: -0.025, exchangeMove: 0.04 },
-  'election-risk': { baseRateDelta: 0.05, propertyMove: -0.025, exchangeMove: 0.025 },
-  'argentina-reform': { baseRateDelta: 0, propertyMove: -0.01, exchangeMove: 0.025 },
+  'rate-up': { baseRateDelta: 0.5, propertyMove: -0.04, exchangeMove: 0.01, unemploymentDelta: 0.1 },
+  'rate-down': { baseRateDelta: -0.5, propertyMove: 0.04, exchangeMove: -0.01, unemploymentDelta: -0.08 },
+  'deposit-special': { baseRateDelta: 0.25, propertyMove: -0.02, exchangeMove: 0, unemploymentDelta: 0.02 },
+  'property-ease': { baseRateDelta: 0, propertyMove: 0.06, exchangeMove: 0, unemploymentDelta: -0.05 },
+  'us-rally': { baseRateDelta: 0, propertyMove: 0.01, exchangeMove: -0.015, unemploymentDelta: -0.08 },
+  'korea-export': { baseRateDelta: 0, propertyMove: 0.01, exchangeMove: -0.01, unemploymentDelta: -0.12 },
+  rare: { baseRateDelta: 0, propertyMove: -0.01, exchangeMove: 0.02, unemploymentDelta: 0.05 },
+  housing: { baseRateDelta: 0, propertyMove: 0.04, exchangeMove: 0, unemploymentDelta: -0.08 },
+  'us-regulation': { baseRateDelta: 0, propertyMove: -0.01, exchangeMove: 0.01, unemploymentDelta: 0.08 },
+  'fx-spike': { baseRateDelta: 0, propertyMove: -0.01, exchangeMove: 0.06, unemploymentDelta: 0.04 },
+  'korea-us-chip-tension': { baseRateDelta: 0, propertyMove: -0.01, exchangeMove: 0.02, unemploymentDelta: 0.08 },
+  'oil-supply-shock': { baseRateDelta: 0.1, propertyMove: -0.01, exchangeMove: 0.025, unemploymentDelta: 0.08 },
+  'grain-shock': { baseRateDelta: 0.1, propertyMove: -0.005, exchangeMove: 0.015, unemploymentDelta: 0.06 },
+  'us-yield-spike': { baseRateDelta: 0.3, propertyMove: -0.03, exchangeMove: 0.03, unemploymentDelta: 0.1 },
+  'em-credit-stress': { baseRateDelta: 0, propertyMove: -0.02, exchangeMove: 0.035, unemploymentDelta: 0.12 },
+  'war-risk': { baseRateDelta: 0.1, propertyMove: -0.025, exchangeMove: 0.04, unemploymentDelta: 0.15 },
+  'election-risk': { baseRateDelta: 0.05, propertyMove: -0.025, exchangeMove: 0.025, unemploymentDelta: 0.08 },
+  'argentina-reform': { baseRateDelta: 0, propertyMove: -0.01, exchangeMove: 0.025, unemploymentDelta: 0.05 },
 };
 
 function combineEventMacroImpacts(events) {
@@ -896,9 +1099,10 @@ function combineEventMacroImpacts(events) {
         baseRateDelta: acc.baseRateDelta + (impact.baseRateDelta ?? 0),
         propertyMove: acc.propertyMove + (impact.propertyMove ?? 0),
         exchangeMove: acc.exchangeMove + (impact.exchangeMove ?? 0),
+        unemploymentDelta: acc.unemploymentDelta + (impact.unemploymentDelta ?? 0),
       };
     },
-    { baseRateDelta: 0, propertyMove: 0, exchangeMove: 0 },
+    { baseRateDelta: 0, propertyMove: 0, exchangeMove: 0, unemploymentDelta: 0 },
   );
 }
 
@@ -931,43 +1135,57 @@ function getRandomMacroDelta(max, decimals = 2) {
   return Number(((Math.random() * 2 - 1) * max).toFixed(decimals));
 }
 
-function createMacroMove({ baseRate, propertyIndex, exchangeRate, eventMacroImpact = {} }) {
+function createMacroMove({ baseRate, propertyIndex, exchangeRate, unemploymentRate, eventMacroImpact = {} }) {
   const randomBaseRateDelta = getRandomMacroDelta(0.2, 2);
   const randomPropertyMove = getRandomMacroDelta(0.03, 3);
   const randomExchangeMove = getRandomMacroDelta(0.04, 3);
+  const randomUnemploymentDelta = getRandomMacroDelta(0.18, 2);
   const baseRateDelta = Number((randomBaseRateDelta + (eventMacroImpact.baseRateDelta ?? 0)).toFixed(2));
   const propertyMove = Number((randomPropertyMove + (eventMacroImpact.propertyMove ?? 0)).toFixed(3));
   const exchangeMove = Number((randomExchangeMove + (eventMacroImpact.exchangeMove ?? 0)).toFixed(3));
+  const unemploymentDelta = Number((randomUnemploymentDelta + (eventMacroImpact.unemploymentDelta ?? 0)).toFixed(2));
   const nextBaseRate = Math.max(0, Number((baseRate + baseRateDelta).toFixed(2)));
   const nextPropertyIndex = Math.max(80, Math.round(propertyIndex * (1 + propertyMove)));
   const nextExchangeRate = Math.max(900, Math.round(exchangeRate * (1 + exchangeMove)));
+  const nextUnemploymentRate = clampNumber(Number((unemploymentRate + unemploymentDelta).toFixed(2)), 1.5, 14);
   const assetImpact = {
     bank: baseRateDelta > 0 ? 0.03 : -0.03,
+    riverbank: baseRateDelta > 0 ? 0.025 : -0.025,
     neo: baseRateDelta > 0 ? -0.03 : 0.03,
+    dogemars: baseRateDelta > 0 ? -0.035 : 0.035,
     enter: baseRateDelta > 0 ? -0.03 : 0.03,
     realty: propertyMove * 0.8 + (baseRateDelta > 0 ? -0.03 : 0.03),
     infra: propertyMove * 0.5,
+    metroinfra: propertyMove * 0.65,
     sp500: exchangeMove * 0.8,
     kospi: exchangeMove > 0 ? 0.03 : -0.02,
     air: exchangeMove > 0 ? -0.04 : 0.03,
+    oceanair: exchangeMove > 0 ? -0.05 : 0.035,
     food: exchangeMove > 0 ? -0.03 : 0.02,
+    purefood: exchangeMove > 0 ? -0.02 : 0.015,
     usBond: baseRateDelta > 0 ? -0.03 : 0.03,
     argBond: exchangeMove > 0 ? -0.04 : 0.02,
   };
+  const unemploymentImpact = unemploymentDelta > 0
+    ? { air: -0.03, oceanair: -0.04, enter: -0.03, realty: -0.025, infra: -0.02, metroinfra: -0.03, bank: -0.015, riverbank: -0.02, usBond: 0.02, food: 0.01, purefood: 0.015 }
+    : { air: 0.025, oceanair: 0.03, enter: 0.025, realty: 0.02, infra: 0.018, metroinfra: 0.02, bank: 0.012, riverbank: 0.012, usBond: -0.01 };
 
   return {
     baseRateDelta,
     propertyMove,
     exchangeMove,
+    unemploymentDelta,
     nextBaseRate,
     nextPropertyIndex,
     nextExchangeRate,
-    assetImpact,
+    nextUnemploymentRate,
+    assetImpact: combineImpacts(assetImpact, unemploymentImpact),
     eventMacroImpact,
     randomMacroImpact: {
       baseRateDelta: randomBaseRateDelta,
       propertyMove: randomPropertyMove,
       exchangeMove: randomExchangeMove,
+      unemploymentDelta: randomUnemploymentDelta,
     },
   };
 }
@@ -981,7 +1199,90 @@ function combineImpacts(...impacts) {
   }, {});
 }
 
-function moveAssetsLocally(currentAssets, modifier = {}, delistedIds = [], roundNumber = 1) {
+function getFinancialSensitivityImpact(asset, macroMove, resolvedEvents) {
+  if (asset.type !== 'stock' || !asset.financials) return 0;
+  const financials = asset.financials;
+  const appliedEventKeys = new Set(resolvedEvents.filter((event) => event.didApply).map(getEventKey));
+  let impact = 0;
+
+  if (macroMove.baseRateDelta > 0) {
+    impact -= clampNumber((financials.debtRatio - 60) / 260, 0, 1) * 0.035;
+  } else if (macroMove.baseRateDelta < 0) {
+    impact += clampNumber((financials.debtRatio - 60) / 260, 0, 1) * 0.025;
+  }
+
+  impact += macroMove.exchangeMove * ((financials.exportRatio - financials.commodityExposure * 0.45) / 100) * 0.45;
+
+  if (macroMove.unemploymentDelta > 0) {
+    impact -= ((financials.cyclicality + financials.laborSensitivity) / 200) * 0.025;
+  } else if (macroMove.unemploymentDelta < 0) {
+    impact += ((financials.cyclicality + financials.laborSensitivity) / 200) * 0.015;
+  }
+
+  if (appliedEventKeys.has('oil-supply-shock') || appliedEventKeys.has('war-risk')) {
+    impact -= (financials.commodityExposure / 100) * 0.022;
+  }
+  if (appliedEventKeys.has('grain-shock') && asset.sector.includes('식품')) {
+    impact -= (financials.commodityExposure / 100) * 0.026;
+  }
+  if (appliedEventKeys.has('rare') && (asset.sector.includes('반도체') || asset.sector.includes('전기차') || asset.sector.includes('재생'))) {
+    impact -= (financials.commodityExposure / 100) * 0.024;
+  }
+  if (appliedEventKeys.has('us-regulation') && asset.country === '미국') {
+    impact -= (financials.policySensitivity / 100) * 0.024;
+  }
+  if ((appliedEventKeys.has('housing') || appliedEventKeys.has('property-ease')) && asset.sector.includes('인프라')) {
+    impact += (financials.policySensitivity / 100) * 0.022;
+  }
+
+  if (impact < 0) {
+    const cashBuffer = clampNumber((financials.cashReserve / Math.max(financials.revenue, 0.1)) * 0.12, 0, 0.25);
+    impact *= (1 - cashBuffer);
+    if (financials.debtRatio >= 180) impact *= 1.15;
+  }
+
+  return Number(clampNumber(impact, -0.04, 0.04).toFixed(3));
+}
+
+function getFinancialImpactMap(assets, macroMove, resolvedEvents) {
+  return Object.fromEntries(
+    assets
+      .map((asset) => [asset.id, getFinancialSensitivityImpact(asset, macroMove, resolvedEvents)])
+      .filter(([, impact]) => impact !== 0),
+  );
+}
+
+function updateAssetFinancials(asset, totalImpact, macroMove) {
+  if (!asset.financials) return null;
+  const financials = asset.financials;
+  const revenueMove = clampNumber(
+    totalImpact * 0.45
+      + macroMove.exchangeMove * ((financials.exportRatio - financials.commodityExposure * 0.35) / 100)
+      - Math.max(0, macroMove.unemploymentDelta) * 0.015,
+    -0.08,
+    0.08,
+  );
+  const marginDelta = clampNumber(
+    totalImpact * 5
+      - Math.max(0, macroMove.baseRateDelta) * (financials.debtRatio / 240) * 0.8
+      - Math.max(0, macroMove.unemploymentDelta) * (financials.laborSensitivity / 100),
+    -2.4,
+    2.4,
+  );
+  const debtDelta = macroMove.baseRateDelta * (financials.debtRatio >= 150 ? 8 : 4) - totalImpact * 10;
+  const nextMargin = clampNumber(financials.operatingMargin + marginDelta, -8, 38);
+
+  return {
+    ...financials,
+    revenue: Number(clampNumber(financials.revenue * (1 + revenueMove), 0.2, 40).toFixed(2)),
+    operatingMargin: Number(nextMargin.toFixed(1)),
+    debtRatio: Math.round(clampNumber(financials.debtRatio + debtDelta + (nextMargin < 2 ? 4 : 0), 10, 360)),
+    cashReserve: Number(clampNumber(financials.cashReserve * (1 + nextMargin / 1000 + totalImpact * 0.08), 0.02, 10).toFixed(2)),
+    creditRisk: Math.round(clampNumber(financials.creditRisk + macroMove.unemploymentDelta * 2 + Math.max(0, macroMove.baseRateDelta) * 2 - totalImpact * 8, 3, 98)),
+  };
+}
+
+function moveAssetsLocally(currentAssets, modifier = {}, delistedIds = [], roundNumber = 1, macroMove = null, negativeStreakByAsset = {}) {
   return currentAssets.map((asset) => {
     if (asset.delisted) return asset;
     if (delistedIds.includes(asset.id)) {
@@ -989,6 +1290,7 @@ function moveAssetsLocally(currentAssets, modifier = {}, delistedIds = [], round
         ...asset,
         delisted: true,
         delistedRound: roundNumber,
+        negativeStreak: negativeStreakByAsset[asset.id] ?? asset.negativeStreak ?? 0,
         price: 0,
         history: [...asset.history, 0].slice(-13),
       };
@@ -1000,6 +1302,8 @@ function moveAssetsLocally(currentAssets, modifier = {}, delistedIds = [], round
       ...asset,
       price: nextPrice,
       history: [...asset.history, nextPrice].slice(-13),
+      negativeStreak: negativeStreakByAsset[asset.id] ?? asset.negativeStreak ?? 0,
+      financials: macroMove ? updateAssetFinancials(asset, eventImpact + marketMove, macroMove) ?? asset.financials : asset.financials,
     };
   });
 }
@@ -1015,13 +1319,22 @@ function getDepositRate(baseRate) {
 }
 
 function getAssetProfile(asset) {
-  return assetLearningProfiles[asset.id] ?? {
+  const baseProfile = assetLearningProfiles[asset.id] ?? {
     story: `${asset.name}은 ${asset.sector} 흐름을 단순화한 가상 자산입니다. 가격만 보지 말고 어떤 이슈에서 변동 가능성이 커지는지 함께 확인해보세요.`,
     metrics: [['자산 유형', assetTypeLabels[asset.type] ?? asset.type], ['국가', asset.country], ['분야', asset.sector], ['현재가', formatAssetPrice(asset)]],
     signals: { stability: '보통', growth: '보통', volatility: '보통' },
     riskTags: ['이슈민감', '분산투자필요'],
     sensitivity: ['금리 변화', '정책 변화', '시장 심리'],
     prompt: '이 자산은 어떤 뉴스에서 변동 가능성이 커질까요?',
+  };
+  const financialMetrics = buildFinancialMetrics(asset);
+  if (!financialMetrics) return baseProfile;
+
+  return {
+    ...baseProfile,
+    metrics: financialMetrics,
+    signals: getFinancialSignals(asset.financials),
+    riskTags: [...new Set([...baseProfile.riskTags, asset.financials.profile, asset.financials.debtRatio >= 160 ? '부채주의' : '재무체크'])],
   };
 }
 
@@ -1174,7 +1487,7 @@ function RoundExplanation({ summary, assets, compact = false }) {
             <div className="explain-head">
               <strong>거시 지표 변화</strong>
               <b className="result-badge expectation">시장 환경 변화</b>
-              <span>선택된 이슈와 라운드별 시장 흐름이 함께 반영되어 금리, 부동산, 환율이 움직였습니다.</span>
+              <span>선택된 이슈와 라운드별 시장 흐름이 함께 반영되어 금리, 부동산, 환율, 실업률이 움직였습니다.</span>
             </div>
             <div className="impact-chips">
               <span className={summary.macroMove.baseRateDelta >= 0 ? 'up-chip' : 'down-chip'}>
@@ -1185,6 +1498,9 @@ function RoundExplanation({ summary, assets, compact = false }) {
               </span>
               <span className={summary.macroMove.exchangeMove >= 0 ? 'up-chip' : 'down-chip'}>
                 원/달러 환율 {formatPercent(summary.macroMove.exchangeMove * 100)}
+              </span>
+              <span className={summary.macroMove.unemploymentDelta >= 0 ? 'up-chip' : 'down-chip'}>
+                실업률 {formatPercent(summary.macroMove.unemploymentDelta)}
               </span>
             </div>
           </article>
@@ -1416,18 +1732,23 @@ function cleanTeamTradeLock(team) {
   return { ...team, tradeHolder: null, tradeHolderExpiresAt: null };
 }
 
-function getTeamParticipantRows(teamAccounts, assets) {
+function getTeamParticipantRows(teamAccounts, assets, players = [], gameStarted = false, round = 1, phase = 'setup') {
   return teamAccounts.map((team) => {
     const cleanTeam = cleanTeamTradeLock(team);
     const holdingsValue = getPortfolioValue(cleanTeam.portfolio, assets);
     const totalAsset = cleanTeam.cash + cleanTeam.deposit + holdingsValue;
+    const memberCount = players.filter((player) => player.teamKey === cleanTeam.key).length;
+    const investedPrincipal = getInvestedPrincipal({ gameStarted, round, phase, memberCount });
     return {
       id: cleanTeam.key,
       name: cleanTeam.name,
       cash: cleanTeam.cash,
       deposit: cleanTeam.deposit,
       totalAsset,
-      returnRate: totalAsset > 0 ? ((totalAsset - INITIAL_CASH) / INITIAL_CASH) * 100 : 0,
+      cashLikeAsset: cleanTeam.cash + cleanTeam.deposit,
+      investmentAsset: holdingsValue,
+      investedPrincipal,
+      returnRate: getInvestmentReturnRate(totalAsset, investedPrincipal),
       holdings: getHoldingRows(cleanTeam.portfolio, assets).map(({ asset, shares }) => `${asset.name} ${shares.toLocaleString('ko-KR')}주`),
       bankrupt: cleanTeam.bankrupt,
     };
@@ -1465,12 +1786,12 @@ function getInvestorType({ cashLikeAsset, holdingsValue, portfolioRows, totalAss
   return '균형 분산형 투자자';
 }
 
-function buildFinalSubmissionReport({ nickname, cash, deposit, depositInterestEarned = 0, portfolio, assets, tradeLogs, roundLogs, reflection }) {
+function buildFinalSubmissionReport({ nickname, cash, deposit, depositInterestEarned = 0, investedPrincipal = INITIAL_CASH, portfolio, assets, tradeLogs, roundLogs, reflection }) {
   const portfolioRows = getHoldingRows(portfolio, assets);
   const investmentAsset = portfolioRows.reduce((sum, row) => sum + row.value, 0);
   const cashLikeAsset = cash + deposit;
   const totalAsset = cashLikeAsset + investmentAsset;
-  const returnRate = ((totalAsset - INITIAL_CASH) / INITIAL_CASH) * 100;
+  const returnRate = getInvestmentReturnRate(totalAsset, investedPrincipal);
   const investorType = getInvestorType({ cashLikeAsset, holdingsValue: investmentAsset, portfolioRows, totalAsset });
   const portfolioReport = portfolioRows.map(({ asset, shares, value }) => ({
     name: asset.name,
@@ -1488,6 +1809,7 @@ function buildFinalSubmissionReport({ nickname, cash, deposit, depositInterestEa
     cash,
     deposit,
     depositInterestEarned,
+    investedPrincipal,
     cashLikeAsset,
     investmentAsset,
     returnRate,
@@ -1705,9 +2027,10 @@ function TeacherRankingPanel({ players, submissions, activeStudent, gameFinished
     : [{
         nickname: activeStudent.name,
         totalAsset: activeStudent.totalAsset,
-        cashLikeAsset: activeStudent.totalAsset,
-        investmentAsset: 0,
-        returnRate: ((activeStudent.totalAsset - INITIAL_CASH) / INITIAL_CASH) * 100,
+        cashLikeAsset: activeStudent.cashLikeAsset ?? activeStudent.totalAsset,
+        investmentAsset: activeStudent.investmentAsset ?? 0,
+        investedPrincipal: activeStudent.investedPrincipal ?? INITIAL_CASH,
+        returnRate: activeStudent.returnRate ?? getInvestmentReturnRate(activeStudent.totalAsset, activeStudent.investedPrincipal ?? INITIAL_CASH),
         investorType: '제출 전',
       }];
   const submittedRows = submissions.length
@@ -1878,6 +2201,7 @@ function FinalReport({
   cash,
   deposit,
   depositInterestEarned,
+  investedPrincipal,
   portfolio,
   assets,
   tradeLogs,
@@ -1889,8 +2213,8 @@ function FinalReport({
 }) {
   const holdingsValue = getPortfolioValue(portfolio, assets);
   const totalAsset = cash + deposit + holdingsValue;
-  const returnRate = ((totalAsset - INITIAL_CASH) / INITIAL_CASH) * 100;
-  const investorType = submission?.investorType ?? buildFinalSubmissionReport({ nickname, cash, deposit, depositInterestEarned, portfolio, assets, tradeLogs, roundLogs, reflection }).investorType;
+  const returnRate = getInvestmentReturnRate(totalAsset, investedPrincipal);
+  const investorType = submission?.investorType ?? buildFinalSubmissionReport({ nickname, cash, deposit, depositInterestEarned, investedPrincipal, portfolio, assets, tradeLogs, roundLogs, reflection }).investorType;
 
   return (
     <section className="final-report" aria-label="나의 투자 결과 보고서">
@@ -1912,6 +2236,10 @@ function FinalReport({
         <div>
           <span>현금성 자산</span>
           <strong>{formatWon(cash + deposit)}</strong>
+        </div>
+        <div>
+          <span>투입 원금</span>
+          <strong>{formatWon(investedPrincipal)}</strong>
         </div>
         <div>
           <span>최종 수익률</span>
@@ -2024,9 +2352,16 @@ const macroGuideItems = {
     down: '내리면 수입 비용 부담은 줄지만, 수출 기업의 원화 환산 매출 기대는 약해질 수 있습니다.',
     examples: ['해외 ETF', '항공', '식품', '수출주'],
   },
+  unemploymentRate: {
+    title: '실업률',
+    summary: '일할 의사가 있지만 일자리를 얻지 못한 사람의 비율입니다. 경기의 체온계처럼 소비와 기업 실적 기대에 영향을 줍니다.',
+    up: '오르면 소비가 줄고 여행, 콘텐츠, 건설 같은 경기민감 업종은 부담을 받을 수 있습니다. 안전자산 선호는 커질 수 있습니다.',
+    down: '내리면 소비와 고용이 좋아졌다는 신호로 해석되어 경기민감 업종과 주식시장 심리가 개선될 수 있습니다.',
+    examples: ['항공', '콘텐츠', '건설', '미국 국채'],
+  },
 };
 
-function MacroGuide({ baseRate, depositRate, propertyAsset, exchangeRate }) {
+function MacroGuide({ baseRate, depositRate, propertyAsset, exchangeRate, unemploymentRate }) {
   const [selectedGuide, setSelectedGuide] = useState('baseRate');
   const item = macroGuideItems[selectedGuide];
   const currentValue = {
@@ -2034,6 +2369,7 @@ function MacroGuide({ baseRate, depositRate, propertyAsset, exchangeRate }) {
     depositRate: `${depositRate.toFixed(1)}%`,
     propertyIndex: propertyAsset ? formatWon(propertyAsset.price) : '-',
     exchangeRate: `${exchangeRate.toLocaleString('ko-KR')}원`,
+    unemploymentRate: `${unemploymentRate.toFixed(1)}%`,
   }[selectedGuide];
 
   return (
@@ -2175,7 +2511,7 @@ function AppHeader({ view, setView, hostAuthenticated, studentEntryAllowed, stud
   );
 }
 
-function HomeView({ setView, roomPin, round, playerCount, baseRate, exchangeRate, expiresAt, roomExpired, syncStatus, studentEntryAllowed, onCreateRoom, hostAuthenticated, studentJoined }) {
+function HomeView({ setView, roomPin, round, playerCount, baseRate, exchangeRate, unemploymentRate, expiresAt, roomExpired, syncStatus, studentEntryAllowed, onCreateRoom, hostAuthenticated, studentJoined }) {
   return (
     <main className="home-view">
       <section className="hero-band">
@@ -2235,6 +2571,11 @@ function HomeView({ setView, roomPin, round, playerCount, baseRate, exchangeRate
               <Globe2 size={19} aria-hidden="true" />
               <strong>{exchangeRate.toLocaleString('ko-KR')}원</strong>
               <span>원/달러 환율</span>
+            </div>
+            <div>
+              <Activity size={19} aria-hidden="true" />
+              <strong>{unemploymentRate.toFixed(1)}%</strong>
+              <span>실업률</span>
             </div>
           </div>
           <p className="sync-note">
@@ -2335,6 +2676,7 @@ function HostView({
   newsFeed,
   baseRate,
   exchangeRate,
+  unemploymentRate,
   activeStudent,
   expiresAt,
   roomExpired,
@@ -2479,6 +2821,11 @@ function HostView({
             <Globe2 size={20} aria-hidden="true" />
             <span>원/달러 환율</span>
             <strong>{exchangeRate.toLocaleString('ko-KR')}원</strong>
+          </div>
+          <div>
+            <Activity size={20} aria-hidden="true" />
+            <span>실업률</span>
+            <strong>{unemploymentRate.toFixed(1)}%</strong>
           </div>
         </section>
 
@@ -2646,8 +2993,10 @@ function StudentView({
   cash,
   deposit,
   depositInterestEarned,
+  investedPrincipal,
   baseRate,
   exchangeRate,
+  unemploymentRate,
   tradeLogs,
   roundLogs,
   reflection,
@@ -2690,7 +3039,7 @@ function StudentView({
   const selectedAsset = assets.find((asset) => asset.id === selectedAssetId) ?? assets[0];
   const holdingsValue = assets.reduce((sum, asset) => sum + (portfolio[asset.id] ?? 0) * asset.price, 0);
   const totalAsset = cash + deposit + holdingsValue;
-  const returnRate = gameStarted ? ((totalAsset - INITIAL_CASH) / INITIAL_CASH) * 100 : 0;
+  const returnRate = gameStarted ? getInvestmentReturnRate(totalAsset, investedPrincipal) : 0;
   const selectedShares = portfolio[selectedAsset.id] ?? 0;
   const selectedHoldingValue = selectedShares * selectedAsset.price;
   const depositRate = getDepositRate(baseRate);
@@ -2824,6 +3173,7 @@ function StudentView({
             cash={cash}
             deposit={deposit}
             depositInterestEarned={depositInterestEarned}
+            investedPrincipal={investedPrincipal}
             portfolio={portfolio}
             assets={assets}
             tradeLogs={tradeLogs}
@@ -2875,7 +3225,7 @@ function StudentView({
 
         <PortfolioDonut cash={cash} deposit={deposit} portfolio={portfolio} assets={assets} />
 
-        <MacroGuide baseRate={baseRate} depositRate={depositRate} propertyAsset={propertyAsset} exchangeRate={exchangeRate} />
+        <MacroGuide baseRate={baseRate} depositRate={depositRate} propertyAsset={propertyAsset} exchangeRate={exchangeRate} unemploymentRate={unemploymentRate} />
 
         <section className="deposit-ticket" aria-labelledby="deposit-heading">
           <div>
@@ -2991,6 +3341,7 @@ export function App() {
   const [isPaused, setIsPaused] = useState(false);
   const [baseRate, setBaseRate] = useState(INITIAL_BASE_RATE);
   const [exchangeRate, setExchangeRate] = useState(INITIAL_EXCHANGE_RATE);
+  const [unemploymentRate, setUnemploymentRate] = useState(INITIAL_UNEMPLOYMENT_RATE);
   const [assets, setAssets] = useState(() => createRandomizedAssets());
   const [triggeredEventsByRound, setTriggeredEventsByRound] = useState({});
   const [latestRoundSummary, setLatestRoundSummary] = useState(null);
@@ -3037,7 +3388,7 @@ export function App() {
   const teamMode = roomMode === 'team';
   const activeTeam = cleanTeamTradeLock(teamAccounts.find((team) => team.key === selectedTeamKey) ?? teamAccounts[0]);
   const teamTradeAllowed = teamMode ? isTeamTradeLockActive(activeTeam, nickname) : true;
-  const teamParticipantRows = teamMode ? getTeamParticipantRows(teamAccounts, assets) : [];
+  const teamParticipantRows = teamMode ? getTeamParticipantRows(teamAccounts, assets, players, gameStarted, round, phase) : [];
   const displayedPlayers = teamMode ? teamParticipantRows : players;
   const { playerCount, roomFull } = getRoomCapacityState({
     basePlayerCount: joined ? players.filter((player) => String(player.studentNumber) !== String(studentNumber)).length : players.length,
@@ -3053,12 +3404,18 @@ export function App() {
   const reportNickname = studentNameLabel;
   const studentHoldingsValue = getPortfolioValue(effectivePortfolio, assets);
   const studentTotalAsset = effectiveCash + effectiveDeposit + studentHoldingsValue;
+  const activeTeamMemberCount = teamMode ? players.filter((player) => player.teamKey === selectedTeamKey).length : 1;
+  const investedPrincipal = getInvestedPrincipal({ gameStarted, round, phase, memberCount: activeTeamMemberCount });
   const submittedReport = submissions.find((submission) => submission.nickname === reportNickname);
   const activeStudent = buildStudentSnapshot({
     id: teamMode ? activeTeam.key : 'active-student',
     name: joined ? studentDisplayName : `${nickname || '학생'} (대기)`,
     totalAsset: studentTotalAsset,
     holdings: getHoldingRows(effectivePortfolio, assets).map(({ asset, shares }) => `${asset.name} ${shares.toLocaleString('ko-KR')}주`),
+    returnRate: getInvestmentReturnRate(studentTotalAsset, investedPrincipal),
+    cashLikeAsset: effectiveCash + effectiveDeposit,
+    investmentAsset: studentHoldingsValue,
+    investedPrincipal,
   });
 
   const applyRemoteRoomBundle = useCallback((bundle) => {
@@ -3081,6 +3438,7 @@ export function App() {
     setIsPaused(bundle.room.is_paused);
     setBaseRate(Number(bundle.room.base_rate));
     setExchangeRate(Number(bundle.room.exchange_rate ?? INITIAL_EXCHANGE_RATE));
+    setUnemploymentRate(Number(bundle.room.unemployment_rate ?? INITIAL_UNEMPLOYMENT_RATE));
     if (bundle.assets.length) setAssets(bundle.assets);
     setTriggeredEventsByRound(groupedEvents);
     setLatestRoundSummary(resolvedCurrentEvents.length ? { round: remoteRound, events: resolvedCurrentEvents, delistedAssets: [] } : null);
@@ -3158,10 +3516,10 @@ export function App() {
       cash: effectiveCash,
       deposit: effectiveDeposit,
       totalAsset: studentTotalAsset,
-      returnRate: ((studentTotalAsset - INITIAL_CASH) / INITIAL_CASH) * 100,
+      returnRate: getInvestmentReturnRate(studentTotalAsset, investedPrincipal),
     };
     upsertRemotePlayer(remoteRoomId, remotePlayer).catch((error) => setSyncStatus(`학생 정보 저장 실패: ${error.message}`));
-  }, [effectiveCash, effectiveDeposit, joined, nickname, remoteRoomId, selectedTeamKey, studentNumber, studentPasscodeHash, studentTotalAsset, teamMode]);
+  }, [effectiveCash, effectiveDeposit, investedPrincipal, joined, nickname, remoteRoomId, selectedTeamKey, studentNumber, studentPasscodeHash, studentTotalAsset, teamMode]);
 
   useEffect(() => {
     if (!gameStarted || !joined || teamMode || phase !== 'open' || salaryPaidRounds.includes(round)) return;
@@ -3455,6 +3813,7 @@ export function App() {
     setIsPaused(nextRoom.isPaused);
     setBaseRate(nextRoom.baseRate);
     setExchangeRate(INITIAL_EXCHANGE_RATE);
+    setUnemploymentRate(INITIAL_UNEMPLOYMENT_RATE);
     setAssets(nextRoom.assets);
     setTriggeredEventsByRound(nextRoom.triggeredEventsByRound);
     setLatestRoundSummary(nextRoom.latestRoundSummary);
@@ -3491,6 +3850,7 @@ export function App() {
         now,
         baseRate: INITIAL_BASE_RATE,
         exchangeRate: INITIAL_EXCHANGE_RATE,
+        unemploymentRate: INITIAL_UNEMPLOYMENT_RATE,
         assets: nextAssets,
         mode: roomMode,
         teams: roomMode === 'team' ? nextTeams : [],
@@ -3564,11 +3924,12 @@ export function App() {
     if (startMode === 'none') {
       publishedEvents = [];
     }
+    const nextPrincipal = getInvestedPrincipal({ gameStarted: true, round, phase: 'open' });
     const salariedPlayers = players.map((player) => ({
       ...player,
       cash: (player.cash ?? 0) + ROUND_SALARY,
       totalAsset: (player.totalAsset ?? 0) + ROUND_SALARY,
-      returnRate: (((player.totalAsset ?? INITIAL_CASH) + ROUND_SALARY - INITIAL_CASH) / INITIAL_CASH) * 100,
+      returnRate: getInvestmentReturnRate((player.totalAsset ?? INITIAL_CASH) + ROUND_SALARY, nextPrincipal),
     }));
     const salariedTeams = payTeamRoundSalary(teamAccounts, players);
     setTriggeredEventsByRound((current) => ({
@@ -3643,8 +4004,8 @@ export function App() {
         repeatedCount,
         resolvedImpact: event.didApply
           ? repeatedVolatility
-            ? normalizeRepeatedEventImpact(event.impact, repeatedCount)
-            : normalizeEventImpact(event.impact, MIN_EVENT_IMPACT)
+            ? normalizeRepeatedEventImpact(event.impact, repeatedCount, assets)
+            : normalizeEventImpact(event.impact, assets)
           : {},
       };
     });
@@ -3656,22 +4017,41 @@ export function App() {
       baseRate,
       propertyIndex: propertyAsset?.price ?? 250_000,
       exchangeRate,
+      unemploymentRate,
       eventMacroImpact,
     });
     const nextBaseRate = macroMove.nextBaseRate;
-    const combinedImpact = combineImpacts(eventImpact, macroMove.assetImpact);
+    const financialImpact = getFinancialImpactMap(assets, macroMove, resolvedEvents);
+    const combinedImpact = combineImpacts(eventImpact, macroMove.assetImpact, financialImpact);
+    const directNegativeCounts = resolvedEvents.reduce((acc, event) => {
+      if (!event.didApply) return acc;
+      Object.entries(event.impact ?? {}).forEach(([assetId, value]) => {
+        const asset = assets.find((item) => item.id === assetId);
+        if (asset?.type === 'stock' && value <= STRONG_NEGATIVE_IMPACT) {
+          acc[assetId] = (acc[assetId] ?? 0) + 1;
+        }
+      });
+      return acc;
+    }, {});
+    const negativeStreakByAsset = Object.fromEntries(
+      assets.map((asset) => {
+        const stressCount = directNegativeCounts[asset.id] ?? 0;
+        return [asset.id, stressCount >= 2 ? (asset.negativeStreak ?? 0) + 1 : 0];
+      }),
+    );
 
     setBaseRate(nextBaseRate);
     setExchangeRate(macroMove.nextExchangeRate);
+    setUnemploymentRate(macroMove.nextUnemploymentRate);
 
     const delistedAssets = round >= DELISTING_START_ROUND
       ? assets
-          .filter((asset) => asset.type === 'stock' && !asset.delisted && (combinedImpact[asset.id] ?? 0) <= STRONG_NEGATIVE_IMPACT)
+          .filter((asset) => asset.type === 'stock' && !asset.delisted && (negativeStreakByAsset[asset.id] ?? 0) >= 2)
           .filter(() => Math.random() < DELISTING_PROBABILITY)
           .map((asset) => ({ id: asset.id, name: asset.name }))
       : [];
 
-    const nextAssets = moveAssetsLocally(assets, combinedImpact, delistedAssets.map((asset) => asset.id), round);
+    const nextAssets = moveAssetsLocally(assets, combinedImpact, delistedAssets.map((asset) => asset.id), round, macroMove, negativeStreakByAsset);
     const depositInterest = Math.round(deposit * (getDepositRate(nextBaseRate) / 100 / 4));
     const nextDeposit = deposit + depositInterest;
     const nextTeamAccounts = teamAccounts.map((team) => {
@@ -3725,9 +4105,12 @@ export function App() {
       pushNews(`${round}라운드 장 마감`, '등록된 이슈가 실제 이벤트로 확인되어 장 마감 가격에 반영되었습니다.');
     }
     setPlayers((current) =>
-      current.map((player, index) => ({
+      current.map((player) => ({
         ...player,
-        returnRate: Number((player.returnRate + ((round + index) % 5 - 1.5) * 1.7).toFixed(1)),
+        returnRate: getInvestmentReturnRate(
+          player.totalAsset ?? Math.round(INITIAL_CASH * (1 + (player.returnRate ?? 0) / 100)),
+          getInvestedPrincipal({ gameStarted: true, round, phase: 'closed' }),
+        ),
       })),
     );
 
@@ -3738,6 +4121,7 @@ export function App() {
             phase: 'closed',
             base_rate: nextBaseRate,
             exchange_rate: macroMove.nextExchangeRate,
+            unemployment_rate: macroMove.nextUnemploymentRate,
           }),
           upsertRemoteAssets(remoteRoomId, nextAssets),
           updateRemoteIssues(remoteRoomId, resolvedEvents, round),
@@ -3773,6 +4157,7 @@ export function App() {
       cash: effectiveCash,
       deposit: effectiveDeposit,
       depositInterestEarned: effectiveDepositInterestEarned,
+      investedPrincipal,
       portfolio: effectivePortfolio,
       assets,
       tradeLogs,
@@ -3795,11 +4180,12 @@ export function App() {
 
   function handleDownloadSubmissions() {
     const rows = [
-      ['순위', '이름', '총자산', '현금성자산', '투자평가금', '예금이자수익', '수익률', '투자성향', '보유자산', '잘한점', '부족한점', '다음계획'],
+      ['순위', '이름', '총자산', '투입원금', '현금성자산', '투자평가금', '예금이자수익', '수익률', '투자성향', '보유자산', '잘한점', '부족한점', '다음계획'],
       ...[...submissions].sort((a, b) => b.totalAsset - a.totalAsset).map((submission, index) => [
         index + 1,
         submission.nickname,
         submission.totalAsset,
+        submission.investedPrincipal ?? INITIAL_CASH,
         submission.cashLikeAsset,
         submission.investmentAsset,
         submission.depositInterestEarned ?? 0,
@@ -3920,6 +4306,7 @@ export function App() {
           playerCount={playerCount}
           baseRate={baseRate}
           exchangeRate={exchangeRate}
+          unemploymentRate={unemploymentRate}
           expiresAt={expiresAt}
           roomExpired={roomExpired}
           syncStatus={syncStatus}
@@ -3946,6 +4333,7 @@ export function App() {
           newsFeed={newsFeed}
           baseRate={baseRate}
           exchangeRate={exchangeRate}
+          unemploymentRate={unemploymentRate}
           activeStudent={activeStudent}
           expiresAt={expiresAt}
           roomExpired={roomExpired}
@@ -3998,8 +4386,10 @@ export function App() {
           cash={effectiveCash}
           deposit={effectiveDeposit}
           depositInterestEarned={effectiveDepositInterestEarned}
+          investedPrincipal={investedPrincipal}
           baseRate={baseRate}
           exchangeRate={exchangeRate}
+          unemploymentRate={unemploymentRate}
           tradeLogs={tradeLogs}
           roundLogs={roundLogs}
           reflection={reflection}

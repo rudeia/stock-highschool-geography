@@ -10,6 +10,7 @@ create table if not exists public.rooms (
   game_started boolean not null default false,
   base_rate numeric(5, 2) not null default 3.5,
   exchange_rate integer not null default 1350,
+  unemployment_rate numeric(5, 2) not null default 3.5,
   is_paused boolean not null default false,
   created_at timestamptz not null default now(),
   expires_at timestamptz not null default now() + interval '24 hours',
@@ -17,6 +18,7 @@ create table if not exists public.rooms (
 );
 
 alter table public.rooms add column if not exists exchange_rate integer not null default 1350;
+alter table public.rooms add column if not exists unemployment_rate numeric(5, 2) not null default 3.5;
 alter table public.rooms add column if not exists mode text not null default 'individual';
 alter table public.rooms add column if not exists game_started boolean not null default false;
 
@@ -84,9 +86,16 @@ create table if not exists public.assets (
   history bigint[] not null default '{}',
   delisted boolean not null default false,
   delisted_round integer,
+  financial_profile text,
+  financials jsonb not null default '{}'::jsonb,
+  negative_streak integer not null default 0,
   updated_at timestamptz not null default now(),
   unique (room_id, asset_key)
 );
+
+alter table public.assets add column if not exists financial_profile text;
+alter table public.assets add column if not exists financials jsonb not null default '{}'::jsonb;
+alter table public.assets add column if not exists negative_streak integer not null default 0;
 
 create table if not exists public.portfolios (
   id uuid primary key default gen_random_uuid(),
@@ -173,6 +182,7 @@ create table if not exists public.final_submissions (
   cash bigint not null default 0,
   deposit bigint not null default 0,
   deposit_interest_earned bigint not null default 0,
+  invested_principal bigint not null default 100000000,
   cash_like_asset bigint not null default 0,
   investment_asset bigint not null default 0,
   return_rate numeric(8, 2) not null default 0,
@@ -186,6 +196,7 @@ create table if not exists public.final_submissions (
 );
 
 alter table public.final_submissions add column if not exists deposit_interest_earned bigint not null default 0;
+alter table public.final_submissions add column if not exists invested_principal bigint not null default 100000000;
 alter table public.final_submissions add column if not exists student_number integer;
 alter table public.final_submissions add column if not exists team_key text not null default '';
 alter table public.final_submissions add column if not exists team_name text not null default '';

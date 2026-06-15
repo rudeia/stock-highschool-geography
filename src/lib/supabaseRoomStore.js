@@ -17,6 +17,9 @@ function toAssetRow(roomId, asset) {
     history: asset.history ?? [],
     delisted: Boolean(asset.delisted),
     delisted_round: asset.delistedRound ?? null,
+    financial_profile: asset.financialProfile ?? asset.financials?.profile ?? null,
+    financials: asset.financials ?? {},
+    negative_streak: asset.negativeStreak ?? 0,
   };
 }
 
@@ -32,6 +35,9 @@ function fromAssetRow(row) {
     history: row.history?.length ? row.history.map(Number) : [Number(row.price)],
     delisted: row.delisted,
     delistedRound: row.delisted_round ?? undefined,
+    financialProfile: row.financial_profile ?? row.financials?.profile ?? null,
+    financials: row.financials && Object.keys(row.financials).length ? row.financials : null,
+    negativeStreak: Number(row.negative_streak ?? 0),
   };
 }
 
@@ -138,6 +144,7 @@ function fromSubmissionRow(row) {
     cash: Number(row.cash ?? 0),
     deposit: Number(row.deposit ?? 0),
     depositInterestEarned: Number(row.deposit_interest_earned ?? 0),
+    investedPrincipal: Number(row.invested_principal ?? 100000000),
     cashLikeAsset: Number(row.cash_like_asset ?? 0),
     investmentAsset: Number(row.investment_asset ?? 0),
     returnRate: Number(row.return_rate ?? 0),
@@ -179,7 +186,7 @@ async function fetchRoomBundle(query) {
   };
 }
 
-export async function createRemoteRoom({ pin, now, baseRate, exchangeRate = 1350, assets, mode = 'individual', teams = [] }) {
+export async function createRemoteRoom({ pin, now, baseRate, exchangeRate = 1350, unemploymentRate = 3.5, assets, mode = 'individual', teams = [] }) {
   if (!supabaseConfigured) return null;
 
   const { data: existing } = await supabase.from('rooms').select('id').eq('pin', pin).maybeSingle();
@@ -197,6 +204,7 @@ export async function createRemoteRoom({ pin, now, baseRate, exchangeRate = 1350
       game_started: false,
       base_rate: baseRate,
       exchange_rate: exchangeRate,
+      unemployment_rate: unemploymentRate,
       is_paused: false,
       created_at: toIso(now),
       expires_at: toIso(now + 24 * 60 * 60 * 1000),
@@ -395,6 +403,7 @@ export async function upsertRemoteSubmission(roomId, report) {
         cash: Math.round(report.cash ?? 0),
         deposit: Math.round(report.deposit ?? 0),
         deposit_interest_earned: Math.round(report.depositInterestEarned ?? 0),
+        invested_principal: Math.round(report.investedPrincipal ?? 100000000),
         cash_like_asset: Math.round(report.cashLikeAsset ?? 0),
         investment_asset: Math.round(report.investmentAsset ?? 0),
         return_rate: Number(report.returnRate ?? 0),
