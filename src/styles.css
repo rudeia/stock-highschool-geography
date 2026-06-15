@@ -259,7 +259,9 @@ p {
 
 .mode-panel,
 .team-trade-panel,
-.team-picker {
+.team-picker,
+.waiting-panel,
+.draft-issue-list {
   border: 1px solid #d7dee8;
   border-radius: 8px;
   background: #ffffff;
@@ -342,6 +344,69 @@ p {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
+}
+
+.waiting-panel {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.9rem;
+  margin: 0.85rem 0;
+  background: #f8fafc;
+}
+
+.waiting-panel strong {
+  color: #111827;
+}
+
+.waiting-panel p {
+  margin: 0;
+  color: #64748b;
+  line-height: 1.45;
+}
+
+.draft-issue-list {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.85rem;
+  margin: 1rem 0;
+  background: #f8fafc;
+}
+
+.draft-issue-list h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.draft-issue-list article {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.75rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.draft-issue-list article div {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.draft-issue-list article span {
+  color: #64748b;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.draft-issue-list article button {
+  min-height: 36px;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  background: #fff1f2;
+  color: #b91c1c;
+  padding: 0.45rem 0.7rem;
+  font-weight: 900;
 }
 
 .projector-preview {

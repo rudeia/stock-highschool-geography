@@ -35,11 +35,14 @@ import {
 import { supabaseConfigured } from './lib/supabaseClient.js';
 import {
   createRemoteRoom,
+  deleteRemoteIssue,
+  deleteRemoteRoundDraftIssues,
   fetchRemoteSubmissions,
   fetchRemoteRoomById,
   fetchRemoteRoomByPin,
   groupEventsByRound,
   insertRemoteIssue,
+  registerRemotePlayer,
   subscribeRemoteRoom,
   updateRemoteIssues,
   updateRemoteRoom,
@@ -51,6 +54,7 @@ import {
 } from './lib/supabaseRoomStore.js';
 
 const INITIAL_CASH = 100_000_000;
+const ROUND_SALARY = 3_000_000;
 const TOTAL_ROUNDS = 12;
 const MAX_PLAYERS_PER_ROOM = 40;
 const INITIAL_BASE_RATE = 3.5;
@@ -747,14 +751,6 @@ const scenarioEvents = [
   },
 ];
 
-const mockPlayers = [
-  { id: 'p1', name: '민준', returnRate: 12.8, cash: 14_200_000 },
-  { id: 'p2', name: '서연', returnRate: 8.4, cash: 23_800_000 },
-  { id: 'p3', name: '지후', returnRate: 5.1, cash: 31_600_000 },
-  { id: 'p4', name: '하은', returnRate: -1.7, cash: 48_300_000 },
-  { id: 'p5', name: '도윤', returnRate: -4.2, cash: 55_900_000 },
-];
-
 const won = new Intl.NumberFormat('ko-KR', {
   style: 'currency',
   currency: 'KRW',
@@ -1343,9 +1339,13 @@ function getHoldingRows(portfolio, assets) {
 }
 
 function createDefaultTeamAccounts() {
+  return createTeamAccounts(false);
+}
+
+function createTeamAccounts(funded) {
   return teamTemplates.map((team) => ({
     ...team,
-    cash: INITIAL_CASH,
+    cash: funded ? INITIAL_CASH : 0,
     deposit: 0,
     depositInterestEarned: 0,
     portfolio: {},
@@ -1354,6 +1354,46 @@ function createDefaultTeamAccounts() {
     negativeRounds: 0,
     bankrupt: false,
   }));
+}
+
+function fundTeamAccounts(teamAccounts) {
+  return teamAccounts.map((team) => ({
+    ...team,
+    cash: team.bankrupt ? 0 : Math.max(team.cash, INITIAL_CASH),
+    deposit: 0,
+    depositInterestEarned: 0,
+    portfolio: {},
+    tradeHolder: null,
+    tradeHolderExpiresAt: null,
+    negativeRounds: 0,
+    bankrupt: false,
+  }));
+}
+
+function payTeamRoundSalary(teamAccounts, players) {
+  return teamAccounts.map((team) => {
+    const memberCount = players.filter((player) => player.teamKey === team.key).length;
+    const salaryTotal = ROUND_SALARY * memberCount;
+    return team.bankrupt
+      ? team
+      : {
+          ...team,
+          cash: team.cash + salaryTotal,
+        };
+  });
+}
+
+function getStudentDisplayName(studentNumber, nickname) {
+  return studentNumber ? `${studentNumber}번 ${nickname}` : nickname;
+}
+
+function hashStudentPasscode(roomPin, studentNumber, passcode) {
+  const source = `${roomPin}:${studentNumber}:${passcode}`;
+  let hash = 0;
+  for (let index = 0; index < source.length; index += 1) {
+    hash = ((hash << 5) - hash + source.charCodeAt(index)) | 0;
+  }
+  return `mc-${Math.abs(hash).toString(36)}`;
 }
 
 function isTeamTradeLockActive(team, nickname) {
@@ -1381,7 +1421,7 @@ function getTeamParticipantRows(teamAccounts, assets) {
       cash: cleanTeam.cash,
       deposit: cleanTeam.deposit,
       totalAsset,
-      returnRate: ((totalAsset - INITIAL_CASH) / INITIAL_CASH) * 100,
+      returnRate: totalAsset > 0 ? ((totalAsset - INITIAL_CASH) / INITIAL_CASH) * 100 : 0,
       holdings: getHoldingRows(cleanTeam.portfolio, assets).map(({ asset, shares }) => `${asset.name} ${shares.toLocaleString('ko-KR')}주`),
       bankrupt: cleanTeam.bankrupt,
     };
@@ -1578,9 +1618,9 @@ function TeacherStudentMonitor({ players, activeStudent, assets }) {
       const holdingNames = (sampleHoldings[player.id] ?? []).map((id) => assets.find((asset) => asset.id === id)?.name).filter(Boolean);
       return {
         id: player.id,
-        name: player.name,
-        totalAsset: Math.round(INITIAL_CASH * (1 + player.returnRate / 100)),
-        holdings: holdingNames,
+        name: getStudentDisplayName(player.studentNumber, player.name),
+        totalAsset: player.totalAsset ?? Math.round(INITIAL_CASH * (1 + player.returnRate / 100)),
+        holdings: player.holdings?.length ? player.holdings : holdingNames,
       };
     }),
   ];
@@ -1608,7 +1648,7 @@ function TeacherStudentMonitor({ players, activeStudent, assets }) {
 
 function TeacherSubmissionPanel({ players, activeStudent, submissions, gameFinished, onDownloadSubmissions }) {
   const activeStudentName = activeStudent.name.includes('(대기)') ? '' : activeStudent.name;
-  const participantNames = [...new Set([activeStudentName, ...players.map((player) => player.name)].filter(Boolean))];
+  const participantNames = [...new Set([activeStudentName, ...players.map((player) => getStudentDisplayName(player.studentNumber, player.name))].filter(Boolean))];
   const submittedNames = new Set(submissions.map((submission) => submission.nickname));
   const submittedRows = [...submissions].sort((a, b) => b.totalAsset - a.totalAsset);
   const missingNames = participantNames.filter((name) => !submittedNames.has(name));
@@ -1669,7 +1709,7 @@ function TeacherRankingPanel({ players, submissions, activeStudent, gameFinished
     : [
         ...activeStudentRows,
         ...players.map((player) => ({
-          nickname: player.name,
+          nickname: getStudentDisplayName(player.studentNumber, player.name),
           totalAsset: player.totalAsset ?? Math.round(INITIAL_CASH * (1 + player.returnRate / 100)),
           cashLikeAsset: player.cash ?? 0,
           investmentAsset: Math.max(0, (player.totalAsset ?? Math.round(INITIAL_CASH * (1 + player.returnRate / 100))) - (player.cash ?? 0) - (player.deposit ?? 0)),
@@ -2100,7 +2140,7 @@ function AssetLearningPanel({ asset }) {
   );
 }
 
-function AppHeader({ view, setView, hostAuthenticated, studentEntryAllowed }) {
+function AppHeader({ view, setView, hostAuthenticated, studentEntryAllowed, studentJoined }) {
   return (
     <header className="topbar">
       <button className="brand" type="button" onClick={() => setView('home')} aria-label="홈으로 이동">
@@ -2112,10 +2152,12 @@ function AppHeader({ view, setView, hostAuthenticated, studentEntryAllowed }) {
       </button>
 
       <nav className="view-switch" aria-label="화면 전환">
-        <button className={view === 'host' || view === 'host-login' ? 'active' : ''} type="button" data-role={classroomRoles.host} onClick={() => setView(hostAuthenticated ? 'host' : 'host-login')}>
-          <School size={18} aria-hidden="true" />
-          교사
-        </button>
+        {!studentJoined ? (
+          <button className={view === 'host' || view === 'host-login' ? 'active' : ''} type="button" data-role={classroomRoles.host} onClick={() => setView(hostAuthenticated ? 'host' : 'host-login')}>
+            <School size={18} aria-hidden="true" />
+            교사
+          </button>
+        ) : null}
         {studentEntryAllowed || view === 'student' ? (
           <button className={view === 'student' ? 'active' : ''} type="button" data-role={classroomRoles.student} onClick={() => setView('student')}>
             <Smartphone size={18} aria-hidden="true" />
@@ -2127,23 +2169,25 @@ function AppHeader({ view, setView, hostAuthenticated, studentEntryAllowed }) {
   );
 }
 
-function HomeView({ setView, roomPin, round, playerCount, baseRate, exchangeRate, expiresAt, roomExpired, syncStatus, studentEntryAllowed, onCreateRoom, hostAuthenticated }) {
+function HomeView({ setView, roomPin, round, playerCount, baseRate, exchangeRate, expiresAt, roomExpired, syncStatus, studentEntryAllowed, onCreateRoom, hostAuthenticated, studentJoined }) {
   return (
     <main className="home-view">
       <section className="hero-band">
         <div className="hero-copy">
-          <p className="eyebrow">12라운드 · 1억 원 초기 자본 · 방당 최대 {MAX_PLAYERS_PER_ROOM}명</p>
+          <p className="eyebrow">12라운드 · 1억 원 초기 자본 · 라운드 생활 소득 {formatWon(ROUND_SALARY)}</p>
           <h1>모의 투자 시뮬레이터</h1>
           <p className="hero-subtitle">화성에 갈까, 바닥 밑 지하실로 갈까?</p>
           <p className="intro">
-            뉴스와 금리, 예금, ETF, 부동산 지수를 보며 1억 원의 자산을 직접 배분하고 결과를 해석합니다.
+            뉴스와 금리, 예금, ETF, 부동산 지수를 보며 월급을 받는 생활자의 입장에서 자산을 배분하고 결과를 해석합니다.
           </p>
           <div className="hero-actions">
-            <button className="command primary" type="button" onClick={() => setView(hostAuthenticated ? 'host' : 'host-login')}>
-              <School size={20} aria-hidden="true" />
-              교사용 대시보드
-              <ChevronRight size={18} aria-hidden="true" />
-            </button>
+            {!studentJoined ? (
+              <button className="command primary" type="button" onClick={() => setView(hostAuthenticated ? 'host' : 'host-login')}>
+                <School size={20} aria-hidden="true" />
+                교사용 대시보드
+                <ChevronRight size={18} aria-hidden="true" />
+              </button>
+            ) : null}
             {studentEntryAllowed ? (
               <button className="command secondary" type="button" onClick={() => setView('student')}>
                 <LogIn size={20} aria-hidden="true" />
@@ -2229,9 +2273,11 @@ function HostView({
   round,
   phase,
   roomMode,
+  gameStarted,
   isPaused,
   assets,
   players,
+  rankingPlayers,
   newsFeed,
   baseRate,
   exchangeRate,
@@ -2244,6 +2290,7 @@ function HostView({
   submissions,
   gameFinished,
   onCreateRoom,
+  onGameStart,
   onRoomModeChange,
   onIssueDraftChange,
   onStartRound,
@@ -2252,11 +2299,13 @@ function HostView({
   onTogglePause,
   onEndGame,
   onRegisterIssue,
+  onCancelIssue,
+  onClearIssues,
   onDownloadSubmissions,
 }) {
   const propertyAsset = assets.find((asset) => asset.type === 'property');
   const eventLimitReached = currentRoundEvents.length >= MAX_EVENTS_PER_ROUND;
-  const canRegisterIssue = phase === 'setup' && !eventLimitReached && !roomExpired;
+  const canRegisterIssue = gameStarted && phase === 'setup' && !eventLimitReached && !roomExpired;
   const [eventCategory, setEventCategory] = useState('all');
   const filteredScenarioEvents = eventCategory === 'all'
     ? scenarioEvents
@@ -2289,7 +2338,11 @@ function HostView({
             <Radio size={19} aria-hidden="true" />
             새 방 생성
           </button>
-          <button className="command primary" type="button" onClick={onStartRound} disabled={roomExpired || phase !== 'setup' || currentRoundEvents.length === 0}>
+          <button className="command primary" type="button" onClick={onGameStart} disabled={roomExpired || gameStarted || phase !== 'setup'}>
+            <Play size={19} aria-hidden="true" />
+            게임 시작
+          </button>
+          <button className="command primary" type="button" onClick={onStartRound} disabled={roomExpired || !gameStarted || phase !== 'setup' || currentRoundEvents.length === 0}>
             <Play size={19} aria-hidden="true" />
             라운드 시작
           </button>
@@ -2313,13 +2366,13 @@ function HostView({
         <section className="mode-panel" aria-label="수업 방식 설정">
           <div>
             <strong>수업 방식</strong>
-            <span>{phase === 'setup' ? '라운드 준비 중에만 변경할 수 있습니다.' : '라운드 진행 중에는 변경할 수 없습니다.'}</span>
+            <span>{phase === 'setup' && !gameStarted ? '게임 시작 전에 변경하는 것을 권장합니다.' : '게임 시작 후에는 수업 중 혼선을 줄이기 위해 유지하세요.'}</span>
           </div>
           <div className="segmented-control">
-            <button className={roomMode === 'individual' ? 'active' : ''} type="button" onClick={() => onRoomModeChange('individual')} disabled={phase !== 'setup'}>
+            <button className={roomMode === 'individual' ? 'active' : ''} type="button" onClick={() => onRoomModeChange('individual')} disabled={phase !== 'setup' || gameStarted}>
               개인 투자
             </button>
-            <button className={roomMode === 'team' ? 'active' : ''} type="button" onClick={() => onRoomModeChange('team')} disabled={phase !== 'setup'}>
+            <button className={roomMode === 'team' ? 'active' : ''} type="button" onClick={() => onRoomModeChange('team')} disabled={phase !== 'setup' || gameStarted}>
               모둠 투자
             </button>
           </div>
@@ -2373,6 +2426,31 @@ function HostView({
           ) : null}
           {eventLimitReached ? <p className="teacher-hint warning">이번 라운드 이벤트 한도에 도달했습니다. 다음 라운드에서 다시 선택할 수 있습니다.</p> : null}
           {phase !== 'setup' ? <p className="teacher-hint">장이 진행 중이거나 마감된 뒤에는 새 이슈를 등록할 수 없습니다.</p> : null}
+          {!gameStarted ? <p className="teacher-hint warning">게임 시작 전에는 이슈를 등록하지 않습니다. 먼저 학생 입장을 확인한 뒤 게임을 시작하세요.</p> : null}
+          {currentRoundEvents.length ? (
+            <div className="draft-issue-list" aria-label="선택된 이슈">
+              <div className="panel-heading split">
+                <div>
+                  <Megaphone size={18} aria-hidden="true" />
+                  <h3>선택된 이슈</h3>
+                </div>
+                <button className="command secondary" type="button" onClick={onClearIssues} disabled={phase !== 'setup'}>
+                  전체 초기화
+                </button>
+              </div>
+              {currentRoundEvents.map((event) => (
+                <article key={event.id}>
+                  <div>
+                    <strong>{event.title}</strong>
+                    <span>{event.detail}</span>
+                  </div>
+                  <button type="button" onClick={() => onCancelIssue(event.id)} disabled={phase !== 'setup'}>
+                    취소
+                  </button>
+                </article>
+              ))}
+            </div>
+          ) : null}
           <div className="event-filter-bar" aria-label="이슈 카테고리 선택">
             {Object.entries(eventCategoryLabels).map(([key, label]) => (
               <button className={eventCategory === key ? 'active' : ''} type="button" key={key} onClick={() => setEventCategory(key)}>
@@ -2410,7 +2488,7 @@ function HostView({
 
         <IssueTicker events={currentRoundEvents} phase={phase} />
         <RoundExplanation summary={latestRoundSummary} assets={assets} />
-        <CloseDashboard phase={phase} players={players} />
+        <CloseDashboard phase={phase} players={rankingPlayers} />
         <TeacherStudentMonitor
           players={players}
           activeStudent={roomMode === 'team' ? buildStudentSnapshot({ id: 'team-mode', name: '모둠 계좌 (대기)', totalAsset: 0, holdings: [] }) : activeStudent}
@@ -2454,7 +2532,7 @@ function HostView({
       </section>
 
       <aside className="host-sidebar">
-        <TeacherRankingPanel players={players} submissions={submissions} activeStudent={activeStudent} gameFinished={gameFinished} />
+        <TeacherRankingPanel players={rankingPlayers} submissions={submissions} activeStudent={activeStudent} gameFinished={gameFinished} />
 
         <section className="news-panel">
           <div className="panel-heading">
@@ -2497,11 +2575,17 @@ function StudentView({
   currentRoundEvents,
   latestRoundSummary,
   gameFinished,
+  gameStarted,
   submittedReport,
   nickname,
   setNickname,
+  studentNumber,
+  setStudentNumber,
+  studentPasscode,
+  setStudentPasscode,
+  studentJoinError,
   joined,
-  setJoined,
+  onJoin,
   teamAccounts,
   selectedTeamKey,
   setSelectedTeamKey,
@@ -2525,14 +2609,14 @@ function StudentView({
   const selectedAsset = assets.find((asset) => asset.id === selectedAssetId) ?? assets[0];
   const holdingsValue = assets.reduce((sum, asset) => sum + (portfolio[asset.id] ?? 0) * asset.price, 0);
   const totalAsset = cash + deposit + holdingsValue;
-  const returnRate = ((totalAsset - INITIAL_CASH) / INITIAL_CASH) * 100;
+  const returnRate = gameStarted ? ((totalAsset - INITIAL_CASH) / INITIAL_CASH) * 100 : 0;
   const selectedShares = portfolio[selectedAsset.id] ?? 0;
   const selectedHoldingValue = selectedShares * selectedAsset.price;
   const depositRate = getDepositRate(baseRate);
   const nextInterest = deposit * (depositRate / 100 / 4);
   const propertyAsset = assets.find((asset) => asset.type === 'property');
-  const canTradeStocks = phase === 'open' && !gameFinished;
-  const canMoveDeposit = !gameFinished;
+  const canTradeStocks = gameStarted && phase === 'open' && !gameFinished;
+  const canMoveDeposit = gameStarted && !gameFinished;
   const teamMode = roomMode === 'team';
   const teamTradeLockedByOther = teamMode && activeTeam?.tradeHolder && !teamTradeAllowed;
   const canUseAccount = !teamMode || (teamTradeAllowed && !activeTeam?.bankrupt);
@@ -2544,7 +2628,7 @@ function StudentView({
         <section className="phone-frame join-card">
           <div className="mobile-notch" />
           <p className="eyebrow">학생 입장</p>
-          <h1>PIN과 닉네임을 입력하세요.</h1>
+          <h1>PIN, 학번, 이름을 입력하세요.</h1>
           <label>
             방 PIN
             <input value={roomPin} readOnly aria-label="방 PIN" />
@@ -2554,8 +2638,23 @@ function StudentView({
             <span>{roomFull ? '정원이 찼습니다.' : '현재 접속 인원'}</span>
           </div>
           <label>
-            닉네임
-            <input value={nickname} onChange={(event) => setNickname(event.target.value)} placeholder="예: 지민" aria-label="닉네임" />
+            학급 번호
+            <input value={studentNumber} onChange={(event) => setStudentNumber(event.target.value.replace(/[^\d]/g, '').slice(0, 2))} inputMode="numeric" placeholder="1~40" aria-label="학급 번호" />
+          </label>
+          <label>
+            이름
+            <input value={nickname} onChange={(event) => setNickname(event.target.value)} placeholder="예: 김지민" aria-label="이름" />
+          </label>
+          <label>
+            개인 비밀번호
+            <input
+              type="password"
+              value={studentPasscode}
+              onChange={(event) => setStudentPasscode(event.target.value.replace(/[^\d]/g, '').slice(0, 6))}
+              inputMode="numeric"
+              placeholder="숫자 6자리"
+              aria-label="개인 비밀번호"
+            />
           </label>
           {teamMode ? (
             <div className="team-picker" aria-label="모둠 선택">
@@ -2575,11 +2674,12 @@ function StudentView({
               </div>
             </div>
           ) : null}
-          <button className="command primary wide" type="button" onClick={() => setJoined(true)} disabled={!nickname.trim() || roomFull}>
+          {studentJoinError ? <p className="auth-error">{studentJoinError}</p> : null}
+          <button className="command primary wide" type="button" onClick={onJoin} disabled={!nickname.trim() || !studentNumber || !/^[0-9]{6}$/.test(studentPasscode) || roomFull}>
             <LogIn size={19} aria-hidden="true" />
             {roomFull ? '정원 마감' : '입장하기'}
           </button>
-          <p className="help-text">입장 시 가상 투자금 {formatWon(INITIAL_CASH)}이 지급됩니다. 방당 최대 {MAX_PLAYERS_PER_ROOM}명까지 참여할 수 있습니다.</p>
+          <p className="help-text">같은 학번은 먼저 등록한 이름과 개인 비밀번호가 맞을 때만 재입장할 수 있습니다. 라운드마다 생활 소득 {formatWon(ROUND_SALARY)}을 받습니다.</p>
         </section>
       </main>
     );
@@ -2592,7 +2692,7 @@ function StudentView({
         <header className="mobile-header">
           <div>
             <span>Round {round} · {phaseLabels[phase]}</span>
-            <strong>{nickname}</strong>
+            <strong>{getStudentDisplayName(studentNumber, nickname)}</strong>
           </div>
           <div className="pin-badge">{roomPin}</div>
         </header>
@@ -2604,6 +2704,12 @@ function StudentView({
             <span>{newsFeed[0]?.detail ?? '교사의 첫 뉴스가 오면 여기에 표시됩니다.'}</span>
           </div>
         </section>
+        {!gameStarted ? (
+          <section className="waiting-panel" aria-label="게임 시작 대기">
+            <strong>게임 시작 대기 중</strong>
+            <p>교사가 게임 시작을 누르면 초기 자본 {formatWon(INITIAL_CASH)}이 지급되고, 라운드마다 생활 소득 {formatWon(ROUND_SALARY)}을 받습니다.</p>
+          </section>
+        ) : null}
 
         {teamMode ? (
           <section className={activeTeam?.bankrupt ? 'team-trade-panel bankrupt' : 'team-trade-panel'} aria-label="모둠 거래권">
@@ -2633,7 +2739,7 @@ function StudentView({
         {phase === 'closed' ? <RoundExplanation summary={latestRoundSummary} assets={assets} compact /> : null}
         {gameFinished ? (
           <FinalReport
-            nickname={nickname}
+            nickname={getStudentDisplayName(studentNumber, nickname)}
             cash={cash}
             deposit={deposit}
             depositInterestEarned={depositInterestEarned}
@@ -2800,6 +2906,7 @@ export function App() {
   const [round, setRound] = useState(1);
   const [phase, setPhase] = useState('setup');
   const [roomMode, setRoomMode] = useState('individual');
+  const [gameStarted, setGameStarted] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [baseRate, setBaseRate] = useState(INITIAL_BASE_RATE);
   const [exchangeRate, setExchangeRate] = useState(INITIAL_EXCHANGE_RATE);
@@ -2808,12 +2915,16 @@ export function App() {
   const [latestRoundSummary, setLatestRoundSummary] = useState(null);
   const [issueDraft, setIssueDraft] = useState('');
   const [newsFeed, setNewsFeed] = useState([
-    { id: 'opening', round: 1, title: '장 시작', detail: '모든 학생에게 초기 자본 1억 원이 지급되었습니다.' },
+    { id: 'opening', round: 1, title: '수업 대기', detail: '교사가 게임 시작을 누르면 초기 자본 1억 원이 지급됩니다.' },
   ]);
-  const [players, setPlayers] = useState(mockPlayers);
+  const [players, setPlayers] = useState([]);
   const [nickname, setNickname] = useState('지민');
+  const [studentNumber, setStudentNumber] = useState('1');
+  const [studentPasscode, setStudentPasscode] = useState('');
+  const [studentJoinError, setStudentJoinError] = useState('');
+  const [studentPasscodeHash, setStudentPasscodeHash] = useState('');
   const [joined, setJoined] = useState(false);
-  const [cash, setCash] = useState(INITIAL_CASH);
+  const [cash, setCash] = useState(0);
   const [deposit, setDeposit] = useState(0);
   const [depositPrincipal, setDepositPrincipal] = useState(0);
   const [depositInterestEarned, setDepositInterestEarned] = useState(0);
@@ -2825,6 +2936,7 @@ export function App() {
   const [depositAmount, setDepositAmount] = useState('10000000');
   const [tradeLogs, setTradeLogs] = useState([]);
   const [roundLogs, setRoundLogs] = useState([]);
+  const [salaryPaidRounds, setSalaryPaidRounds] = useState([]);
   const [reflection, setReflection] = useState({ good: '', improve: '', next: '' });
   const [submissions, setSubmissions] = useState([]);
   const [remoteRoomId, setRemoteRoomId] = useState(null);
@@ -2836,6 +2948,7 @@ export function App() {
     [selectedAssetId, assets],
   );
   const currentRoundEvents = triggeredEventsByRound[round] ?? [];
+  const publicCurrentRoundEvents = currentRoundEvents.filter((event) => event.published);
   const expiresAt = roomCreatedAt + ROOM_TTL_MS;
   const gameFinished = phase === 'ended' || (round === TOTAL_ROUNDS && phase === 'closed');
   const teamMode = roomMode === 'team';
@@ -2844,16 +2957,17 @@ export function App() {
   const teamParticipantRows = teamMode ? getTeamParticipantRows(teamAccounts, assets) : [];
   const displayedPlayers = teamMode ? teamParticipantRows : players;
   const { playerCount, roomFull } = getRoomCapacityState({
-    basePlayerCount: joined ? players.filter((player) => player.name !== nickname).length : players.length,
+    basePlayerCount: joined ? players.filter((player) => String(player.studentNumber) !== String(studentNumber)).length : players.length,
     joined,
     maxPlayers: MAX_PLAYERS_PER_ROOM,
   });
-  const effectiveCash = teamMode ? activeTeam.cash : cash;
-  const effectiveDeposit = teamMode ? activeTeam.deposit : deposit;
+  const effectiveCash = gameStarted ? (teamMode ? activeTeam.cash : cash) : 0;
+  const effectiveDeposit = gameStarted ? (teamMode ? activeTeam.deposit : deposit) : 0;
   const effectiveDepositInterestEarned = teamMode ? activeTeam.depositInterestEarned : depositInterestEarned;
-  const effectivePortfolio = teamMode ? activeTeam.portfolio : portfolio;
-  const studentDisplayName = teamMode && joined ? `${activeTeam.name} · ${nickname}` : nickname;
-  const reportNickname = teamMode ? activeTeam.name : nickname.trim();
+  const effectivePortfolio = gameStarted ? (teamMode ? activeTeam.portfolio : portfolio) : {};
+  const studentNameLabel = getStudentDisplayName(studentNumber, nickname.trim());
+  const studentDisplayName = teamMode && joined ? `${activeTeam.name} · ${studentNameLabel}` : studentNameLabel;
+  const reportNickname = studentNameLabel;
   const studentHoldingsValue = getPortfolioValue(effectivePortfolio, assets);
   const studentTotalAsset = effectiveCash + effectiveDeposit + studentHoldingsValue;
   const submittedReport = submissions.find((submission) => submission.nickname === reportNickname);
@@ -2880,6 +2994,7 @@ export function App() {
     setRound(remoteRound);
     setPhase(isExpired ? 'expired' : bundle.room.phase);
     setRoomMode(bundle.room.mode ?? 'individual');
+    setGameStarted(Boolean(bundle.room.game_started));
     setIsPaused(bundle.room.is_paused);
     setBaseRate(Number(bundle.room.base_rate));
     setExchangeRate(Number(bundle.room.exchange_rate ?? INITIAL_EXCHANGE_RATE));
@@ -2954,13 +3069,35 @@ export function App() {
     if (!supabaseConfigured || !remoteRoomId || !joined || !nickname.trim()) return;
     const remotePlayer = {
       name: nickname.trim(),
+      studentNumber,
+      passcodeHash: studentPasscodeHash,
+      teamKey: teamMode ? selectedTeamKey : '',
       cash: effectiveCash,
       deposit: effectiveDeposit,
       totalAsset: studentTotalAsset,
       returnRate: ((studentTotalAsset - INITIAL_CASH) / INITIAL_CASH) * 100,
     };
     upsertRemotePlayer(remoteRoomId, remotePlayer).catch((error) => setSyncStatus(`학생 정보 저장 실패: ${error.message}`));
-  }, [effectiveCash, effectiveDeposit, joined, nickname, remoteRoomId, studentTotalAsset]);
+  }, [effectiveCash, effectiveDeposit, joined, nickname, remoteRoomId, selectedTeamKey, studentNumber, studentPasscodeHash, studentTotalAsset, teamMode]);
+
+  useEffect(() => {
+    if (!gameStarted || !joined || teamMode || phase !== 'open' || salaryPaidRounds.includes(round)) return;
+    const timer = window.setTimeout(() => {
+      setCash((current) => current + ROUND_SALARY);
+      setSalaryPaidRounds((current) => [...current, round]);
+      setTradeLogs((current) => [
+        buildTradeLog({
+          round,
+          type: '월급',
+          detail: `${round}라운드 생활 소득 +${formatWon(ROUND_SALARY)}`,
+          sequence: current.length,
+          now: Date.now(),
+        }),
+        ...current,
+      ]);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [gameStarted, joined, phase, round, salaryPaidRounds, teamMode]);
 
   function pushNews(title, detail, targetRound = round) {
     setNewsFeed((current) => [{ id: `${Date.now()}-${title}`, round: targetRound, title, detail }, ...current].slice(0, 6));
@@ -3029,7 +3166,7 @@ export function App() {
   }
 
   async function handleRoomModeChange(nextMode) {
-    if (phase !== 'setup') return;
+    if (phase !== 'setup' || gameStarted) return;
     setRoomMode(nextMode);
     const nextTeams = teamAccounts.length ? teamAccounts : createDefaultTeamAccounts();
     if (!teamAccounts.length) setTeamAccounts(nextTeams);
@@ -3049,6 +3186,138 @@ export function App() {
     setReflection((current) => ({ ...current, [key]: value }));
   }
 
+  async function handleStudentJoin() {
+    const trimmedName = nickname.trim();
+    const parsedNumber = Number(studentNumber);
+    const normalizedPasscode = studentPasscode.trim();
+    if (!Number.isInteger(parsedNumber) || parsedNumber < 1 || parsedNumber > MAX_PLAYERS_PER_ROOM) {
+      setStudentJoinError(`학번은 1부터 ${MAX_PLAYERS_PER_ROOM} 사이의 숫자로 입력하세요.`);
+      return;
+    }
+    if (!trimmedName) {
+      setStudentJoinError('이름을 입력하세요.');
+      return;
+    }
+    if (!/^[0-9]{6}$/.test(normalizedPasscode)) {
+      setStudentJoinError('개인 비밀번호는 숫자 6자리로 입력하세요.');
+      return;
+    }
+
+    const passcodeHash = hashStudentPasscode(roomPin, parsedNumber, normalizedPasscode);
+    const existingPlayer = players.find((player) => Number(player.studentNumber) === parsedNumber);
+    if (existingPlayer && (existingPlayer.name !== trimmedName || existingPlayer.passcodeHash !== passcodeHash)) {
+      setStudentJoinError('이미 사용 중인 학번입니다. 이름과 개인 비밀번호를 확인하세요.');
+      return;
+    }
+    if (!existingPlayer && players.length >= MAX_PLAYERS_PER_ROOM) {
+      setStudentJoinError('정원이 찼습니다.');
+      return;
+    }
+
+    const nextPlayer = {
+      id: existingPlayer?.id ?? `local-${parsedNumber}`,
+      name: trimmedName,
+      studentNumber: parsedNumber,
+      passcodeHash,
+      teamKey: teamMode ? selectedTeamKey : '',
+      cash: gameStarted && !teamMode ? INITIAL_CASH : effectiveCash,
+      deposit: gameStarted ? effectiveDeposit : 0,
+      totalAsset: gameStarted && !teamMode ? INITIAL_CASH : studentTotalAsset,
+      returnRate: 0,
+      holdings: [],
+    };
+
+    try {
+      const savedPlayer = remoteRoomId
+        ? await registerRemotePlayer(remoteRoomId, nextPlayer)
+        : null;
+      const playerToStore = savedPlayer ?? nextPlayer;
+      setPlayers((current) => [
+        ...current.filter((player) => Number(player.studentNumber) !== parsedNumber),
+        playerToStore,
+      ].sort((a, b) => Number(a.studentNumber ?? 99) - Number(b.studentNumber ?? 99)));
+      setStudentPasscodeHash(passcodeHash);
+      setStudentNumber(String(parsedNumber));
+      setNickname(trimmedName);
+      if (gameStarted && !teamMode) {
+        setCash((current) => (current > 0 ? current : INITIAL_CASH));
+      }
+      setStudentJoinError('');
+      setJoined(true);
+    } catch (error) {
+      setStudentJoinError(error.message);
+    }
+  }
+
+  async function handleGameStart() {
+    if (roomExpired || gameStarted || phase !== 'setup') return;
+    const fundedTeams = fundTeamAccounts(teamAccounts.length ? teamAccounts : createDefaultTeamAccounts());
+    setGameStarted(true);
+    setCash(INITIAL_CASH);
+    setDeposit(0);
+    setDepositPrincipal(0);
+    setDepositInterestEarned(0);
+    setPortfolio({});
+    setTeamAccounts(fundedTeams);
+    setPlayers((current) =>
+      current.map((player) => ({
+        ...player,
+        cash: INITIAL_CASH,
+        deposit: 0,
+        totalAsset: INITIAL_CASH,
+        returnRate: 0,
+      })),
+    );
+    pushNews('게임 시작', '모든 개인 또는 모둠 계좌에 초기 자본 1억 원이 지급되었습니다.');
+    if (remoteRoomId) {
+      try {
+        await Promise.all([
+          updateRemoteRoom(remoteRoomId, { game_started: true }),
+          upsertRemoteTeamAccounts(remoteRoomId, fundedTeams),
+          ...players.map((player) =>
+            upsertRemotePlayer(remoteRoomId, {
+              ...player,
+              cash: INITIAL_CASH,
+              deposit: 0,
+              totalAsset: INITIAL_CASH,
+              returnRate: 0,
+            }),
+          ),
+        ]);
+      } catch (error) {
+        setSyncStatus(`게임 시작 저장 실패: ${error.message}`);
+      }
+    }
+  }
+
+  async function handleCancelIssue(issueId) {
+    if (phase !== 'setup') return;
+    const targetIssue = currentRoundEvents.find((event) => event.id === issueId);
+    setTriggeredEventsByRound((current) => ({
+      ...current,
+      [round]: (current[round] ?? []).filter((event) => event.id !== issueId),
+    }));
+    if (remoteRoomId && targetIssue) {
+      try {
+        await deleteRemoteIssue(remoteRoomId, targetIssue);
+      } catch (error) {
+        setSyncStatus(`이슈 취소 실패: ${error.message}`);
+      }
+    }
+  }
+
+  async function handleClearIssues() {
+    if (phase !== 'setup' || !currentRoundEvents.length) return;
+    setTriggeredEventsByRound((current) => ({ ...current, [round]: [] }));
+    if (remoteRoomId) {
+      try {
+        await deleteRemoteRoundDraftIssues(remoteRoomId, round);
+      } catch (error) {
+        setSyncStatus(`이슈 초기화 실패: ${error.message}`);
+      }
+    }
+  }
+
   async function createNewRoom() {
     if (!hostAuthenticated) {
       setView('host-login');
@@ -3064,8 +3333,8 @@ export function App() {
       now,
       initialBaseRate: INITIAL_BASE_RATE,
       assets: nextAssets,
-      players: supabaseConfigured ? [] : mockPlayers,
-      initialCash: INITIAL_CASH,
+      players: [],
+      initialCash: 0,
       initialAssetId: initialTradableAssets[0].id,
     });
 
@@ -3075,6 +3344,7 @@ export function App() {
     setRound(nextRoom.round);
     setPhase(nextRoom.phase);
     setRoomMode(roomMode);
+    setGameStarted(false);
     setIsPaused(nextRoom.isPaused);
     setBaseRate(nextRoom.baseRate);
     setExchangeRate(INITIAL_EXCHANGE_RATE);
@@ -3084,6 +3354,10 @@ export function App() {
     setIssueDraft(nextRoom.issueDraft);
     setNewsFeed(nextRoom.newsFeed);
     setPlayers(nextRoom.players);
+    setJoined(false);
+    setStudentJoinError('');
+    setStudentPasscode('');
+    setStudentPasscodeHash('');
     setCash(nextRoom.cash);
     setDeposit(nextRoom.deposit);
     setDepositPrincipal(0);
@@ -3096,6 +3370,7 @@ export function App() {
     setDepositAmount(nextRoom.depositAmount);
     setTradeLogs(nextRoom.tradeLogs);
     setRoundLogs(nextRoom.roundLogs);
+    setSalaryPaidRounds([]);
     setReflection(nextRoom.reflection);
     setSubmissions([]);
 
@@ -3134,7 +3409,7 @@ export function App() {
   }
 
   async function handleRegisterIssue(event, issueOption = null) {
-    if (roomExpired || currentRoundEvents.length >= MAX_EVENTS_PER_ROUND) return;
+    if (roomExpired || !gameStarted || currentRoundEvents.length >= MAX_EVENTS_PER_ROUND) return;
 
     const registeredEvent = buildRegisteredIssue({
       event,
@@ -3144,6 +3419,7 @@ export function App() {
       now: Date.now(),
       defaultProbability: DEFAULT_EVENT_PROBABILITY,
     });
+    registeredEvent.published = false;
 
     setTriggeredEventsByRound((current) => ({
       ...current,
@@ -3153,7 +3429,13 @@ export function App() {
 
     if (remoteRoomId) {
       try {
-        await insertRemoteIssue(remoteRoomId, registeredEvent, round);
+        const savedIssue = await insertRemoteIssue(remoteRoomId, registeredEvent, round);
+        if (savedIssue) {
+          setTriggeredEventsByRound((current) => ({
+            ...current,
+            [round]: (current[round] ?? []).map((item) => (item.id === registeredEvent.id ? savedIssue : item)),
+          }));
+        }
       } catch (error) {
         setSyncStatus(`이슈 저장 실패: ${error.message}`);
       }
@@ -3161,12 +3443,38 @@ export function App() {
   }
 
   async function handleStartRound() {
-    if (roomExpired || !currentRoundEvents.length || phase !== 'setup') return;
+    if (roomExpired || !gameStarted || !currentRoundEvents.length || phase !== 'setup') return;
+    const publishedEvents = currentRoundEvents.map((event) => ({ ...event, published: true }));
+    const salariedPlayers = players.map((player) => ({
+      ...player,
+      cash: (player.cash ?? 0) + ROUND_SALARY,
+      totalAsset: (player.totalAsset ?? 0) + ROUND_SALARY,
+      returnRate: (((player.totalAsset ?? INITIAL_CASH) + ROUND_SALARY - INITIAL_CASH) / INITIAL_CASH) * 100,
+    }));
+    const salariedTeams = payTeamRoundSalary(teamAccounts, players);
+    setTriggeredEventsByRound((current) => ({
+      ...current,
+      [round]: publishedEvents,
+    }));
+    if (teamMode) {
+      setTeamAccounts(salariedTeams);
+    } else {
+      setPlayers(salariedPlayers);
+    }
     setPhase('open');
-    pushNews(`${round}라운드 이슈 공개`, `${currentRoundEvents.length}개 이슈가 공개되었습니다. 가격은 장 마감 후 반영됩니다.`);
+    pushNews(`${round}라운드 이슈 공개`, `${currentRoundEvents.length}개 이슈가 공개되었습니다. 생활 소득 ${formatWon(ROUND_SALARY)}이 지급됩니다.`);
     if (remoteRoomId) {
       try {
-        await updateRemoteRoom(remoteRoomId, { phase: 'open' });
+        const remoteUpdates = [
+          updateRemoteRoom(remoteRoomId, { phase: 'open' }),
+          updateRemoteIssues(remoteRoomId, publishedEvents, round),
+        ];
+        if (teamMode) {
+          remoteUpdates.push(upsertRemoteTeamAccounts(remoteRoomId, salariedTeams));
+        } else {
+          remoteUpdates.push(...salariedPlayers.map((player) => upsertRemotePlayer(remoteRoomId, player)));
+        }
+        await Promise.all(remoteUpdates);
       } catch (error) {
         setSyncStatus(`라운드 시작 저장 실패: ${error.message}`);
       }
@@ -3176,7 +3484,8 @@ export function App() {
   async function handleCloseRound() {
     if (roomExpired || phase !== 'open') return;
 
-    const initialResolvedEvents = currentRoundEvents.map((event) => {
+    const eventsForResolution = currentRoundEvents.filter((event) => event.published);
+    const initialResolvedEvents = eventsForResolution.map((event) => {
       const didApply = Math.random() < (event.probability ?? DEFAULT_EVENT_PROBABILITY);
       const outcomeType = didApply ? (Math.random() < 0.7 ? 'event' : 'expectation') : 'failed';
       return {
@@ -3467,7 +3776,7 @@ export function App() {
 
   return (
     <div className="app-shell">
-      <AppHeader view={view} setView={setView} hostAuthenticated={hostAuthenticated} studentEntryAllowed={studentEntryAllowed} />
+      <AppHeader view={view} setView={setView} hostAuthenticated={hostAuthenticated} studentEntryAllowed={studentEntryAllowed} studentJoined={joined} />
       {view === 'home' ? (
         <HomeView
           setView={setView}
@@ -3482,20 +3791,23 @@ export function App() {
           studentEntryAllowed={studentEntryAllowed}
           onCreateRoom={createNewRoom}
           hostAuthenticated={hostAuthenticated}
+          studentJoined={joined}
         />
       ) : null}
-      {view === 'host-login' ? (
+      {view === 'host-login' && !joined ? (
         <HostLoginView login={hostLogin} error={hostLoginError} onLoginChange={setHostLogin} onSubmit={handleHostLogin} />
       ) : null}
-      {view === 'host' && hostAuthenticated ? (
+      {view === 'host' && hostAuthenticated && !joined ? (
         <HostView
           roomPin={roomPin}
           round={round}
           phase={phase}
           roomMode={roomMode}
+          gameStarted={gameStarted}
           isPaused={isPaused}
           assets={assets}
-          players={displayedPlayers}
+          players={players}
+          rankingPlayers={displayedPlayers}
           newsFeed={newsFeed}
           baseRate={baseRate}
           exchangeRate={exchangeRate}
@@ -3508,6 +3820,7 @@ export function App() {
           submissions={submissions}
           gameFinished={gameFinished}
           onCreateRoom={createNewRoom}
+          onGameStart={handleGameStart}
           onRoomModeChange={handleRoomModeChange}
           onIssueDraftChange={setIssueDraft}
           onStartRound={handleStartRound}
@@ -3526,10 +3839,12 @@ export function App() {
           }}
           onEndGame={handleEndGame}
           onRegisterIssue={handleRegisterIssue}
+          onCancelIssue={handleCancelIssue}
+          onClearIssues={handleClearIssues}
           onDownloadSubmissions={handleDownloadSubmissions}
         />
       ) : null}
-      {view === 'host' && !hostAuthenticated ? (
+      {view === 'host' && !hostAuthenticated && !joined ? (
         <HostLoginView login={hostLogin} error={hostLoginError} onLoginChange={setHostLogin} onSubmit={handleHostLogin} />
       ) : null}
       {view === 'student' ? (
@@ -3551,14 +3866,20 @@ export function App() {
           reflection={reflection}
           playerCount={playerCount}
           roomFull={roomFull}
-          currentRoundEvents={currentRoundEvents}
+          currentRoundEvents={publicCurrentRoundEvents}
           latestRoundSummary={latestRoundSummary}
           gameFinished={gameFinished}
+          gameStarted={gameStarted}
           submittedReport={submittedReport}
           nickname={nickname}
           setNickname={setNickname}
+          studentNumber={studentNumber}
+          setStudentNumber={setStudentNumber}
+          studentPasscode={studentPasscode}
+          setStudentPasscode={setStudentPasscode}
+          studentJoinError={studentJoinError}
           joined={joined}
-          setJoined={setJoined}
+          onJoin={handleStudentJoin}
           teamAccounts={teamAccounts}
           selectedTeamKey={selectedTeamKey}
           setSelectedTeamKey={setSelectedTeamKey}

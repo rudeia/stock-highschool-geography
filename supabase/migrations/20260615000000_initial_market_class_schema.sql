@@ -7,6 +7,7 @@ create table if not exists public.rooms (
   current_round integer not null default 1 check (current_round between 1 and 12),
   phase text not null default 'setup' check (phase in ('setup', 'open', 'closed', 'ended', 'expired')),
   mode text not null default 'individual' check (mode in ('individual', 'team')),
+  game_started boolean not null default false,
   base_rate numeric(5, 2) not null default 3.5,
   exchange_rate integer not null default 1350,
   is_paused boolean not null default false,
@@ -17,11 +18,15 @@ create table if not exists public.rooms (
 
 alter table public.rooms add column if not exists exchange_rate integer not null default 1350;
 alter table public.rooms add column if not exists mode text not null default 'individual';
+alter table public.rooms add column if not exists game_started boolean not null default false;
 
 create table if not exists public.players (
   id uuid primary key default gen_random_uuid(),
   room_id uuid not null references public.rooms(id) on delete cascade,
+  student_number integer check (student_number between 1 and 40),
   nickname text not null,
+  passcode_hash text not null default '',
+  team_key text not null default '',
   cash bigint not null default 100000000,
   deposit bigint not null default 0,
   total_asset bigint not null default 100000000,
@@ -30,6 +35,24 @@ create table if not exists public.players (
   updated_at timestamptz not null default now(),
   unique (room_id, nickname)
 );
+
+alter table public.players add column if not exists student_number integer check (student_number between 1 and 40);
+alter table public.players add column if not exists passcode_hash text not null default '';
+alter table public.players add column if not exists team_key text not null default '';
+
+do $$
+begin
+  alter table public.players drop constraint if exists players_room_id_nickname_key;
+  if not exists (
+    select 1 from pg_indexes
+    where schemaname = 'public'
+      and tablename = 'players'
+      and indexname = 'players_room_student_number_unique'
+  ) then
+    create unique index players_room_student_number_unique on public.players(room_id, student_number);
+  end if;
+end;
+$$;
 
 create table if not exists public.team_accounts (
   id uuid primary key default gen_random_uuid(),
@@ -95,8 +118,11 @@ create table if not exists public.round_events (
   failure_detail text,
   expectation_title text,
   expectation_detail text,
+  published boolean not null default false,
   created_at timestamptz not null default now()
 );
+
+alter table public.round_events add column if not exists published boolean not null default false;
 
 create table if not exists public.trade_logs (
   id uuid primary key default gen_random_uuid(),
@@ -140,6 +166,9 @@ create table if not exists public.final_submissions (
   id uuid primary key default gen_random_uuid(),
   room_id uuid not null references public.rooms(id) on delete cascade,
   nickname text not null,
+  student_number integer,
+  team_key text not null default '',
+  team_name text not null default '',
   total_asset bigint not null default 0,
   cash bigint not null default 0,
   deposit bigint not null default 0,
@@ -157,6 +186,9 @@ create table if not exists public.final_submissions (
 );
 
 alter table public.final_submissions add column if not exists deposit_interest_earned bigint not null default 0;
+alter table public.final_submissions add column if not exists student_number integer;
+alter table public.final_submissions add column if not exists team_key text not null default '';
+alter table public.final_submissions add column if not exists team_name text not null default '';
 
 do $$
 begin
