@@ -161,6 +161,19 @@ p {
   letter-spacing: 0;
 }
 
+.hero-copy h1 {
+  max-width: 740px;
+  font-size: clamp(3.2rem, 8vw, 7rem);
+}
+
+.hero-subtitle {
+  margin: -0.35rem 0 1rem;
+  color: #172033;
+  font-size: clamp(1.25rem, 2.4vw, 2rem);
+  font-weight: 950;
+  line-height: 1.18;
+}
+
 .intro {
   max-width: 650px;
   margin-bottom: 1.7rem;
@@ -228,6 +241,7 @@ p {
 .join-card,
 .auth-card,
 .expiry-notice,
+.join-qr-card,
 .final-report {
   border: 1px solid #d7dee8;
   border-radius: 8px;
@@ -239,6 +253,95 @@ p {
   display: grid;
   gap: 1rem;
   padding: 1rem;
+}
+
+.hero-market-graphic {
+  display: grid;
+  max-width: 620px;
+  gap: 0.8rem;
+  margin-top: 1.35rem;
+  border: 1px solid #d7dee8;
+  border-radius: 8px;
+  background: #101827;
+  color: #ffffff;
+  padding: 1rem;
+  box-shadow: 0 18px 46px rgba(15, 23, 42, 0.16);
+}
+
+.market-graphic-head,
+.market-tickers {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.market-graphic-head span {
+  color: #94a3b8;
+  font-size: 0.78rem;
+  font-weight: 950;
+}
+
+.market-graphic-head strong {
+  color: #f8fafc;
+  font-size: 0.9rem;
+}
+
+.market-chart {
+  position: relative;
+  display: flex;
+  min-height: 156px;
+  align-items: end;
+  gap: 0.55rem;
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.08), rgba(248, 250, 252, 0.02));
+  padding: 1rem;
+  overflow: hidden;
+}
+
+.market-chart > span {
+  width: 100%;
+  min-width: 18px;
+  border-radius: 8px 8px 0 0;
+  background: #22c55e;
+  opacity: 0.86;
+}
+
+.market-chart > span.loss {
+  background: #ef4444;
+}
+
+.market-chart .sparkline {
+  position: absolute;
+  right: 1rem;
+  bottom: 2.2rem;
+  width: min(55%, 260px);
+  height: 78px;
+  filter: drop-shadow(0 8px 16px rgba(245, 158, 11, 0.25));
+}
+
+.market-tickers {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.market-tickers div {
+  display: grid;
+  gap: 0.15rem;
+  border: 1px solid rgba(226, 232, 240, 0.16);
+  border-radius: 8px;
+  background: rgba(248, 250, 252, 0.08);
+  padding: 0.65rem;
+}
+
+.market-tickers span {
+  color: #cbd5e1;
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.market-tickers strong {
+  font-size: 1rem;
 }
 
 .auth-screen {
@@ -303,6 +406,63 @@ p {
 .expiry-notice.expired {
   border-color: #fecaca;
   background: #fef2f2;
+}
+
+.join-qr-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.9rem;
+  padding: 0.85rem;
+  box-shadow: none;
+}
+
+.qr-box {
+  display: grid;
+  width: 164px;
+  height: 164px;
+  place-items: center;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.qr-box svg {
+  display: block;
+  width: 148px;
+  height: 148px;
+}
+
+.qr-copy {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.qr-copy span {
+  color: #2563eb;
+  font-size: 0.78rem;
+  font-weight: 950;
+}
+
+.qr-copy strong {
+  color: #101827;
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.qr-copy p {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.qr-copy .command {
+  width: max-content;
+  min-height: 38px;
+  padding: 0.55rem 0.7rem;
+  font-size: 0.82rem;
 }
 
 .pin-tile {
@@ -1297,6 +1457,33 @@ input {
   text-align: center;
 }
 
+.capacity-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  padding: 0.7rem 0.8rem;
+}
+
+.capacity-note strong {
+  font-size: 1.08rem;
+}
+
+.capacity-note span {
+  font-size: 0.82rem;
+  font-weight: 950;
+}
+
+.capacity-note.full {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
 .trading-app {
   display: grid;
   gap: 0.8rem;
@@ -1545,6 +1732,14 @@ input {
     font-size: 2.45rem;
   }
 
+  .hero-copy h1 {
+    font-size: 3.4rem;
+  }
+
+  .market-tickers {
+    grid-template-columns: 1fr;
+  }
+
   .section-title {
     align-items: flex-start;
     flex-direction: column;
@@ -1579,6 +1774,14 @@ input {
 
   .stock-price {
     align-self: center;
+  }
+
+  .join-qr-card {
+    grid-template-columns: 1fr;
+  }
+
+  .qr-box {
+    width: 100%;
   }
 
   .holding-list article {
@@ -1619,6 +1822,18 @@ input {
 
   .quick-actions {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .hero-copy h1 {
+    font-size: 3rem;
+  }
+
+  .hero-subtitle {
+    font-size: 1.3rem;
+  }
+
+  .market-chart {
+    min-height: 132px;
   }
 }
 

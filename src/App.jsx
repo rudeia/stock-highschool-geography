@@ -21,10 +21,12 @@ import {
   Users,
   Wallet,
 } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
 import { supabaseConfigured } from './lib/supabaseClient.js';
 
 const INITIAL_CASH = 100_000_000;
 const TOTAL_ROUNDS = 12;
+const MAX_PLAYERS_PER_ROOM = 40;
 const INITIAL_BASE_RATE = 3.5;
 const MAX_EVENTS_PER_ROUND = 5;
 const DEFAULT_EVENT_PROBABILITY = 0.75;
@@ -385,6 +387,22 @@ function formatDateTime(value) {
     hour: '2-digit',
     minute: '2-digit',
   }).format(new Date(value));
+}
+
+function getJoinUrl(roomPin) {
+  const origin = typeof window === 'undefined' ? '' : window.location.origin;
+  return `${origin}/?view=student&pin=${roomPin}`;
+}
+
+function getInitialRoomPin() {
+  if (typeof window === 'undefined') return '428915';
+  const pinFromUrl = new URLSearchParams(window.location.search).get('pin');
+  return pinFromUrl && /^[0-9]{6}$/.test(pinFromUrl) ? pinFromUrl : '428915';
+}
+
+function getInitialView() {
+  if (typeof window === 'undefined') return 'home';
+  return new URLSearchParams(window.location.search).get('view') === 'student' ? 'student' : 'home';
 }
 
 function getPortfolioValue(portfolio, assets) {
@@ -827,6 +845,74 @@ function RoomExpiryNotice({ roomPin, expiresAt, expired, onCreateRoom }) {
   );
 }
 
+function JoinQrCard({ roomPin }) {
+  const [copied, setCopied] = useState(false);
+  const joinUrl = getJoinUrl(roomPin);
+
+  async function handleCopyLink() {
+    try {
+      await navigator.clipboard.writeText(joinUrl);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  return (
+    <section className="join-qr-card" aria-label="학생 접속 QR">
+      <div className="qr-box">
+        <QRCodeSVG value={joinUrl} size={148} level="M" includeMargin />
+      </div>
+      <div className="qr-copy">
+        <span>학생 접속 QR</span>
+        <strong>{roomPin}</strong>
+        <p>학생은 QR을 스캔하거나 PIN을 입력해 입장합니다.</p>
+        <button className="command secondary" type="button" onClick={handleCopyLink}>
+          {copied ? '복사 완료' : '접속 링크 복사'}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function HeroMarketGraphic() {
+  const bars = [42, 68, 54, 86, 62, 92, 74, 108];
+
+  return (
+    <section className="hero-market-graphic" aria-label="시장 차트 미리보기">
+      <div className="market-graphic-head">
+        <span>LIVE CLASS MARKET</span>
+        <strong>RISK / RETURN</strong>
+      </div>
+      <div className="market-chart">
+        {bars.map((height, index) => (
+          <span
+            className={index % 3 === 1 ? 'loss' : 'gain'}
+            key={`${height}-${index}`}
+            style={{ height: `${height}px` }}
+          />
+        ))}
+        <Sparkline history={[72, 86, 64, 112, 92, 128, 98, 146]} color="#f59e0b" />
+      </div>
+      <div className="market-tickers">
+        <div>
+          <span>NEO</span>
+          <strong className="up">+12.4%</strong>
+        </div>
+        <div>
+          <span>KOSPI ETF</span>
+          <strong className="up">+5.1%</strong>
+        </div>
+        <div>
+          <span>AIR</span>
+          <strong className="down">-8.7%</strong>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function FinalReport({
   nickname,
   cash,
@@ -1024,15 +1110,16 @@ function AppHeader({ view, setView, hostAuthenticated }) {
   );
 }
 
-function HomeView({ setView, roomPin, round, players, baseRate, expiresAt, roomExpired, onCreateRoom, hostAuthenticated }) {
+function HomeView({ setView, roomPin, round, playerCount, baseRate, expiresAt, roomExpired, onCreateRoom, hostAuthenticated }) {
   return (
     <main className="home-view">
       <section className="hero-band">
         <div className="hero-copy">
-          <p className="eyebrow">12라운드 · 1억 원 초기 자본 · 금리/예금/부동산/ETF 포함</p>
-          <h1>학생은 자산 배분을, 교사는 시장 변화를 설계합니다.</h1>
+          <p className="eyebrow">12라운드 · 1억 원 초기 자본 · 방당 최대 {MAX_PLAYERS_PER_ROOM}명</p>
+          <h1>모의 투자 시뮬레이터</h1>
+          <p className="hero-subtitle">화성에 갈까, 바닥 밑 지하실로 갈까?</p>
           <p className="intro">
-            PIN으로 입장해 주식, ETF, 부동산 지수, 예금을 비교하고 라운드별 뉴스와 금리 변화가 자산에 미치는 영향을 체험합니다.
+            뉴스와 금리, 예금, ETF, 부동산 지수를 보며 1억 원의 자산을 직접 배분하고 결과를 해석합니다.
           </p>
           <div className="hero-actions">
             <button className="command primary" type="button" onClick={() => setView(hostAuthenticated ? 'host' : 'host-login')}>
@@ -1049,6 +1136,7 @@ function HomeView({ setView, roomPin, round, players, baseRate, expiresAt, roomE
               새 방 생성
             </button>
           </div>
+          <HeroMarketGraphic />
         </div>
 
         <aside className="projector-preview" aria-label="수업 현황 미리보기">
@@ -1064,8 +1152,8 @@ function HomeView({ setView, roomPin, round, players, baseRate, expiresAt, roomE
             </div>
             <div>
               <Users size={19} aria-hidden="true" />
-              <strong>{players.length}</strong>
-              <span>접속 학생</span>
+              <strong>{playerCount}/{MAX_PLAYERS_PER_ROOM}</strong>
+              <span>접속 인원</span>
             </div>
             <div>
               <Landmark size={19} aria-hidden="true" />
@@ -1081,6 +1169,7 @@ function HomeView({ setView, roomPin, round, players, baseRate, expiresAt, roomE
           <p className="sync-note">
             {supabaseConfigured ? 'Supabase 연결 정보가 감지되었습니다.' : '환경변수를 추가하면 Supabase Realtime으로 연결할 수 있습니다.'}
           </p>
+          <JoinQrCard roomPin={roomPin} />
           <RoomExpiryNotice roomPin={roomPin} expiresAt={expiresAt} expired={roomExpired} onCreateRoom={onCreateRoom} />
         </aside>
       </section>
@@ -1131,6 +1220,7 @@ function HostView({
         </div>
 
         <RoomExpiryNotice roomPin={roomPin} expiresAt={expiresAt} expired={roomExpired} onCreateRoom={onCreateRoom} />
+        <JoinQrCard roomPin={roomPin} />
 
         <div className="control-strip">
           <div className="round-meter">
@@ -1316,6 +1406,8 @@ function StudentView({
   tradeLogs,
   roundLogs,
   reflection,
+  playerCount,
+  roomFull,
   currentRoundEvents,
   latestRoundSummary,
   gameFinished,
@@ -1356,15 +1448,19 @@ function StudentView({
             방 PIN
             <input value={roomPin} readOnly aria-label="방 PIN" />
           </label>
+          <div className={roomFull ? 'capacity-note full' : 'capacity-note'}>
+            <strong>{playerCount}/{MAX_PLAYERS_PER_ROOM}</strong>
+            <span>{roomFull ? '정원이 찼습니다.' : '현재 접속 인원'}</span>
+          </div>
           <label>
             닉네임
             <input value={nickname} onChange={(event) => setNickname(event.target.value)} placeholder="예: 지민" aria-label="닉네임" />
           </label>
-          <button className="command primary wide" type="button" onClick={() => setJoined(true)} disabled={!nickname.trim()}>
+          <button className="command primary wide" type="button" onClick={() => setJoined(true)} disabled={!nickname.trim() || roomFull}>
             <LogIn size={19} aria-hidden="true" />
-            입장하기
+            {roomFull ? '정원 마감' : '입장하기'}
           </button>
-          <p className="help-text">입장 시 가상 투자금 {formatWon(INITIAL_CASH)}이 지급됩니다.</p>
+          <p className="help-text">입장 시 가상 투자금 {formatWon(INITIAL_CASH)}이 지급됩니다. 방당 최대 {MAX_PLAYERS_PER_ROOM}명까지 참여할 수 있습니다.</p>
         </section>
       </main>
     );
@@ -1529,11 +1625,11 @@ function StudentView({
 }
 
 export function App() {
-  const [view, setView] = useState('home');
+  const [view, setView] = useState(getInitialView);
   const [hostAuthenticated, setHostAuthenticated] = useState(false);
   const [hostLogin, setHostLogin] = useState({ id: '', password: '' });
   const [hostLoginError, setHostLoginError] = useState('');
-  const [roomPin, setRoomPin] = useState('428915');
+  const [roomPin, setRoomPin] = useState(getInitialRoomPin);
   const [roomCreatedAt, setRoomCreatedAt] = useState(() => Date.now());
   const [roomExpired, setRoomExpired] = useState(false);
   const [round, setRound] = useState(1);
@@ -1567,6 +1663,8 @@ export function App() {
   const currentRoundEvents = triggeredEventsByRound[round] ?? [];
   const expiresAt = roomCreatedAt + ROOM_TTL_MS;
   const gameFinished = phase === 'ended' || (round === TOTAL_ROUNDS && phase === 'closed');
+  const playerCount = players.length + (joined ? 1 : 0);
+  const roomFull = !joined && playerCount >= MAX_PLAYERS_PER_ROOM;
   const studentHoldingsValue = getPortfolioValue(portfolio, assets);
   const activeStudent = {
     id: 'active-student',
@@ -1814,7 +1912,7 @@ export function App() {
           setView={setView}
           roomPin={roomPin}
           round={round}
-          players={players}
+          playerCount={playerCount}
           baseRate={baseRate}
           expiresAt={expiresAt}
           roomExpired={roomExpired}
@@ -1868,6 +1966,8 @@ export function App() {
           tradeLogs={tradeLogs}
           roundLogs={roundLogs}
           reflection={reflection}
+          playerCount={playerCount}
+          roomFull={roomFull}
           currentRoundEvents={currentRoundEvents}
           latestRoundSummary={latestRoundSummary}
           gameFinished={gameFinished}
