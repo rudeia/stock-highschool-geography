@@ -233,6 +233,7 @@ p {
 .issue-panel,
 .close-dashboard,
 .macro-guide,
+.asset-learning-panel,
 .holdings-panel,
 .student-monitor,
 .asset-panel,
@@ -599,6 +600,7 @@ p {
 .issue-panel,
 .close-dashboard,
 .macro-guide,
+.asset-learning-panel,
 .holdings-panel,
 .student-monitor {
   padding: 1rem;
@@ -778,6 +780,12 @@ p {
 .macro-guide {
   display: grid;
   gap: 0.7rem;
+}
+
+.asset-learning-panel {
+  display: grid;
+  gap: 0.75rem;
+  box-shadow: none;
 }
 
 .macro-guide-tabs {
@@ -1034,6 +1042,134 @@ textarea {
   color: #101827;
 }
 
+.asset-story {
+  display: grid;
+  gap: 0.45rem;
+  border: 1px solid #e1e7ef;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 0.75rem;
+}
+
+.asset-story > div {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.asset-story strong,
+.sensitivity-list strong,
+.precheck-list strong,
+.financial-links strong {
+  color: #101827;
+}
+
+.asset-story span {
+  color: #64748b;
+  font-size: 0.8rem;
+  font-weight: 850;
+}
+
+.asset-story p,
+.precheck-list p,
+.student-prompt {
+  margin: 0;
+  color: #475569;
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.metric-grid,
+.signal-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.metric-grid div,
+.signal {
+  display: grid;
+  gap: 0.2rem;
+  border: 1px solid #e1e7ef;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 0.65rem;
+}
+
+.metric-grid span,
+.signal span {
+  color: #64748b;
+  font-size: 0.76rem;
+  font-weight: 850;
+}
+
+.metric-grid strong,
+.signal strong {
+  color: #101827;
+  font-size: 0.92rem;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.signal.hot {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+.signal.hot strong {
+  color: #b91c1c;
+}
+
+.signal.cool {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+}
+
+.signal.cool strong {
+  color: #1d4ed8;
+}
+
+.risk-tag-list,
+.sensitivity-list > div,
+.financial-links > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.risk-tag-list span,
+.sensitivity-list span,
+.financial-links span {
+  border-radius: 8px;
+  background: #eef2ff;
+  color: #3730a3;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.76rem;
+  font-weight: 900;
+}
+
+.sensitivity-list,
+.precheck-list,
+.financial-links {
+  display: grid;
+  gap: 0.45rem;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 0.7rem;
+}
+
+.precheck-list p {
+  border-left: 3px solid #2563eb;
+  padding-left: 0.55rem;
+}
+
+.student-prompt {
+  border-radius: 8px;
+  background: #fff7ed;
+  color: #9a3412;
+  padding: 0.7rem;
+  font-weight: 850;
+}
+
 .explain-panel.muted,
 .issue-panel.muted {
   box-shadow: none;
@@ -1209,7 +1345,8 @@ textarea {
 }
 
 .no-impact,
-.expectation-note {
+.expectation-note,
+.volatility-note {
   display: grid;
   gap: 0.25rem;
   border-radius: 8px;
@@ -1221,13 +1358,19 @@ textarea {
   background: #fffbeb;
 }
 
+.volatility-note {
+  background: #fef2f2;
+}
+
 .no-impact strong,
-.expectation-note strong {
+.expectation-note strong,
+.volatility-note strong {
   color: #334155;
 }
 
 .no-impact span,
-.expectation-note span {
+.expectation-note span,
+.volatility-note span {
   color: #64748b;
 }
 
@@ -1759,6 +1902,8 @@ input {
   .event-grid,
   .macro-panel,
   .preview-grid,
+  .metric-grid,
+  .signal-grid,
   .report-summary,
   .student-monitor-list {
     grid-template-columns: 1fr;

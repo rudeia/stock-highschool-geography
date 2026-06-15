@@ -30,7 +30,7 @@ create table if not exists public.assets (
   id uuid primary key default gen_random_uuid(),
   room_id uuid not null references public.rooms(id) on delete cascade,
   asset_key text not null,
-  type text not null check (type in ('stock', 'etf', 'property')),
+  type text not null check (type in ('stock', 'etf', 'property', 'futures', 'bond')),
   country text not null,
   name text not null,
   sector text not null,

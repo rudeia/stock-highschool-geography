@@ -43,6 +43,7 @@ const DELISTING_START_ROUND = 9;
 const DELISTING_PROBABILITY = 0.2;
 const STRONG_NEGATIVE_IMPACT = -0.07;
 const MIN_EVENT_IMPACT = 0.1;
+const MIN_REPEATED_EVENT_IMPACT = 0.5;
 const PASSIVE_MARKET_MOVE = 0.05;
 const ROOM_TTL_MS = 24 * 60 * 60 * 1000;
 const HOST_CREDENTIALS = {
@@ -72,6 +73,10 @@ const initialTradableAssets = [
   { id: 'sp500', type: 'etf', country: '미국', name: 'S&P 500 ETF', sector: '미국 대표지수', priceOptions: [48_000, 62_000, 76_000], color: '#1d4ed8' },
   { id: 'kospi', type: 'etf', country: '한국', name: 'KOSPI 200 ETF', sector: '한국 대표지수', priceOptions: [27_500, 34_500, 42_000], color: '#0f766e' },
   { id: 'realty', type: 'property', country: '한국', name: '도시부동산지수', sector: '주거/상업 부동산', priceOptions: [180_000, 250_000, 320_000], color: '#a16207' },
+  { id: 'oilFut', type: 'futures', country: '글로벌', name: '글로벌 원유 선물', sector: '에너지 원자재', priceOptions: [71_000, 88_000, 104_000], color: '#92400e' },
+  { id: 'grainFut', type: 'futures', country: '글로벌', name: '글로벌 곡물 선물', sector: '식량 원자재', priceOptions: [31_000, 45_000, 59_000], color: '#ca8a04' },
+  { id: 'usBond', type: 'bond', country: '미국', name: '미국 10년 국채', sector: '선진국 국채', priceOptions: [91_000, 100_000, 108_000], color: '#334155' },
+  { id: 'argBond', type: 'bond', country: '아르헨티나', name: '아르헨티나 국채', sector: '고위험 신흥국 국채', priceOptions: [24_000, 36_000, 52_000], color: '#be123c' },
 ];
 
 function createRandomizedAssets() {
@@ -89,6 +94,147 @@ const assetTypeLabels = {
   stock: '주식',
   etf: 'ETF',
   property: '부동산',
+  futures: '선물',
+  bond: '채권',
+};
+
+const assetLearningProfiles = {
+  neo: {
+    story: '도심 전기차와 자율주행 셔틀을 만드는 한국 모빌리티 기업입니다. 2016년 배터리 교체형 소형 전기차로 시작해 물류 로봇과 자율주행 소프트웨어까지 사업을 넓혔습니다.',
+    metrics: [['매출', '3.2조 원'], ['영업이익률', '6.8%'], ['부채비율', '118%'], ['현금보유', '5,800억 원'], ['R&D 비중', '14%'], ['수출비중', '42%'], ['원자재 의존도', '높음']],
+    signals: { stability: '보통', growth: '높음', volatility: '높음' },
+    riskTags: ['성장주', '원자재민감', '환율민감', '기술규제민감'],
+    sensitivity: ['희토류·배터리 소재 이슈', '환율 변화', '금리 변화', '기술 규제'],
+    prompt: '성장성이 높지만 원자재 의존도가 높은 기업은 어떤 이슈에서 변동 가능성이 커질까요?',
+  },
+  core: {
+    story: 'AI 서버용 반도체와 차량용 칩을 설계하는 미국 기술 기업입니다. 2008년 데이터센터 칩 설계사로 출발했고, 최근에는 AI 가속기 매출 비중이 커졌습니다.',
+    metrics: [['매출', '18.6조 원'], ['영업이익률', '24.5%'], ['부채비율', '54%'], ['현금보유', '4.8조 원'], ['R&D 비중', '21%'], ['수출비중', '68%'], ['원자재 의존도', '보통']],
+    signals: { stability: '높음', growth: '높음', volatility: '높음' },
+    riskTags: ['기술성장주', '수출민감', '정책민감', 'AI투자민감'],
+    sensitivity: ['미국 기술 규제', '반도체 수출 규정', 'AI 투자 확대', '환율 변화'],
+    prompt: 'R&D 비중이 높은 기술 기업은 규제와 투자 뉴스에 왜 민감할까요?',
+  },
+  eco: {
+    story: '태양광 부품과 에너지 저장장치를 생산하는 한국 재생에너지 기업입니다. 2012년 소형 태양광 모듈 업체로 시작해 산업용 ESS 시장으로 확장했습니다.',
+    metrics: [['매출', '1.8조 원'], ['영업이익률', '5.4%'], ['부채비율', '132%'], ['현금보유', '3,100억 원'], ['R&D 비중', '9%'], ['수출비중', '37%'], ['원자재 의존도', '높음']],
+    signals: { stability: '보통', growth: '높음', volatility: '높음' },
+    riskTags: ['정책민감', '원자재민감', '금리민감', '친환경테마'],
+    sensitivity: ['정부 보조금', '희토류·금속 가격', '금리 변화', '에너지 가격'],
+    prompt: '친환경 기업이 정부 정책과 금리에 동시에 민감한 이유는 무엇일까요?',
+  },
+  oil: {
+    story: '정유, 윤활유, 석유화학 원료를 다루는 한국 에너지 기업입니다. 항만 저장시설을 기반으로 성장했고 원유 가격과 정제마진 변화에 민감합니다.',
+    metrics: [['매출', '9.7조 원'], ['영업이익률', '7.1%'], ['부채비율', '86%'], ['현금보유', '1.2조 원'], ['R&D 비중', '3%'], ['수출비중', '31%'], ['원자재 의존도', '매우 높음']],
+    signals: { stability: '보통', growth: '보통', volatility: '높음' },
+    riskTags: ['원유민감', '물가민감', '환율민감', '경기민감'],
+    sensitivity: ['산유국 감산', '중동 긴장', '원유 재고', '달러 강세'],
+    prompt: '원유를 사서 정제하는 기업은 원유 가격 변화가 항상 같은 방향으로 유리할까요?',
+  },
+  enter: {
+    story: '글로벌 팬덤 플랫폼과 영상 콘텐츠를 운영하는 미국 엔터테인먼트 기업입니다. 스트리밍과 공연 IP를 결합해 성장했지만 소비심리와 광고 경기에 영향을 받습니다.',
+    metrics: [['매출', '5.4조 원'], ['영업이익률', '11.2%'], ['부채비율', '72%'], ['현금보유', '9,400억 원'], ['R&D 비중', '6%'], ['수출비중', '55%'], ['원자재 의존도', '낮음']],
+    signals: { stability: '보통', growth: '높음', volatility: '보통' },
+    riskTags: ['소비심리민감', '광고민감', '미국기술규제', '환율민감'],
+    sensitivity: ['소비 둔화', '미국 기술 규제', '광고 경기', '환율 변화'],
+    prompt: '콘텐츠 기업은 공장보다 팬덤과 광고 경기에 더 민감할 수 있는 이유가 무엇일까요?',
+  },
+  food: {
+    story: '대체 단백질과 가공식품을 만드는 한국 식품 기업입니다. 1998년 냉동식품 회사로 시작해 곡물 기반 간편식과 바이오 소재로 사업을 넓혔습니다.',
+    metrics: [['매출', '2.6조 원'], ['영업이익률', '4.9%'], ['부채비율', '95%'], ['현금보유', '4,200억 원'], ['R&D 비중', '5%'], ['수출비중', '24%'], ['원자재 의존도', '높음']],
+    signals: { stability: '보통', growth: '보통', volatility: '보통' },
+    riskTags: ['곡물민감', '물가민감', '소비심리민감', '환율민감'],
+    sensitivity: ['곡물 가격', '비료 가격', '원유 가격', '소비 심리'],
+    prompt: '식품 기업은 매출이 안정적이어도 원재료 가격에 왜 흔들릴 수 있을까요?',
+  },
+  air: {
+    story: '국내선과 동아시아 노선을 운영하는 한국 항공사입니다. 저비용 항공으로 출발해 화물 노선까지 확장했지만 유류비와 여행 수요에 민감합니다.',
+    metrics: [['매출', '1.4조 원'], ['영업이익률', '3.2%'], ['부채비율', '214%'], ['현금보유', '2,600억 원'], ['R&D 비중', '1%'], ['수출비중', '18%'], ['원자재 의존도', '매우 높음']],
+    signals: { stability: '낮음', growth: '보통', volatility: '높음' },
+    riskTags: ['고부채', '유가민감', '환율민감', '여행수요민감'],
+    sensitivity: ['원유 가격', '환율 급등', '경기 둔화', '여행 수요'],
+    prompt: '항공사는 왜 유가와 환율, 부채비율을 함께 봐야 할까요?',
+  },
+  bank: {
+    story: '가계대출과 기업금융을 주력으로 하는 한국 상업은행입니다. 1970년 지역은행으로 출발해 디지털 대출과 자산관리로 확장했습니다.',
+    metrics: [['매출', '7.8조 원'], ['영업이익률', '18.1%'], ['부채비율', '은행업 특성상 높음'], ['현금보유', '유동성 높음'], ['R&D 비중', '2%'], ['수출비중', '낮음'], ['원자재 의존도', '낮음']],
+    signals: { stability: '높음', growth: '보통', volatility: '보통' },
+    riskTags: ['금리민감', '부동산민감', '신용위험민감', '경기민감'],
+    sensitivity: ['기준금리', '부동산 경기', '가계대출', '신용위험'],
+    prompt: '은행은 금리가 오를 때 항상 유리할까요, 아니면 대출 부실 위험도 같이 커질까요?',
+  },
+  medi: {
+    story: '만성질환 치료제와 원격진료 솔루션을 가진 미국 헬스케어 기업입니다. 2003년 의료기기 회사로 시작해 바이오 의약품과 데이터 기반 진료로 확장했습니다.',
+    metrics: [['매출', '8.1조 원'], ['영업이익률', '16.7%'], ['부채비율', '61%'], ['현금보유', '1.7조 원'], ['R&D 비중', '18%'], ['수출비중', '49%'], ['원자재 의존도', '낮음']],
+    signals: { stability: '높음', growth: '보통', volatility: '보통' },
+    riskTags: ['규제민감', 'R&D민감', '방어주', '미국정책민감'],
+    sensitivity: ['의료 규제', '임상 결과', '미국 정책', '기술 규제'],
+    prompt: '헬스케어 기업은 경기보다 규제와 연구개발 뉴스에 더 민감할 수 있는 이유가 무엇일까요?',
+  },
+  infra: {
+    story: '도로, 철도, 데이터센터 기반 시설을 짓는 한국 인프라 기업입니다. 공공공사에서 시작해 민간 데이터센터 시공으로 사업을 확장했습니다.',
+    metrics: [['매출', '3.9조 원'], ['영업이익률', '5.9%'], ['부채비율', '156%'], ['현금보유', '6,300억 원'], ['R&D 비중', '2%'], ['수출비중', '11%'], ['원자재 의존도', '높음']],
+    signals: { stability: '보통', growth: '보통', volatility: '높음' },
+    riskTags: ['정책민감', '고부채', '원자재민감', '부동산민감'],
+    sensitivity: ['인프라 예산', '금리 변화', '철강·시멘트 가격', '부동산 정책'],
+    prompt: '건설 기업은 수주가 늘어도 금리와 원자재 가격을 함께 봐야 하는 이유가 무엇일까요?',
+  },
+  sp500: {
+    story: '미국 대표 기업 묶음에 투자하는 ETF입니다. 한 기업이 아니라 미국 대형주의 평균적인 흐름을 따라가도록 설계되었습니다.',
+    metrics: [['구성 종목', '대형주 500개'], ['분산도', '높음'], ['기술주 비중', '높음'], ['배당성향', '보통'], ['환율노출', '있음'], ['국가노출', '미국'], ['변동성', '보통']],
+    signals: { stability: '높음', growth: '보통', volatility: '보통' },
+    riskTags: ['미국시장민감', '환율민감', '기술주비중', '분산투자'],
+    sensitivity: ['미국 금리', '미국 증시', '달러 환율', '기술주 규제'],
+    prompt: 'ETF는 분산투자가 되지만 왜 미국 전체 뉴스에는 민감할까요?',
+  },
+  kospi: {
+    story: '한국 대표 기업 묶음에 투자하는 ETF입니다. 반도체, 자동차, 금융 등 국내 대형주의 흐름을 압축해서 보여줍니다.',
+    metrics: [['구성 종목', '대형주 200개'], ['분산도', '높음'], ['수출주 비중', '높음'], ['배당성향', '보통'], ['환율노출', '있음'], ['국가노출', '한국'], ['변동성', '보통']],
+    signals: { stability: '보통', growth: '보통', volatility: '보통' },
+    riskTags: ['한국시장민감', '수출민감', '환율민감', '반도체비중'],
+    sensitivity: ['한국 수출', '반도체 경기', '환율 변화', '외국인 자금'],
+    prompt: '한국 지수 ETF는 왜 특정 대형 업종 뉴스에 함께 흔들릴 수 있을까요?',
+  },
+  realty: {
+    story: '도시 주거·상업 부동산 가격 흐름을 단순화한 지수입니다. 실제 건물이 아니라 부동산 시장 분위기를 학습하기 위한 가상 지표입니다.',
+    metrics: [['대출 의존도', '높음'], ['금리 민감도', '높음'], ['거래량 민감도', '높음'], ['정책 민감도', '높음'], ['임대수요', '보통'], ['공급탄력성', '낮음'], ['변동성', '보통']],
+    signals: { stability: '보통', growth: '보통', volatility: '보통' },
+    riskTags: ['금리민감', '정책민감', '대출민감', '경기민감'],
+    sensitivity: ['금리 변화', '대출 규제', '부동산 정책', '경기 둔화'],
+    prompt: '부동산은 왜 금리와 대출 규제에 크게 반응할 수 있을까요?',
+  },
+  oilFut: {
+    story: '미래의 원유 가격 기대를 반영하는 원자재 선물입니다. 기업이 아니라 에너지 수요, 공급, 지정학적 불안이 가격 판단의 핵심입니다.',
+    metrics: [['기초자산', '원유'], ['수요 민감도', '높음'], ['공급 민감도', '매우 높음'], ['달러 민감도', '높음'], ['물가 연결성', '높음'], ['보관비용 영향', '있음'], ['변동성', '매우 높음']],
+    signals: { stability: '낮음', growth: '보통', volatility: '높음' },
+    riskTags: ['원자재', '유가민감', '지정학민감', '인플레이션민감'],
+    sensitivity: ['산유국 감산', '중동 긴장', '원유 재고', '글로벌 경기'],
+    prompt: '원유 선물은 왜 기업 실적보다 수요·공급 뉴스에 더 민감할까요?',
+  },
+  grainFut: {
+    story: '밀과 옥수수 같은 주요 곡물 가격 기대를 반영하는 식량 원자재 선물입니다. 기후, 전쟁, 비료, 물류 이슈가 모두 연결됩니다.',
+    metrics: [['기초자산', '밀·옥수수'], ['기후 민감도', '매우 높음'], ['비료 민감도', '높음'], ['물류 민감도', '높음'], ['물가 연결성', '높음'], ['수출규제 영향', '높음'], ['변동성', '높음']],
+    signals: { stability: '낮음', growth: '보통', volatility: '높음' },
+    riskTags: ['식량민감', '기후민감', '물가민감', '원자재'],
+    sensitivity: ['곡창지대 가뭄', '수출 제한', '비료 가격', '해상 운송'],
+    prompt: '곡물 가격 변화가 식품 기업과 물가, 금리까지 연결되는 이유는 무엇일까요?',
+  },
+  usBond: {
+    story: '미국 정부가 발행한 10년 만기 국채를 단순화한 자산입니다. 안전자산 성격이 있지만 금리와 재정 이슈에 따라 가격 변동 가능성이 생깁니다.',
+    metrics: [['발행자', '미국 정부'], ['신용위험', '낮음'], ['금리 민감도', '높음'], ['안전자산 선호', '높음'], ['달러 민감도', '높음'], ['만기', '10년'], ['변동성', '보통']],
+    signals: { stability: '높음', growth: '낮음', volatility: '보통' },
+    riskTags: ['안전자산', '금리민감', '달러민감', '재정이슈민감'],
+    sensitivity: ['미국 금리', '인플레이션', '경기 침체 우려', '미국 재정적자'],
+    prompt: '안전자산인 국채도 금리가 움직이면 가격 변동 가능성이 커지는 이유는 무엇일까요?',
+  },
+  argBond: {
+    story: '아르헨티나 정부가 발행한 고위험 국채를 단순화한 자산입니다. 높은 이자 기대가 있지만 환율, 정치, 신용등급 이슈에 크게 민감합니다.',
+    metrics: [['발행자', '아르헨티나 정부'], ['신용위험', '높음'], ['금리 민감도', '높음'], ['통화가치 민감도', '매우 높음'], ['원자재 수출 영향', '있음'], ['만기', '중장기'], ['변동성', '매우 높음']],
+    signals: { stability: '낮음', growth: '보통', volatility: '높음' },
+    riskTags: ['고위험채권', '신용등급민감', '환율민감', '정치위험'],
+    sensitivity: ['IMF 협상', '신용등급 하향', '통화가치 급락', '원자재 수출'],
+    prompt: '채권은 안전하다고만 생각하기 쉬운데, 저신용 국가 채권은 왜 위험자산처럼 움직일까요?',
+  },
 };
 
 const scenarioEvents = [
@@ -360,6 +506,127 @@ const scenarioEvents = [
     ],
     impact: { core: -0.12, kospi: -0.05, neo: -0.04, sp500: -0.03 },
   },
+  {
+    id: 'oil-supply-shock',
+    title: '산유국 감산',
+    detail: '주요 산유국이 원유 생산량을 줄일 수 있다는 소식이 나오며 에너지 가격 불확실성이 커졌습니다.',
+    principle: '원유 공급이 줄어들면 에너지 가격 기대가 움직이고, 유류비 부담이 큰 산업의 변동 가능성이 커집니다.',
+    affectedAssets: ['원유 선물 변동성 확대', '정유/원자재 변동성 확대', '항공주 부담 가능성', '물가 압력 가능성'],
+    discussionPrompt: '원유 가격 이슈가 항공, 식품, 채권까지 연결될 수 있는 이유는 무엇일까요?',
+    financialLinks: ['원유 선물', '유류비', '원자재 의존도', '물가'],
+    issueOptions: [
+      {
+        title: 'OPEC+ 감산 연장 논의',
+        detail: '주요 산유국들이 원유 생산량 감축을 더 오래 유지할 가능성이 제기됐습니다.',
+        failureTitle: '감산 연장 합의 불발',
+        failureDetail: '산유국 간 이해관계가 엇갈리며 감산 연장 가능성이 낮아졌습니다.',
+      },
+      {
+        title: '중동 해상 운송 차질 우려',
+        detail: '중동 지역 해상 운송 불안으로 원유 공급 일정이 흔들릴 수 있다는 보도가 나왔습니다.',
+        failureTitle: '해상 운송 차질 우려 완화',
+        failureDetail: '주요 항로가 정상 운항 중이라는 확인이 나오며 시장 영향이 줄었습니다.',
+      },
+      {
+        title: '원유 재고 예상보다 큰 폭 감소',
+        detail: '글로벌 원유 재고가 예상보다 빠르게 줄었다는 통계가 발표됐습니다.',
+        failureTitle: '원유 재고 감소폭 재해석',
+        failureDetail: '일시적 통계 요인이 컸다는 분석이 나오며 공급 부족 우려가 약해졌습니다.',
+      },
+    ],
+    impact: { oilFut: 0.18, oil: 0.1, air: -0.12, food: -0.04, grainFut: 0.03, usBond: 0.02 },
+  },
+  {
+    id: 'grain-shock',
+    title: '곡물 공급 충격',
+    detail: '주요 곡물 생산 지역의 작황과 수출 정책이 흔들리며 식량 원자재 불확실성이 커졌습니다.',
+    principle: '곡물 가격 기대가 움직이면 식품 원가, 소비자물가, 일부 국가의 재정과 통화가치까지 영향을 받을 수 있습니다.',
+    affectedAssets: ['곡물 선물 변동성 확대', '식품 기업 원가 부담 가능성', '물가 압력 가능성', '신흥국 채권 변동성 확대'],
+    discussionPrompt: '식량 가격 변화가 왜 한 기업의 문제가 아니라 경제 전체 이슈가 될 수 있을까요?',
+    financialLinks: ['곡물 선물', '식품 원가', '원자재 의존도', '물가'],
+    issueOptions: [
+      {
+        title: '주요 곡창지대 가뭄 확산',
+        detail: '곡물 생산 지역의 가뭄이 길어지며 수확량 감소 우려가 커졌습니다.',
+        failureTitle: '가뭄 피해 예상보다 제한적',
+        failureDetail: '비 예보와 관개 시설 효과가 확인되며 곡물 공급 우려가 완화됐습니다.',
+      },
+      {
+        title: '곡물 수출국 수출 제한 검토',
+        detail: '식량 안보를 이유로 주요 수출국이 곡물 수출 제한을 검토한다는 소식이 나왔습니다.',
+        failureTitle: '곡물 수출 제한 보류',
+        failureDetail: '국제 협의 이후 수출 제한 논의가 보류되며 시장 영향이 줄었습니다.',
+      },
+      {
+        title: '비료 가격 급등',
+        detail: '천연가스와 운송비 부담으로 비료 가격이 올라 농산물 생산비가 커질 수 있다는 분석이 나왔습니다.',
+        failureTitle: '비료 공급 계약 안정',
+        failureDetail: '장기 공급 계약과 재고가 확인되며 비료 가격 충격이 제한됐습니다.',
+      },
+    ],
+    impact: { grainFut: 0.2, food: -0.11, argBond: 0.04, usBond: 0.02, kospi: -0.02 },
+  },
+  {
+    id: 'us-yield-spike',
+    title: '미국 국채금리 급등',
+    detail: '미국 물가와 재정 우려로 장기 국채금리가 급등하며 글로벌 자산 가격의 할인율 부담이 커졌습니다.',
+    principle: '금리가 오르면 채권 가격은 부담을 받고, 미래 이익 기대가 큰 성장자산의 현재 가치도 흔들릴 수 있습니다.',
+    affectedAssets: ['미국 국채 가격 변동성 확대', '성장주 부담 가능성', '고위험 채권 부담 가능성', '은행주 변동성 확대'],
+    discussionPrompt: '국채가 안전자산인데도 금리가 급등하면 가격이 흔들리는 이유는 무엇일까요?',
+    financialLinks: ['금리 민감도', '부채비율', '할인율', '안전자산'],
+    issueOptions: [
+      {
+        title: '미국 인플레이션 예상 상회',
+        detail: '미국 물가 지표가 예상보다 높게 나오며 장기 금리 상승 압력이 커졌습니다.',
+        failureTitle: '미국 물가 충격 일시적 평가',
+        failureDetail: '세부 지표에서 일시 요인이 확인되며 금리 급등 우려가 완화됐습니다.',
+      },
+      {
+        title: '미국 재정적자 우려 확대',
+        detail: '미국 정부의 재정 부담이 커질 수 있다는 전망이 국채시장 불안을 키웠습니다.',
+        failureTitle: '재정 우려 완화 발언',
+        failureDetail: '정책 당국의 재정 안정화 계획 발표로 국채시장 불안이 줄었습니다.',
+      },
+      {
+        title: '연준 긴축 장기화 전망',
+        detail: '미국 기준금리가 더 오래 높게 유지될 수 있다는 전망이 확산됐습니다.',
+        failureTitle: '연준 완화 가능성 재부각',
+        failureDetail: '경기 둔화 신호가 나오며 긴축 장기화 전망이 약해졌습니다.',
+      },
+    ],
+    baseRateDelta: 0.3,
+    impact: { usBond: -0.12, sp500: -0.06, core: -0.07, enter: -0.05, argBond: -0.08, bank: 0.04 },
+  },
+  {
+    id: 'em-credit-stress',
+    title: '신흥국 신용위험 확대',
+    detail: '저신용 국가의 채무 상환 능력에 대한 의심이 커지며 고위험 채권과 위험자산 변동성이 확대됐습니다.',
+    principle: '국가 신용위험이 커지면 높은 이자를 기대한 투자도 손실 위험이 커지고, 자금은 안전자산으로 이동할 수 있습니다.',
+    affectedAssets: ['고위험 신흥국 채권 변동성 확대', '미국 국채 선호 가능성', '위험자산 회피 가능성', '은행 신용위험 점검'],
+    discussionPrompt: '높은 이자를 주는 채권이 오히려 위험할 수 있는 이유는 무엇일까요?',
+    financialLinks: ['신용위험', '통화가치', '국가 부채', '안전자산 선호'],
+    issueOptions: [
+      {
+        title: '아르헨티나 IMF 협상 지연',
+        detail: '채무 조정과 지원 조건을 둘러싼 협상이 늦어지며 상환 불확실성이 커졌습니다.',
+        failureTitle: 'IMF 협상 진전',
+        failureDetail: '핵심 조건에 대한 합의가 알려지며 신용위험 우려가 줄었습니다.',
+      },
+      {
+        title: '신흥국 통화가치 급락',
+        detail: '달러 강세와 자금 유출 우려로 일부 신흥국 통화가 빠르게 약세를 보였습니다.',
+        failureTitle: '신흥국 통화 안정 조치',
+        failureDetail: '외환시장 안정 조치와 자금 유입으로 통화 급락 우려가 진정됐습니다.',
+      },
+      {
+        title: '국가 신용등급 하향 경고',
+        detail: '국제 신용평가사가 일부 신흥국의 신용등급 하향 가능성을 경고했습니다.',
+        failureTitle: '신용등급 유지 확인',
+        failureDetail: '신용평가사가 단기 등급 조정 가능성을 낮게 평가하며 시장 충격이 제한됐습니다.',
+      },
+    ],
+    impact: { argBond: -0.22, usBond: 0.08, sp500: -0.03, kospi: -0.04, bank: -0.03 },
+  },
 ];
 
 const mockPlayers = [
@@ -433,15 +700,49 @@ function getPassiveMarketMove() {
   return Number(((Math.random() * 2 - 1) * PASSIVE_MARKET_MOVE).toFixed(3));
 }
 
-function normalizeEventImpact(impact = {}) {
+function normalizeEventImpact(impact = {}, minimumImpact = MIN_EVENT_IMPACT) {
   return Object.fromEntries(
     Object.entries(impact).map(([assetId, value]) => {
       if (value === 0) return [assetId, 0];
       const direction = value > 0 ? 1 : -1;
-      const adjustedValue = direction * Math.max(Math.abs(value), MIN_EVENT_IMPACT);
+      const adjustedValue = direction * Math.max(Math.abs(value), minimumImpact);
       return [assetId, Number(adjustedValue.toFixed(3))];
     }),
   );
+}
+
+function getAppliedEventTypeCounts(events) {
+  return events.reduce((acc, event) => {
+    if (!event.didApply) return acc;
+    const eventKey = getEventKey(event);
+    acc[eventKey] = (acc[eventKey] ?? 0) + 1;
+    return acc;
+  }, {});
+}
+
+function combineResolvedImpacts(events) {
+  const groupedImpacts = events.reduce((groups, event) => {
+    if (!event.didApply) return groups;
+    const groupKey = event.repeatedVolatility ? getEventKey(event) : event.id;
+    const group = groups[groupKey] ?? {};
+
+    Object.entries(event.resolvedImpact).forEach(([assetId, value]) => {
+      const currentValue = group[assetId] ?? 0;
+      group[assetId] = event.repeatedVolatility && Math.abs(currentValue) >= Math.abs(value)
+        ? currentValue
+        : currentValue + value;
+    });
+
+    groups[groupKey] = group;
+    return groups;
+  }, {});
+
+  return Object.values(groupedImpacts).reduce((acc, group) => {
+    Object.entries(group).forEach(([assetId, value]) => {
+      acc[assetId] = (acc[assetId] ?? 0) + value;
+    });
+    return acc;
+  }, {});
 }
 
 function moveAssetsLocally(currentAssets, modifier = {}, delistedIds = [], roundNumber = 1) {
@@ -475,6 +776,17 @@ function getChange(asset) {
 
 function getDepositRate(baseRate) {
   return Math.max(0.5, baseRate + 0.8);
+}
+
+function getAssetProfile(asset) {
+  return assetLearningProfiles[asset.id] ?? {
+    story: `${asset.name}은 ${asset.sector} 흐름을 단순화한 가상 자산입니다. 가격만 보지 말고 어떤 이슈에서 변동 가능성이 커지는지 함께 확인해보세요.`,
+    metrics: [['자산 유형', assetTypeLabels[asset.type] ?? asset.type], ['국가', asset.country], ['분야', asset.sector], ['현재가', formatAssetPrice(asset)]],
+    signals: { stability: '보통', growth: '보통', volatility: '보통' },
+    riskTags: ['이슈민감', '분산투자필요'],
+    sensitivity: ['금리 변화', '정책 변화', '시장 심리'],
+    prompt: '이 자산은 어떤 뉴스에서 변동 가능성이 커질까요?',
+  };
 }
 
 function Sparkline({ history, color }) {
@@ -515,6 +827,10 @@ function getSimpleExplanation(event) {
     'us-regulation': '미국 기술 규제 = 미국 기업 성장 부담',
     'fx-spike': '환율 급등 = 수출입 기업의 손익 변화',
     'korea-us-chip-tension': '국가 간 반도체 갈등 = 공급망 불확실성 증가',
+    'oil-supply-shock': '산유국 감산 = 원유 공급 기대 변화',
+    'grain-shock': '곡물 공급 충격 = 식품 원가와 물가 불확실성 증가',
+    'us-yield-spike': '미국 국채금리 급등 = 글로벌 돈값 상승',
+    'em-credit-stress': '신흥국 신용위험 = 높은 이자 뒤의 상환 위험 부각',
   };
 
   return explanations[getEventKey(event)] ?? '뉴스가 투자자의 기대를 바꾸면 가격도 움직일 수 있습니다.';
@@ -533,9 +849,31 @@ function getCausalChain(event) {
     'us-regulation': ['미국 규제 강화', '비용·성장 부담', '미국 기술주 하락 압력'],
     'fx-spike': ['달러 강세', '수출입 손익 변화', '업종별 주가 차별화'],
     'korea-us-chip-tension': ['정책 갈등', '수출·보조금 불확실', '반도체주 하락 압력'],
+    'oil-supply-shock': ['원유 공급 우려', '에너지 비용 기대 변화', '유가 민감 산업 변동성 확대'],
+    'grain-shock': ['곡물 공급 우려', '식품 원가·물가 부담', '식량 민감 자산 변동성 확대'],
+    'us-yield-spike': ['미국 금리 상승', '채권 가격·할인율 부담', '성장자산·고위험채 변동성 확대'],
+    'em-credit-stress': ['상환 위험 부각', '위험자산 회피', '고위험 채권 부담·안전자산 선호'],
   };
 
   return chains[getEventKey(event)] ?? ['뉴스 발생', '기대 변화', '가격 변동'];
+}
+
+function getFinancialLinks(event) {
+  const links = {
+    'rate-up': ['부채비율', '금리 민감도', '현금보유', '대출 의존도'],
+    'rate-down': ['성장성', '금리 민감도', '투자 계획', '부동산 지수'],
+    'deposit-special': ['예금금리', '안정성', '현금흐름', '위험자산 선호'],
+    'property-ease': ['대출 의존도', '부동산 민감도', '수주 기대', '가계부채'],
+    'us-rally': ['국가노출', '성장성', '기술주 비중', '환율노출'],
+    'korea-export': ['수출비중', '환율노출', '제조업 경기', '매출 성장'],
+    rare: ['원자재 의존도', '공급망', 'R&D 비중', '재고 부담'],
+    housing: ['수주잔고', '부채비율', '원자재 의존도', '정책 민감도'],
+    'us-regulation': ['국가노출', '규제 민감도', 'R&D 비중', '플랫폼 의존도'],
+    'fx-spike': ['수출비중', '환율노출', '해외 비용', '달러 부채'],
+    'korea-us-chip-tension': ['국가노출', '공급망', '수출규제', '반도체 의존도'],
+  };
+
+  return event.financialLinks ?? links[getEventKey(event)] ?? ['부채비율', '현금보유', '원자재 의존도', '국가노출'];
 }
 
 function getResultLabel(event, compact) {
@@ -602,6 +940,7 @@ function RoundExplanation({ summary, assets, compact = false }) {
         ) : null}
         {summary.events.map((event, index) => {
           const movers = getEventMovers(event, assets);
+          const financialLinks = getFinancialLinks(event);
           return (
             <article key={`${summary.round}-${event.id}-${index}`}>
               <div className="explain-head">
@@ -616,6 +955,16 @@ function RoundExplanation({ summary, assets, compact = false }) {
                   <span key={step}>{step}</span>
                 ))}
               </div>
+              {!compact ? (
+                <div className="financial-links" aria-label={`${event.title} 연결 지표`}>
+                  <strong>같이 볼 재무·시장 신호</strong>
+                  <div>
+                    {financialLinks.map((link) => (
+                      <span key={link}>{link}</span>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
               {!compact && event.didApply !== false ? (
                 <div className="impact-chips" aria-label={`${event.title} 영향 자산`}>
                   {movers.map((mover) => (
@@ -629,6 +978,12 @@ function RoundExplanation({ summary, assets, compact = false }) {
                 <p className="expectation-note">
                   <strong>{event.expectationTitle}</strong>
                   <span>{event.expectationDetail}</span>
+                </p>
+              ) : null}
+              {event.repeatedVolatility ? (
+                <p className="volatility-note">
+                  <strong>동일 유형 이슈 반복 적용</strong>
+                  <span>같은 유형의 이슈가 2회 이상 실제로 반영되어 시장 변동성이 크게 확대되었습니다.</span>
                 </p>
               ) : null}
               {event.didApply === false ? (
@@ -1094,6 +1449,83 @@ function MacroGuide({ baseRate, depositRate, propertyAsset }) {
   );
 }
 
+function AssetLearningPanel({ asset }) {
+  const profile = getAssetProfile(asset);
+  const signalEntries = [
+    ['안정성', profile.signals.stability],
+    ['성장성', profile.signals.growth],
+    ['변동성', profile.signals.volatility],
+  ];
+  const checklist = [
+    '이 자산은 어떤 나라와 산업에 연결되어 있나?',
+    '부채비율, 현금보유, 원자재 의존도 중 무엇이 눈에 띄나?',
+    '지금 공개된 이슈가 실제 이벤트가 아니어도 기대감만으로 움직일 수 있나?',
+    '전 재산을 넣었을 때 상장폐지나 급락을 버틸 수 있나?',
+  ];
+
+  return (
+    <section className="asset-learning-panel" aria-label={`${asset.name} 분석`}>
+      <div className="panel-heading split">
+        <div>
+          <Building2 size={20} aria-hidden="true" />
+          <h2>기업·자산 분석</h2>
+        </div>
+        <span className="limit-pill">{assetTypeLabels[asset.type] ?? asset.type}</span>
+      </div>
+
+      <article className="asset-story">
+        <div>
+          <strong>{asset.name}</strong>
+          <span>{asset.country} · {asset.sector}</span>
+        </div>
+        <p>{profile.story}</p>
+      </article>
+
+      <div className="metric-grid" aria-label={`${asset.name} 간단 재무표`}>
+        {profile.metrics.map(([label, value]) => (
+          <div key={label}>
+            <span>{label}</span>
+            <strong>{value}</strong>
+          </div>
+        ))}
+      </div>
+
+      <div className="signal-grid" aria-label={`${asset.name} 재무 신호`}>
+        {signalEntries.map(([label, value]) => (
+          <div className={`signal ${value === '높음' || value === '매우 높음' ? 'hot' : value === '낮음' ? 'cool' : ''}`} key={label}>
+            <span>{label}</span>
+            <strong>{value}</strong>
+          </div>
+        ))}
+      </div>
+
+      <div className="risk-tag-list" aria-label={`${asset.name} 위험 태그`}>
+        {profile.riskTags.map((tag) => (
+          <span key={tag}>{tag}</span>
+        ))}
+      </div>
+
+      <div className="sensitivity-list">
+        <strong>변동 가능성이 커지는 이슈</strong>
+        <div>
+          {profile.sensitivity.map((item) => (
+            <span key={item}>{item}</span>
+          ))}
+        </div>
+      </div>
+
+      <div className="precheck-list">
+        <strong>투자 전 체크</strong>
+        {checklist.map((item) => (
+          <p key={item}>{item}</p>
+        ))}
+      </div>
+
+      <p className="student-prompt">{profile.prompt}</p>
+    </section>
+  );
+}
+
 function AppHeader({ view, setView, hostAuthenticated }) {
   return (
     <header className="topbar">
@@ -1551,6 +1983,8 @@ function StudentView({
 
         <MacroGuide baseRate={baseRate} depositRate={depositRate} propertyAsset={propertyAsset} />
 
+        <AssetLearningPanel asset={selectedAsset} />
+
         <section className="deposit-ticket" aria-labelledby="deposit-heading">
           <div>
             <h2 id="deposit-heading">예금 계좌</h2>
@@ -1803,28 +2237,32 @@ export function App() {
   function handleCloseRound() {
     if (roomExpired || phase !== 'open') return;
 
-    const resolvedEvents = currentRoundEvents.map((event) => {
+    const initialResolvedEvents = currentRoundEvents.map((event) => {
       const didApply = Math.random() < (event.probability ?? DEFAULT_EVENT_PROBABILITY);
       const outcomeType = didApply ? (Math.random() < 0.7 ? 'event' : 'expectation') : 'failed';
-      const adjustedImpact = normalizeEventImpact(event.impact);
       return {
         ...event,
         resolved: true,
         didApply,
         outcomeType,
-        resolvedImpact: didApply ? adjustedImpact : {},
         expectationTitle: `${event.title} 실제 발표 전 기대감 선반영`,
         expectationDetail: '실제 이벤트가 확정되지는 않았지만, 투자자들이 가능성을 먼저 반영하면서 가격이 움직였습니다.',
       };
     });
 
-    const combinedImpact = resolvedEvents.reduce((acc, event) => {
-      if (!event.didApply) return acc;
-      Object.entries(event.resolvedImpact).forEach(([assetId, value]) => {
-        acc[assetId] = (acc[assetId] ?? 0) + value;
-      });
-      return acc;
-    }, {});
+    const appliedEventTypeCounts = getAppliedEventTypeCounts(initialResolvedEvents);
+    const resolvedEvents = initialResolvedEvents.map((event) => {
+      const repeatedVolatility = event.didApply && (appliedEventTypeCounts[getEventKey(event)] ?? 0) >= 2;
+      return {
+        ...event,
+        repeatedVolatility,
+        resolvedImpact: event.didApply
+          ? normalizeEventImpact(event.impact, repeatedVolatility ? MIN_REPEATED_EVENT_IMPACT : MIN_EVENT_IMPACT)
+          : {},
+      };
+    });
+
+    const combinedImpact = combineResolvedImpacts(resolvedEvents);
 
     const baseRateDelta = resolvedEvents.reduce((sum, event) => sum + (event.outcomeType === 'event' ? event.baseRateDelta ?? 0 : 0), 0);
     if (baseRateDelta) {
