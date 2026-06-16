@@ -5,9 +5,11 @@ create table if not exists public.rooms (
   pin text not null unique check (pin ~ '^[0-9]{6}$'),
   host_id text not null default 'geography',
   current_round integer not null default 1 check (current_round between 1 and 12),
+  total_rounds integer not null default 12 check (total_rounds in (4, 12)),
   phase text not null default 'setup' check (phase in ('setup', 'open', 'closed', 'ended', 'expired')),
   mode text not null default 'individual' check (mode in ('individual', 'team')),
   game_started boolean not null default false,
+  final_reports_downloaded boolean not null default false,
   base_rate numeric(5, 2) not null default 3.5,
   exchange_rate integer not null default 1350,
   unemployment_rate numeric(5, 2) not null default 3.5,
@@ -17,10 +19,13 @@ create table if not exists public.rooms (
   updated_at timestamptz not null default now()
 );
 
+alter table public.rooms add column if not exists host_id text not null default 'geography';
+alter table public.rooms add column if not exists total_rounds integer not null default 12 check (total_rounds in (4, 12));
 alter table public.rooms add column if not exists exchange_rate integer not null default 1350;
 alter table public.rooms add column if not exists unemployment_rate numeric(5, 2) not null default 3.5;
 alter table public.rooms add column if not exists mode text not null default 'individual';
 alter table public.rooms add column if not exists game_started boolean not null default false;
+alter table public.rooms add column if not exists final_reports_downloaded boolean not null default false;
 
 create table if not exists public.players (
   id uuid primary key default gen_random_uuid(),
@@ -28,6 +33,8 @@ create table if not exists public.players (
   student_number integer check (student_number between 1 and 40),
   nickname text not null,
   passcode_hash text not null default '',
+  session_token text not null default '',
+  last_seen_at timestamptz,
   team_key text not null default '',
   cash bigint not null default 100000000,
   deposit bigint not null default 0,
@@ -40,6 +47,8 @@ create table if not exists public.players (
 
 alter table public.players add column if not exists student_number integer check (student_number between 1 and 40);
 alter table public.players add column if not exists passcode_hash text not null default '';
+alter table public.players add column if not exists session_token text not null default '';
+alter table public.players add column if not exists last_seen_at timestamptz;
 alter table public.players add column if not exists team_key text not null default '';
 
 do $$
@@ -175,6 +184,7 @@ create table if not exists public.final_submissions (
   id uuid primary key default gen_random_uuid(),
   room_id uuid not null references public.rooms(id) on delete cascade,
   nickname text not null,
+  mode text not null default 'individual',
   student_number integer,
   team_key text not null default '',
   team_name text not null default '',
@@ -197,6 +207,7 @@ create table if not exists public.final_submissions (
 
 alter table public.final_submissions add column if not exists deposit_interest_earned bigint not null default 0;
 alter table public.final_submissions add column if not exists invested_principal bigint not null default 100000000;
+alter table public.final_submissions add column if not exists mode text not null default 'individual';
 alter table public.final_submissions add column if not exists student_number integer;
 alter table public.final_submissions add column if not exists team_key text not null default '';
 alter table public.final_submissions add column if not exists team_name text not null default '';

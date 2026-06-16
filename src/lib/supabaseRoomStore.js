@@ -1,5 +1,7 @@
 import { supabase, supabaseConfigured } from './supabaseClient.js';
 
+const PLAYER_SESSION_TIMEOUT_MS = 90_000;
+
 function toIso(value) {
   return new Date(value).toISOString();
 }
@@ -96,6 +98,8 @@ function fromPlayerRow(row) {
     name: row.nickname,
     studentNumber: row.student_number ?? null,
     passcodeHash: row.passcode_hash ?? '',
+    sessionToken: row.session_token ?? '',
+    lastSeenAt: row.last_seen_at ? new Date(row.last_seen_at).getTime() : 0,
     teamKey: row.team_key ?? '',
     returnRate: Number(row.return_rate ?? 0),
     cash: Number(row.cash ?? 0),
@@ -140,6 +144,9 @@ function fromSubmissionRow(row) {
   return {
     id: row.id,
     nickname: row.nickname,
+    mode: row.mode ?? 'individual',
+    teamKey: row.team_key ?? '',
+    teamName: row.team_name ?? '',
     totalAsset: Number(row.total_asset ?? 0),
     cash: Number(row.cash ?? 0),
     deposit: Number(row.deposit ?? 0),
@@ -186,7 +193,7 @@ async function fetchRoomBundle(query) {
   };
 }
 
-export async function createRemoteRoom({ pin, now, baseRate, exchangeRate = 1350, unemploymentRate = 3.5, assets, mode = 'individual', teams = [] }) {
+export async function createRemoteRoom({ pin, now, hostId = 'geography', totalRounds = 12, baseRate, exchangeRate = 1350, unemploymentRate = 3.5, assets, mode = 'individual', teams = [] }) {
   if (!supabaseConfigured) return null;
 
   const { data: existing } = await supabase.from('rooms').select('id').eq('pin', pin).maybeSingle();
@@ -198,10 +205,13 @@ export async function createRemoteRoom({ pin, now, baseRate, exchangeRate = 1350
     .from('rooms')
     .insert({
       pin,
+      host_id: hostId,
       current_round: 1,
+      total_rounds: totalRounds,
       phase: 'setup',
       mode,
       game_started: false,
+      final_reports_downloaded: false,
       base_rate: baseRate,
       exchange_rate: exchangeRate,
       unemployment_rate: unemploymentRate,
@@ -306,9 +316,21 @@ export async function registerRemotePlayer(roomId, player) {
     if (existing.nickname !== player.name || existing.passcode_hash !== player.passcodeHash) {
       throw new Error('이미 사용 중인 학번입니다. 이름과 개인 비밀번호를 확인하세요.');
     }
+    const existingLastSeenAt = existing.last_seen_at ? new Date(existing.last_seen_at).getTime() : 0;
+    const activeDifferentSession = existing.session_token
+      && existing.session_token !== player.sessionToken
+      && existingLastSeenAt
+      && Date.now() - existingLastSeenAt < PLAYER_SESSION_TIMEOUT_MS;
+    if (activeDifferentSession) {
+      throw new Error('해당 학번은 다른 기기에서 접속 중입니다. 기존 화면을 닫고 잠시 후 다시 시도하세요.');
+    }
     const { data, error } = await supabase
       .from('players')
-      .update({ team_key: player.teamKey ?? existing.team_key ?? '' })
+      .update({
+        team_key: player.teamKey ?? existing.team_key ?? '',
+        session_token: player.sessionToken ?? existing.session_token ?? '',
+        last_seen_at: toIso(player.lastSeenAt ?? Date.now()),
+      })
       .eq('id', existing.id)
       .select()
       .single();
@@ -323,6 +345,8 @@ export async function registerRemotePlayer(roomId, player) {
       student_number: studentNumber,
       nickname: player.name,
       passcode_hash: player.passcodeHash,
+      session_token: player.sessionToken ?? '',
+      last_seen_at: toIso(player.lastSeenAt ?? Date.now()),
       team_key: player.teamKey ?? '',
       cash: Math.round(player.cash ?? 0),
       deposit: Math.round(player.deposit ?? 0),
@@ -346,6 +370,8 @@ export async function upsertRemotePlayer(roomId, player) {
         student_number: player.studentNumber ? Number(player.studentNumber) : null,
         nickname: player.name,
         passcode_hash: player.passcodeHash ?? '',
+        session_token: player.sessionToken ?? '',
+        last_seen_at: toIso(player.lastSeenAt ?? Date.now()),
         team_key: player.teamKey ?? '',
         cash: Math.round(player.cash ?? 0),
         deposit: Math.round(player.deposit ?? 0),
@@ -399,6 +425,9 @@ export async function upsertRemoteSubmission(roomId, report) {
       {
         room_id: roomId,
         nickname: report.nickname,
+        mode: report.mode ?? 'individual',
+        team_key: report.teamKey ?? '',
+        team_name: report.teamName ?? '',
         total_asset: Math.round(report.totalAsset ?? 0),
         cash: Math.round(report.cash ?? 0),
         deposit: Math.round(report.deposit ?? 0),

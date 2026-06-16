@@ -16,7 +16,9 @@ import {
   PiggyBank,
   Play,
   Radio,
+  RotateCcw,
   School,
+  Shuffle,
   Smartphone,
   Trophy,
   Users,
@@ -55,12 +57,15 @@ import {
 
 const INITIAL_CASH = 100_000_000;
 const ROUND_SALARY = 3_000_000;
-const TOTAL_ROUNDS = 12;
+const DEFAULT_TOTAL_ROUNDS = 12;
+const ROUND_OPTIONS = [4, 12];
 const MAX_PLAYERS_PER_ROOM = 40;
 const INITIAL_BASE_RATE = 3.5;
 const INITIAL_UNEMPLOYMENT_RATE = 3.5;
 const MAX_EVENTS_PER_ROUND = 5;
-const DEFAULT_EVENT_PROBABILITY = 0.75;
+const EVENT_SUCCESS_PROBABILITY = 0.7;
+const EXPECTATION_WITHIN_SUCCESS_PROBABILITY = 0.3;
+const DEFAULT_EVENT_PROBABILITY = EVENT_SUCCESS_PROBABILITY;
 const DELISTING_START_ROUND = 9;
 const DELISTING_PROBABILITY = 0.2;
 const STRONG_NEGATIVE_IMPACT = -0.07;
@@ -74,15 +79,58 @@ const MAX_INDIRECT_REPEATED_EVENT_IMPACT = 0.12;
 const PASSIVE_MARKET_MOVE = 0.05;
 const INITIAL_EXCHANGE_RATE = 1350;
 const ROOM_TTL_MS = 24 * 60 * 60 * 1000;
-const HOST_CREDENTIALS = {
-  id: 'geography',
-  password: '72727272',
-};
+const PLAYER_SESSION_TIMEOUT_MS = 90_000;
+const PLAYER_HEARTBEAT_MS = 30_000;
+const HOST_PASSWORD = '72727272';
+const HOST_IDS = ['geography', ...Array.from({ length: 20 }, (_, index) => `geography${index + 1}`)];
 const TEAM_TRADE_LOCK_MS = 60_000;
 const teamTemplates = Array.from({ length: 8 }, (_, index) => ({
   key: `team-${index + 1}`,
   name: `${index + 1}모둠`,
 }));
+
+function getAuthorizedHostId(id, password) {
+  const normalizedId = id.trim().toLowerCase();
+  if (password !== HOST_PASSWORD) return '';
+  return HOST_IDS.includes(normalizedId) ? normalizedId : '';
+}
+
+function createStudentSessionToken() {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function getStudentSessionKey(roomPin, studentNumber) {
+  return `market-class-session:${roomPin}:${studentNumber}`;
+}
+
+function getStoredStudentSessionToken(roomPin, studentNumber) {
+  try {
+    return window.localStorage.getItem(getStudentSessionKey(roomPin, studentNumber)) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function storeStudentSessionToken(roomPin, studentNumber, token) {
+  try {
+    window.localStorage.setItem(getStudentSessionKey(roomPin, studentNumber), token);
+  } catch {
+    // Storage can be blocked in some browsers; the server-side check still protects remote rooms.
+  }
+}
+
+function hasActiveDifferentSession(player, sessionToken) {
+  if (!player?.sessionToken || player.sessionToken === sessionToken) return false;
+  const lastSeenAt = Number(player.lastSeenAt ?? 0);
+  return lastSeenAt && Date.now() - lastSeenAt < PLAYER_SESSION_TIMEOUT_MS;
+}
+
+function getPlayerConnectionLabel(player) {
+  const lastSeenAt = Number(player?.lastSeenAt ?? 0);
+  if (!lastSeenAt) return '접속 확인 대기';
+  return Date.now() - lastSeenAt < PLAYER_SESSION_TIMEOUT_MS ? '접속 중' : '재접속 가능';
+}
 
 const phaseLabels = {
   setup: '라운드 준비',
@@ -511,6 +559,198 @@ const scenarioEvents = [
     ],
     baseRateDelta: 0.2,
     impact: { bank: 0.05, riverbank: 0.06, enter: -0.02, dogemars: -0.03, neo: -0.02, realty: -0.03 },
+  },
+  {
+    id: 'growth-boom',
+    title: '경기 호황',
+    detail: '소비와 기업 투자가 함께 늘며 경기 회복 기대가 강해졌습니다.',
+    principle: '경기가 좋아지면 기업 매출과 고용 기대가 커지고, 주식과 부동산 같은 위험자산 선호가 높아질 수 있습니다.',
+    affectedAssets: ['경기민감주 상승 압력', '부동산 상승 압력', '채권 가격 하락 압력', '실업률 하락 압력'],
+    discussionPrompt: '경기 호황이 모든 기업에 같은 크기의 호재로 작용하지 않는 이유는 무엇일까요?',
+    financialLinks: ['경기민감도', '영업이익률', '고용', '소비심리'],
+    issueOptions: [
+      {
+        title: '소매판매와 설비투자 동반 증가',
+        detail: '소비 지출과 기업 설비투자가 함께 늘며 경기 확장 기대가 커졌습니다.',
+        failureTitle: '소비 증가세 일시적 요인으로 확인',
+        failureDetail: '세부 통계에서 계절 행사와 일회성 지출 영향이 컸다는 분석이 나오며 경기 호황 기대가 약해졌습니다.',
+      },
+      {
+        title: '기업 실적 전망 상향',
+        detail: '주요 기업들이 매출 전망을 올리며 투자자들의 위험자산 선호가 살아났습니다.',
+        failureTitle: '실적 전망 상향 폭 제한',
+        failureDetail: '비용 부담이 여전히 크다는 평가가 나오며 시장 영향은 제한됐습니다.',
+      },
+    ],
+    impact: { kospi: 0.08, sp500: 0.06, enter: 0.08, air: 0.09, oceanair: 0.1, neo: 0.05, realty: 0.05, bank: 0.04, riverbank: 0.04, usBond: -0.05 },
+  },
+  {
+    id: 'recession-risk',
+    title: '경기 침체 우려',
+    detail: '소비와 투자가 둔화되며 기업 매출 감소와 위험자산 회피 우려가 커졌습니다.',
+    principle: '경기가 나빠질 것 같으면 기업 이익 기대가 낮아지고, 투자자는 주식보다 현금성 자산이나 안전자산을 선호할 수 있습니다.',
+    affectedAssets: ['경기민감주 하락 압력', '부동산 하락 압력', '미국 국채 선호', '실업률 상승 압력'],
+    discussionPrompt: '경기 침체 우려가 커질 때 방어주와 안전자산이 상대적으로 주목받는 이유는 무엇일까요?',
+    financialLinks: ['경기민감도', '현금보유', '고용', '안전자산 선호'],
+    issueOptions: [
+      {
+        title: '소비자심리지수 급락',
+        detail: '가계가 지출을 줄일 가능성이 커지며 소비 관련 기업의 실적 우려가 확대됐습니다.',
+        failureTitle: '소비심리 급락세 반등',
+        failureDetail: '후속 조사에서 고용과 임금 기대가 개선되며 소비 둔화 우려가 완화됐습니다.',
+      },
+      {
+        title: '기업 투자 계획 축소',
+        detail: '주요 기업들이 신규 투자 일정을 늦추며 경기 둔화 가능성이 부각됐습니다.',
+        failureTitle: '투자 축소 발표 제한적',
+        failureDetail: '일부 업종에 국한된 조정으로 확인되며 전체 경기 영향은 작게 평가됐습니다.',
+      },
+    ],
+    impact: { kospi: -0.09, sp500: -0.07, enter: -0.08, air: -0.12, oceanair: -0.13, neo: -0.06, realty: -0.06, infra: -0.06, metroinfra: -0.07, usBond: 0.08, food: 0.03, purefood: 0.04 },
+  },
+  {
+    id: 'jobs-improve',
+    title: '고용 개선',
+    detail: '취업자 수가 늘고 임금 흐름이 안정되며 소비 여력이 개선됐습니다.',
+    principle: '고용이 좋아지면 가계 소득과 소비 기대가 커져 여행, 콘텐츠, 금융, 부동산에 긍정적으로 작용할 수 있습니다.',
+    affectedAssets: ['소비 관련주 상승 압력', '항공·여행 상승 압력', '은행 대출 기대 상승', '실업률 하락'],
+    discussionPrompt: '고용 개선이 주식시장과 부동산 심리에 동시에 영향을 줄 수 있는 이유는 무엇일까요?',
+    financialLinks: ['실업률', '소비심리', '매출 성장', '대출 수요'],
+    issueOptions: [
+      {
+        title: '취업자 수 예상보다 큰 폭 증가',
+        detail: '고용 지표가 예상보다 좋게 나오며 소비와 대출 수요 회복 기대가 커졌습니다.',
+        failureTitle: '고용 증가 질적 개선 부족',
+        failureDetail: '단기 일자리 증가 비중이 큰 것으로 확인되며 시장 영향은 제한됐습니다.',
+      },
+      {
+        title: '청년 고용률 개선',
+        detail: '청년층 고용률이 개선되며 소비 회복 기대가 높아졌습니다.',
+        failureTitle: '청년 고용 개선 일시적',
+        failureDetail: '계절 채용 영향이 컸다는 분석이 나오며 기대감이 약해졌습니다.',
+      },
+    ],
+    impact: { enter: 0.08, air: 0.1, oceanair: 0.09, bank: 0.05, riverbank: 0.04, realty: 0.04, kospi: 0.05, sp500: 0.03, food: 0.03, purefood: 0.03 },
+  },
+  {
+    id: 'unemployment-worse',
+    title: '실업률 악화',
+    detail: '실업률이 오르고 채용 계획이 줄어들며 소비 둔화 우려가 커졌습니다.',
+    principle: '실업률이 오르면 가계 소비가 줄고 경기민감 업종의 매출 기대가 약해질 수 있습니다. 동시에 안전자산 선호가 커질 수 있습니다.',
+    affectedAssets: ['소비·여행 하락 압력', '부동산 하락 압력', '미국 국채 선호', '은행 신용위험 점검'],
+    discussionPrompt: '실업률 상승이 주가뿐 아니라 은행과 부동산에도 부담이 되는 이유는 무엇일까요?',
+    financialLinks: ['실업률', '소비심리', '신용위험', '현금흐름'],
+    issueOptions: [
+      {
+        title: '실업률 예상보다 높게 발표',
+        detail: '고용시장이 식고 있다는 신호가 나오며 소비와 대출 상환 능력에 대한 우려가 커졌습니다.',
+        failureTitle: '실업률 상승 일시적 요인',
+        failureDetail: '구직활동 증가에 따른 통계 효과가 컸다는 분석이 나오며 충격이 완화됐습니다.',
+      },
+      {
+        title: '기업 채용 계획 축소',
+        detail: '주요 기업들이 채용 계획을 줄이며 경기 둔화 우려가 커졌습니다.',
+        failureTitle: '채용 축소 일부 업종에 그쳐',
+        failureDetail: '서비스업과 공공부문 채용이 유지되며 전체 고용 충격은 제한됐습니다.',
+      },
+    ],
+    impact: { enter: -0.1, air: -0.12, oceanair: -0.14, bank: -0.06, riverbank: -0.07, realty: -0.06, kospi: -0.06, sp500: -0.04, usBond: 0.07, argBond: -0.05 },
+  },
+  {
+    id: 'inflation-cool',
+    title: '물가 둔화',
+    detail: '소비자물가 상승률이 낮아지며 금리 부담 완화 기대가 커졌습니다.',
+    principle: '물가가 안정되면 중앙은행이 금리를 덜 올리거나 내릴 여지가 생기고, 성장주와 채권 가격에 긍정적으로 작용할 수 있습니다.',
+    affectedAssets: ['성장주 상승 압력', '채권 가격 상승 압력', '원자재 선물 하락 압력', '예금 매력 일부 둔화'],
+    discussionPrompt: '물가가 안정되면 왜 주식과 채권이 동시에 좋아질 수 있을까요?',
+    financialLinks: ['물가', '할인율', '원자재 의존도', '금리 민감도'],
+    issueOptions: [
+      {
+        title: '소비자물가 예상보다 낮게 발표',
+        detail: '물가 상승률이 예상보다 낮아 금리 부담이 줄어들 수 있다는 기대가 커졌습니다.',
+        failureTitle: '근원물가 여전히 높음',
+        failureDetail: '에너지 제외 물가가 높게 유지되며 금리 부담 완화 기대가 약해졌습니다.',
+      },
+      {
+        title: '국제 원자재 가격 안정',
+        detail: '원유와 곡물 가격이 안정되며 기업 원가 부담 완화 기대가 커졌습니다.',
+        failureTitle: '원자재 가격 안정세 제한적',
+        failureDetail: '일부 품목 가격은 여전히 높아 전체 물가 영향은 제한적이었습니다.',
+      },
+    ],
+    impact: { core: 0.07, dogemars: 0.09, neo: 0.06, sp500: 0.06, kospi: 0.05, usBond: 0.08, argBond: 0.04, oilFut: -0.07, grainFut: -0.06, bank: -0.03, riverbank: -0.03 },
+  },
+  {
+    id: 'inflation-rebound',
+    title: '물가 재상승',
+    detail: '물가가 다시 오르며 금리 인상과 기업 비용 부담 우려가 커졌습니다.',
+    principle: '물가가 다시 오르면 금리 부담이 커지고 원가가 높은 기업의 이익 기대가 낮아질 수 있습니다. 원자재와 예금 선호는 커질 수 있습니다.',
+    affectedAssets: ['성장주 하락 압력', '채권 가격 하락 압력', '원자재 선물 상승 압력', '은행주 변동성 확대'],
+    discussionPrompt: '물가 상승이 기업 매출에는 좋아 보여도 이익과 주가에는 부담이 될 수 있는 이유는 무엇일까요?',
+    financialLinks: ['물가', '원자재 의존도', '부채비율', '금리 민감도'],
+    issueOptions: [
+      {
+        title: '근원물가 재상승',
+        detail: '서비스와 임금 관련 물가가 다시 오르며 금리 인상 우려가 커졌습니다.',
+        failureTitle: '물가 재상승 우려 완화',
+        failureDetail: '세부 항목에서 일시적 요인이 확인되며 시장 충격이 줄었습니다.',
+      },
+      {
+        title: '에너지·식품 가격 동반 상승',
+        detail: '생활 물가에 직접 연결되는 에너지와 식품 가격이 함께 오르며 비용 부담이 커졌습니다.',
+        failureTitle: '에너지·식품 가격 상승세 진정',
+        failureDetail: '재고와 공급 계약 안정으로 가격 상승 압력이 빠르게 낮아졌습니다.',
+      },
+    ],
+    impact: { core: -0.08, dogemars: -0.1, neo: -0.07, sp500: -0.06, kospi: -0.05, usBond: -0.09, argBond: -0.05, oilFut: 0.08, grainFut: 0.08, bank: 0.04, riverbank: 0.04, air: -0.07, oceanair: -0.08, food: -0.05, purefood: -0.04 },
+  },
+  {
+    id: 'fx-stabilize',
+    title: '환율 안정',
+    detail: '원/달러 환율 변동성이 줄고 원화 가치가 안정되며 수입 비용 부담이 완화됐습니다.',
+    principle: '환율이 안정되면 해외 비용이 큰 기업의 부담이 줄고, 외국인 투자 심리가 개선될 수 있습니다. 다만 미국 자산의 환산 이익 기대는 약해질 수 있습니다.',
+    affectedAssets: ['항공·식품 비용 부담 완화', '국내 지수 안정', '미국 ETF 환산가치 부담', '신흥국 채권 안정'],
+    discussionPrompt: '환율 안정이 수출 기업과 수입 비용 기업에 서로 다르게 작용하는 이유는 무엇일까요?',
+    financialLinks: ['환율노출', '해외 비용', '수출비중', '달러 자산'],
+    issueOptions: [
+      {
+        title: '외환시장 안정 조치 효과',
+        detail: '외환시장 안정 조치와 달러 약세가 겹치며 환율 변동성이 줄었습니다.',
+        failureTitle: '환율 안정 효과 제한',
+        failureDetail: '미국 금리 전망이 다시 강해지며 환율 안정 기대가 약해졌습니다.',
+      },
+      {
+        title: '원화 강세 전환',
+        detail: '외국인 자금 유입과 무역수지 개선으로 원화가 안정되는 흐름을 보였습니다.',
+        failureTitle: '원화 강세 흐름 둔화',
+        failureDetail: '달러 수요가 다시 늘며 원화 안정세가 오래 이어지지 못했습니다.',
+      },
+    ],
+    impact: { air: 0.1, oceanair: 0.11, food: 0.05, purefood: 0.05, kospi: 0.04, argBond: 0.05, sp500: -0.04, core: -0.02, dogemars: -0.02 },
+  },
+  {
+    id: 'fx-volatility',
+    title: '환율 불안 확대',
+    detail: '원/달러 환율이 크게 출렁이며 수출입 기업과 해외 자산의 손익 전망이 불안정해졌습니다.',
+    principle: '환율 변동성이 커지면 수출 기업에는 기회가 될 수 있지만, 해외 비용과 달러 부채가 큰 기업에는 부담이 됩니다.',
+    affectedAssets: ['항공·식품 비용 부담', '미국 ETF 환산가치 변동', '신흥국 채권 부담', '수출주 차별화'],
+    discussionPrompt: '환율이 오른다는 사실보다 변동성이 커지는 것이 기업에 더 부담이 될 수 있는 이유는 무엇일까요?',
+    financialLinks: ['환율노출', '달러 부채', '수출비중', '해외 비용'],
+    issueOptions: [
+      {
+        title: '달러 수요 급증',
+        detail: '글로벌 불확실성으로 달러 수요가 늘며 환율 변동성이 커졌습니다.',
+        failureTitle: '달러 수요 급증세 진정',
+        failureDetail: '외환 유동성 공급과 위험 심리 개선으로 환율 불안이 완화됐습니다.',
+      },
+      {
+        title: '외국인 자금 유출 우려',
+        detail: '외국인 투자자금 유출 가능성이 제기되며 국내 금융시장 변동성이 커졌습니다.',
+        failureTitle: '외국인 자금 유입 전환',
+        failureDetail: '국내 기업 실적 기대가 유지되며 자금 유출 우려가 약해졌습니다.',
+      },
+    ],
+    impact: { air: -0.1, oceanair: -0.12, food: -0.05, purefood: -0.04, kospi: -0.05, argBond: -0.07, sp500: 0.05, core: 0.03, dogemars: 0.03, neo: 0.03 },
   },
   {
     id: 'property-ease',
@@ -1073,6 +1313,14 @@ const eventMacroImpacts = {
   'rate-up': { baseRateDelta: 0.5, propertyMove: -0.04, exchangeMove: 0.01, unemploymentDelta: 0.1 },
   'rate-down': { baseRateDelta: -0.5, propertyMove: 0.04, exchangeMove: -0.01, unemploymentDelta: -0.08 },
   'deposit-special': { baseRateDelta: 0.25, propertyMove: -0.02, exchangeMove: 0, unemploymentDelta: 0.02 },
+  'growth-boom': { baseRateDelta: 0.1, propertyMove: 0.035, exchangeMove: -0.01, unemploymentDelta: -0.18 },
+  'recession-risk': { baseRateDelta: -0.15, propertyMove: -0.04, exchangeMove: 0.015, unemploymentDelta: 0.22 },
+  'jobs-improve': { baseRateDelta: 0.05, propertyMove: 0.025, exchangeMove: -0.005, unemploymentDelta: -0.25 },
+  'unemployment-worse': { baseRateDelta: -0.1, propertyMove: -0.035, exchangeMove: 0.015, unemploymentDelta: 0.3 },
+  'inflation-cool': { baseRateDelta: -0.25, propertyMove: 0.02, exchangeMove: -0.01, unemploymentDelta: -0.04 },
+  'inflation-rebound': { baseRateDelta: 0.3, propertyMove: -0.025, exchangeMove: 0.015, unemploymentDelta: 0.06 },
+  'fx-stabilize': { baseRateDelta: -0.05, propertyMove: 0.01, exchangeMove: -0.035, unemploymentDelta: -0.04 },
+  'fx-volatility': { baseRateDelta: 0.05, propertyMove: -0.015, exchangeMove: 0.045, unemploymentDelta: 0.06 },
   'property-ease': { baseRateDelta: 0, propertyMove: 0.06, exchangeMove: 0, unemploymentDelta: -0.05 },
   'us-rally': { baseRateDelta: 0, propertyMove: 0.01, exchangeMove: -0.015, unemploymentDelta: -0.08 },
   'korea-export': { baseRateDelta: 0, propertyMove: 0.01, exchangeMove: -0.01, unemploymentDelta: -0.12 },
@@ -1234,6 +1482,26 @@ function getFinancialSensitivityImpact(asset, macroMove, resolvedEvents) {
   if ((appliedEventKeys.has('housing') || appliedEventKeys.has('property-ease')) && asset.sector.includes('인프라')) {
     impact += (financials.policySensitivity / 100) * 0.022;
   }
+  if (appliedEventKeys.has('growth-boom') || appliedEventKeys.has('jobs-improve')) {
+    impact += (financials.cyclicality / 100) * 0.018;
+  }
+  if (appliedEventKeys.has('recession-risk') || appliedEventKeys.has('unemployment-worse')) {
+    impact -= ((financials.cyclicality + financials.creditRisk) / 200) * 0.026;
+  }
+  if (appliedEventKeys.has('inflation-cool')) {
+    impact += clampNumber((financials.debtRatio - 60) / 260, 0, 1) * 0.018;
+    impact += (financials.rdRatio / 100) * 0.025;
+  }
+  if (appliedEventKeys.has('inflation-rebound')) {
+    impact -= (financials.commodityExposure / 100) * 0.02;
+    impact -= clampNumber((financials.debtRatio - 80) / 260, 0, 1) * 0.018;
+  }
+  if (appliedEventKeys.has('fx-stabilize') && financials.commodityExposure > financials.exportRatio) {
+    impact += ((financials.commodityExposure - financials.exportRatio) / 100) * 0.018;
+  }
+  if (appliedEventKeys.has('fx-volatility') && financials.commodityExposure > 55) {
+    impact -= (financials.commodityExposure / 100) * 0.018;
+  }
 
   if (impact < 0) {
     const cashBuffer = clampNumber((financials.cashReserve / Math.max(financials.revenue, 0.1)) * 0.12, 0, 0.25);
@@ -1368,6 +1636,14 @@ function getSimpleExplanation(event) {
     'rate-up': '금리 인상 = 돈을 빌리는 비용 증가',
     'rate-down': '금리 인하 = 돈을 빌리는 부담 감소',
     'deposit-special': '예금 특판 = 안전하게 받을 수 있는 이자 증가',
+    'growth-boom': '경기 호황 = 소비와 기업 투자가 함께 좋아짐',
+    'recession-risk': '경기 침체 우려 = 소비와 기업 투자가 둔화될 가능성',
+    'jobs-improve': '고용 개선 = 가계 소득과 소비 여력 증가',
+    'unemployment-worse': '실업률 악화 = 소비 둔화와 신용위험 우려',
+    'inflation-cool': '물가 둔화 = 금리 부담 완화 기대',
+    'inflation-rebound': '물가 재상승 = 금리와 원가 부담 증가',
+    'fx-stabilize': '환율 안정 = 수입 비용과 금융시장 불안 완화',
+    'fx-volatility': '환율 불안 = 수출입 손익과 외국인 자금 불확실성',
     'property-ease': '부동산 규제 완화 = 집이나 건물을 사기 쉬워짐',
     'us-rally': '미국 증시 강세 = 글로벌 투자 분위기 개선',
     'korea-export': '한국 수출 호조 = 국내 기업 실적 기대 증가',
@@ -1393,6 +1669,14 @@ function getCausalChain(event) {
     'rate-up': ['이자가 오름', '대출 부담 증가', '부동산·성장주 부담'],
     'rate-down': ['이자가 내려감', '투자·소비 기대 증가', '부동산·성장주 선호'],
     'deposit-special': ['예금 이자 증가', '안전자산 선호', '위험자산 수요 둔화'],
+    'growth-boom': ['소비·투자 증가', '기업 매출 기대 상승', '경기민감주·부동산 선호'],
+    'recession-risk': ['소비·투자 둔화', '기업 이익 기대 하락', '안전자산 선호와 위험자산 부담'],
+    'jobs-improve': ['고용 개선', '가계 소득·소비 기대 증가', '여행·콘텐츠·금융 상승 압력'],
+    'unemployment-worse': ['실업률 상승', '소비와 대출 상환 우려', '경기민감주·부동산 하락 압력'],
+    'inflation-cool': ['물가 안정', '금리 부담 완화 기대', '성장주·채권 가격 상승 압력'],
+    'inflation-rebound': ['물가 재상승', '금리와 원가 부담 증가', '성장주·채권 가격 하락 압력'],
+    'fx-stabilize': ['환율 변동성 완화', '수입 비용 부담 감소', '국내 투자심리 개선'],
+    'fx-volatility': ['환율 변동성 확대', '수출입 손익 불확실', '항공·식품·신흥국 채권 부담'],
     'property-ease': ['규제 부담 감소', '거래 기대 증가', '부동산·건설주 선호'],
     'us-rally': ['미국 대형주 기대 증가', '글로벌 투자심리 개선', '미국 ETF 상승 압력'],
     'korea-export': ['수출 증가', '기업 매출 기대 증가', 'KOSPI·제조업 상승 압력'],
@@ -1418,6 +1702,14 @@ function getFinancialLinks(event) {
     'rate-up': ['부채비율', '금리 민감도', '현금보유', '대출 의존도'],
     'rate-down': ['성장성', '금리 민감도', '투자 계획', '부동산 지수'],
     'deposit-special': ['예금금리', '안정성', '현금흐름', '위험자산 선호'],
+    'growth-boom': ['경기민감도', '영업이익률', '고용', '소비심리'],
+    'recession-risk': ['경기민감도', '현금보유', '고용', '안전자산 선호'],
+    'jobs-improve': ['실업률', '소비심리', '매출 성장', '대출 수요'],
+    'unemployment-worse': ['실업률', '소비심리', '신용위험', '현금흐름'],
+    'inflation-cool': ['물가', '할인율', '원자재 의존도', '금리 민감도'],
+    'inflation-rebound': ['물가', '원자재 의존도', '부채비율', '금리 민감도'],
+    'fx-stabilize': ['환율노출', '해외 비용', '수출비중', '달러 자산'],
+    'fx-volatility': ['환율노출', '달러 부채', '수출비중', '해외 비용'],
     'property-ease': ['대출 의존도', '부동산 민감도', '수주 기대', '가계부채'],
     'us-rally': ['국가노출', '성장성', '기술주 비중', '환율노출'],
     'korea-export': ['수출비중', '환율노출', '제조업 경기', '매출 성장'],
@@ -1718,10 +2010,10 @@ function hashStudentPasscode(roomPin, studentNumber, passcode) {
   return `mc-${Math.abs(hash).toString(36)}`;
 }
 
-function isTeamTradeLockActive(team, nickname) {
+function isTeamTradeLockActive(team, studentLabel) {
   return Boolean(
     team?.tradeHolder
-      && team.tradeHolder === nickname.trim()
+      && team.tradeHolder === studentLabel
       && team.tradeHolderExpiresAt
       && team.tradeHolderExpiresAt > Date.now(),
   );
@@ -1786,7 +2078,7 @@ function getInvestorType({ cashLikeAsset, holdingsValue, portfolioRows, totalAss
   return '균형 분산형 투자자';
 }
 
-function buildFinalSubmissionReport({ nickname, cash, deposit, depositInterestEarned = 0, investedPrincipal = INITIAL_CASH, portfolio, assets, tradeLogs, roundLogs, reflection }) {
+function buildFinalSubmissionReport({ nickname, mode = 'individual', teamKey = '', teamName = '', cash, deposit, depositInterestEarned = 0, investedPrincipal = INITIAL_CASH, portfolio, assets, tradeLogs, roundLogs, reflection }) {
   const portfolioRows = getHoldingRows(portfolio, assets);
   const investmentAsset = portfolioRows.reduce((sum, row) => sum + row.value, 0);
   const cashLikeAsset = cash + deposit;
@@ -1805,6 +2097,9 @@ function buildFinalSubmissionReport({ nickname, cash, deposit, depositInterestEa
 
   return {
     nickname,
+    mode,
+    teamKey,
+    teamName,
     totalAsset,
     cash,
     deposit,
@@ -1949,6 +2244,7 @@ function TeacherStudentMonitor({ players, activeStudent, assets }) {
         name: getStudentDisplayName(player.studentNumber, player.name),
         totalAsset: player.totalAsset ?? Math.round(INITIAL_CASH * (1 + player.returnRate / 100)),
         holdings: player.holdings?.length ? player.holdings : holdingNames,
+        connectionLabel: getPlayerConnectionLabel(player),
       };
     }),
   ];
@@ -1964,7 +2260,7 @@ function TeacherStudentMonitor({ players, activeStudent, assets }) {
           <article key={student.id}>
             <div>
               <strong>{student.name}</strong>
-              <span>{formatWon(student.totalAsset)}</span>
+              <span>{formatWon(student.totalAsset)} · {student.connectionLabel ?? '현재 화면'}</span>
             </div>
             <p>{student.holdings.length ? student.holdings.join(', ') : '보유 종목 없음'}</p>
           </article>
@@ -1974,9 +2270,58 @@ function TeacherStudentMonitor({ players, activeStudent, assets }) {
   );
 }
 
-function TeacherSubmissionPanel({ players, activeStudent, submissions, gameFinished, onDownloadSubmissions }) {
+function TeacherTeamPanel({ roomMode, teamAccounts, assets, players, gameStarted, round, phase }) {
+  if (roomMode !== 'team') return null;
+
+  const rows = getTeamParticipantRows(teamAccounts, assets, players, gameStarted, round, phase);
+
+  return (
+    <section className="team-dashboard-panel" aria-label="모둠 계좌 현황">
+      <div className="panel-heading">
+        <Users size={22} aria-hidden="true" />
+        <h2>모둠 계좌 현황</h2>
+      </div>
+      <div className="team-dashboard-list">
+        {rows.map((team) => {
+          const sourceTeam = teamAccounts.find((item) => item.key === team.id);
+          const members = players.filter((player) => player.teamKey === team.id);
+          return (
+            <article className={team.bankrupt ? 'bankrupt' : ''} key={team.id}>
+              <div className="team-dashboard-head">
+                <div>
+                  <strong>{team.name}</strong>
+                  <span>{members.length ? members.map((member) => getStudentDisplayName(member.studentNumber, member.name)).join(', ') : '모둠원 대기'}</span>
+                </div>
+                <em>{team.bankrupt ? '파산' : sourceTeam?.tradeHolder ? `${sourceTeam.tradeHolder} 거래권` : '거래권 없음'}</em>
+              </div>
+              <div className="team-dashboard-metrics">
+                <span>현금 {formatWon(team.cash)}</span>
+                <span>예금 {formatWon(team.deposit)}</span>
+                <span>투자 {formatWon(team.investmentAsset)}</span>
+                <span>총자산 {formatWon(team.totalAsset)}</span>
+              </div>
+              <p>
+                {team.bankrupt
+                  ? '2라운드 연속 잔고 문제가 발생해 거래가 중단되었습니다.'
+                  : (sourceTeam?.negativeRounds ?? 0) > 0
+                    ? `잔고 경고 ${sourceTeam.negativeRounds}/2라운드`
+                    : '잔고 정상'}
+              </p>
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function getSubmissionParticipantNames(players, activeStudent) {
   const activeStudentName = activeStudent.name.includes('(대기)') ? '' : activeStudent.name;
-  const participantNames = [...new Set([activeStudentName, ...players.map((player) => getStudentDisplayName(player.studentNumber, player.name))].filter(Boolean))];
+  return [...new Set([activeStudentName, ...players.map((player) => getStudentDisplayName(player.studentNumber, player.name))].filter(Boolean))];
+}
+
+function TeacherSubmissionPanel({ players, activeStudent, submissions, gameFinished, allSubmissionsComplete, finalReportsDownloaded, onDownloadSubmissions }) {
+  const participantNames = getSubmissionParticipantNames(players, activeStudent);
   const submittedNames = new Set(submissions.map((submission) => submission.nickname));
   const submittedRows = [...submissions].sort((a, b) => b.totalAsset - a.totalAsset);
   const missingNames = participantNames.filter((name) => !submittedNames.has(name));
@@ -1995,17 +2340,22 @@ function TeacherSubmissionPanel({ players, activeStudent, submissions, gameFinis
         <button className="command secondary" type="button" onClick={() => window.print()} disabled={!gameFinished || !submittedRows.length}>
           보고서 인쇄
         </button>
-        <button className="command primary" type="button" onClick={onDownloadSubmissions} disabled={!gameFinished || !submittedRows.length}>
-          CSV 다운로드
+        <button className="command primary" type="button" onClick={onDownloadSubmissions} disabled={!gameFinished || !allSubmissionsComplete}>
+          {finalReportsDownloaded ? 'CSV 다시 다운로드' : 'CSV 다운로드'}
         </button>
       </div>
+      {gameFinished && submittedRows.length && !allSubmissionsComplete ? <p className="teacher-hint warning">아직 제출하지 않은 학생이 있어 CSV 다운로드가 잠겨 있습니다.</p> : null}
+      {finalReportsDownloaded ? <p className="teacher-hint success">CSV 다운로드가 완료되었습니다. 제출이 모두 끝났다면 게임 종료를 진행할 수 있습니다.</p> : null}
       <div className="submission-list">
         {submittedRows.map((submission, index) => (
           <article key={submission.nickname}>
             <span>{index + 1}위</span>
             <strong>{submission.nickname}</strong>
             <em>{submission.investorType}</em>
-            <small>{formatWon(submission.totalAsset)} · {formatPercent(submission.returnRate)}</small>
+            <small>
+              {submission.mode === 'team' ? `${submission.teamName || '모둠'} · ` : ''}
+              {formatWon(submission.totalAsset)} · {formatPercent(submission.returnRate)}
+            </small>
           </article>
         ))}
         {missingNames.map((name) => (
@@ -2070,6 +2420,65 @@ function TeacherRankingPanel({ players, submissions, activeStudent, gameFinished
           );
         })}
       </ol>
+    </section>
+  );
+}
+
+function EndGameFlowPanel({ finalRoundClosed, submittedCount, participantCount, allSubmissionsComplete, finalReportsDownloaded, phase }) {
+  if (phase === 'ended') {
+    return (
+      <section className="end-flow-panel complete" aria-label="게임 종료 상태">
+        <strong>게임이 종료되었습니다.</strong>
+        <span>이제 새 게임 시작으로 다음 수업 방을 만들 수 있습니다.</span>
+      </section>
+    );
+  }
+
+  return (
+    <section className="end-flow-panel" aria-label="게임 종료 조건">
+      <div>
+        <strong>종료 전 확인</strong>
+        <span>마지막 라운드가 끝난 뒤 제출과 다운로드가 완료되어야 게임을 종료할 수 있습니다.</span>
+      </div>
+      <ol>
+        <li className={finalRoundClosed ? 'done' : ''}>최종 라운드 마감</li>
+        <li className={allSubmissionsComplete ? 'done' : ''}>학생 제출 {submittedCount}/{participantCount}</li>
+        <li className={finalReportsDownloaded ? 'done' : ''}>CSV 다운로드</li>
+      </ol>
+    </section>
+  );
+}
+
+function ResetRoomModal({ value, error, onChange, onCancel, onConfirm }) {
+  return (
+    <section className="choice-modal-backdrop" aria-label="방 초기화 암호 입력">
+      <form className="choice-modal reset-modal" onSubmit={onConfirm}>
+        <div>
+          <p className="eyebrow">방 초기화</p>
+          <h2>초기화 암호를 입력하세요.</h2>
+          <p>현재 방의 라운드, 학생, 제출, 자산 데이터를 지우고 같은 PIN으로 새로 시작합니다.</p>
+        </div>
+        <label>
+          초기화 암호
+          <input
+            type="password"
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+            placeholder="암호 입력"
+            aria-label="초기화 암호"
+          />
+        </label>
+        {error ? <p className="auth-error">{error}</p> : null}
+        <div className="choice-actions">
+          <button className="command danger" type="submit">
+            <RotateCcw size={18} aria-hidden="true" />
+            초기화 실행
+          </button>
+          <button className="command secondary" type="button" onClick={onCancel}>
+            취소
+          </button>
+        </div>
+      </form>
     </section>
   );
 }
@@ -2198,6 +2607,8 @@ function HeroMarketGraphic() {
 
 function FinalReport({
   nickname,
+  mode,
+  teamName,
   cash,
   deposit,
   depositInterestEarned,
@@ -2214,7 +2625,7 @@ function FinalReport({
   const holdingsValue = getPortfolioValue(portfolio, assets);
   const totalAsset = cash + deposit + holdingsValue;
   const returnRate = getInvestmentReturnRate(totalAsset, investedPrincipal);
-  const investorType = submission?.investorType ?? buildFinalSubmissionReport({ nickname, cash, deposit, depositInterestEarned, investedPrincipal, portfolio, assets, tradeLogs, roundLogs, reflection }).investorType;
+  const investorType = submission?.investorType ?? buildFinalSubmissionReport({ nickname, mode, teamName, cash, deposit, depositInterestEarned, investedPrincipal, portfolio, assets, tradeLogs, roundLogs, reflection }).investorType;
 
   return (
     <section className="final-report" aria-label="나의 투자 결과 보고서">
@@ -2232,6 +2643,10 @@ function FinalReport({
         <div>
           <span>이름</span>
           <strong>{nickname}</strong>
+        </div>
+        <div>
+          <span>투자 방식</span>
+          <strong>{mode === 'team' ? teamName : '개인 투자'}</strong>
         </div>
         <div>
           <span>현금성 자산</span>
@@ -2511,12 +2926,12 @@ function AppHeader({ view, setView, hostAuthenticated, studentEntryAllowed, stud
   );
 }
 
-function HomeView({ setView, roomPin, round, playerCount, baseRate, exchangeRate, unemploymentRate, expiresAt, roomExpired, syncStatus, studentEntryAllowed, onCreateRoom, hostAuthenticated, studentJoined }) {
+function HomeView({ setView, roomPin, round, totalRounds, gameStarted, playerCount, baseRate, exchangeRate, unemploymentRate, expiresAt, roomExpired, syncStatus, studentEntryAllowed, onCreateRoom, hostAuthenticated, studentJoined }) {
   return (
     <main className="home-view">
       <section className="hero-band">
         <div className="hero-copy">
-          <p className="eyebrow">12라운드 · 1억 원 초기 자본 · 라운드 생활 소득 {formatWon(ROUND_SALARY)}</p>
+          <p className="eyebrow">{totalRounds}라운드 · 1억 원 초기 자본 · 라운드 생활 소득 {formatWon(ROUND_SALARY)}</p>
           <h1>모의 투자 시뮬레이터</h1>
           <p className="hero-subtitle">화성에 갈까, 바닥 밑 지하실로 갈까?</p>
           <p className="intro">
@@ -2554,7 +2969,7 @@ function HomeView({ setView, roomPin, round, playerCount, baseRate, exchangeRate
           <div className="preview-grid">
             <div>
               <Clock3 size={19} aria-hidden="true" />
-              <strong>{round}/{TOTAL_ROUNDS}</strong>
+              <strong>{gameStarted ? round : 0}/{totalRounds}</strong>
               <span>현재 라운드</span>
             </div>
             <div>
@@ -2564,17 +2979,17 @@ function HomeView({ setView, roomPin, round, playerCount, baseRate, exchangeRate
             </div>
             <div>
               <Landmark size={19} aria-hidden="true" />
-              <strong>{baseRate.toFixed(1)}%</strong>
+              <strong>{gameStarted ? `${baseRate.toFixed(1)}%` : '0.0%'}</strong>
               <span>기준금리</span>
             </div>
             <div>
               <Globe2 size={19} aria-hidden="true" />
-              <strong>{exchangeRate.toLocaleString('ko-KR')}원</strong>
+              <strong>{gameStarted ? `${exchangeRate.toLocaleString('ko-KR')}원` : '0원'}</strong>
               <span>원/달러 환율</span>
             </div>
             <div>
               <Activity size={19} aria-hidden="true" />
-              <strong>{unemploymentRate.toFixed(1)}%</strong>
+              <strong>{gameStarted ? `${unemploymentRate.toFixed(1)}%` : '0.0%'}</strong>
               <span>실업률</span>
             </div>
           </div>
@@ -2591,6 +3006,7 @@ function HomeView({ setView, roomPin, round, playerCount, baseRate, exchangeRate
 
 const eventCategoryLabels = {
   all: '전체',
+  macro: '경기/고용/물가',
   rate: '금리/환율',
   commodity: '원자재/식량',
   geopolitics: '전쟁/정치',
@@ -2600,6 +3016,7 @@ const eventCategoryLabels = {
 };
 
 function getEventCategory(event) {
+  if (['growth-boom', 'recession-risk', 'jobs-improve', 'unemployment-worse', 'inflation-cool', 'inflation-rebound', 'fx-stabilize', 'fx-volatility'].includes(event.id)) return 'macro';
   if (['rate-up', 'rate-down', 'deposit-special', 'fx-spike', 'us-yield-spike'].includes(event.id)) return 'rate';
   if (['rare', 'oil-supply-shock', 'grain-shock'].includes(event.id)) return 'commodity';
   if (['war-risk', 'election-risk'].includes(event.id)) return 'geopolitics';
@@ -2610,6 +3027,7 @@ function getEventCategory(event) {
 }
 
 const eventPresetFilters = [
+  { label: '거시경제 수업', category: 'macro' },
   { label: '고변동성', category: 'geopolitics' },
   { label: '채권/환율 수업', category: 'bond' },
   { label: '원자재 수업', category: 'commodity' },
@@ -2617,6 +3035,10 @@ const eventPresetFilters = [
 
 const eventConflictGroups = [
   { label: '금리 방향 충돌', eventIds: ['rate-up', 'rate-down'] },
+  { label: '경기 방향 충돌', eventIds: ['growth-boom', 'recession-risk'] },
+  { label: '고용 방향 충돌', eventIds: ['jobs-improve', 'unemployment-worse'] },
+  { label: '물가 방향 충돌', eventIds: ['inflation-cool', 'inflation-rebound'] },
+  { label: '환율 안정성과 불안 충돌', eventIds: ['fx-stabilize', 'fx-volatility', 'fx-spike'] },
   { label: '부동산 완화와 금리 긴축 충돌', eventIds: ['property-ease', 'rate-up'] },
   { label: '위험자산 선호와 위험 회피 충돌', eventIds: ['us-rally', 'war-risk', 'election-risk', 'us-regulation'] },
   { label: '수출 호재와 공급망 갈등 충돌', eventIds: ['korea-export', 'korea-us-chip-tension'] },
@@ -2663,14 +3085,167 @@ function pickRandomRoundIssues({ round, now, count = 3 }) {
     });
 }
 
+function HostSetupView({
+  roomPin,
+  hostId,
+  totalRounds,
+  roomMode,
+  players,
+  expiresAt,
+  roomExpired,
+  syncStatus,
+  onCreateRoom,
+  onGameStart,
+  onRoomModeChange,
+  onTotalRoundsChange,
+}) {
+  return (
+    <main className="host-layout setup-mode">
+      <section className="host-main">
+        <div className="section-title">
+          <div>
+            <p className="eyebrow">교사용 방 세팅</p>
+            <h1>수업 시작 전 설정</h1>
+          </div>
+          <div className="status-pill">
+            <Radio size={17} aria-hidden="true" />
+            대기 중
+          </div>
+        </div>
+
+        <section className="room-setup-panel" aria-label="방 설정">
+          <div className="setup-header">
+            <div>
+              <span>교사 계정</span>
+              <strong>{hostId || 'geography'}</strong>
+            </div>
+            <div>
+              <span>ROOM PIN</span>
+              <strong>{roomPin}</strong>
+            </div>
+          </div>
+
+          <div className="setup-options-grid">
+            <article>
+              <div>
+                <strong>라운드 버전</strong>
+                <span>수업 시간에 맞춰 1년형 또는 3년형으로 진행합니다.</span>
+              </div>
+              <div className="segmented-control">
+                {ROUND_OPTIONS.map((option) => (
+                  <button
+                    className={totalRounds === option ? 'active' : ''}
+                    type="button"
+                    key={option}
+                    onClick={() => onTotalRoundsChange(option)}
+                    disabled={roomExpired}
+                  >
+                    {option === 4 ? '4라운드 1년형' : '12라운드 3년형'}
+                  </button>
+                ))}
+              </div>
+            </article>
+
+            <article>
+              <div>
+                <strong>투자 방식</strong>
+                <span>개인별 판단 또는 모둠 공동 계좌로 수업을 운영합니다.</span>
+              </div>
+              <div className="segmented-control">
+                <button className={roomMode === 'individual' ? 'active' : ''} type="button" onClick={() => onRoomModeChange('individual')} disabled={roomExpired}>
+                  개인 투자
+                </button>
+                <button className={roomMode === 'team' ? 'active' : ''} type="button" onClick={() => onRoomModeChange('team')} disabled={roomExpired}>
+                  모둠 투자
+                </button>
+              </div>
+            </article>
+          </div>
+
+          <div className="prestart-stats" aria-label="게임 시작 전 수치">
+            <div>
+              <span>현재 라운드</span>
+              <strong>0/{totalRounds}</strong>
+            </div>
+            <div>
+              <span>초기 자본</span>
+              <strong>{formatWon(0)}</strong>
+            </div>
+            <div>
+              <span>기준금리</span>
+              <strong>0.0%</strong>
+            </div>
+            <div>
+              <span>참여 학생</span>
+              <strong>{players.length}/{MAX_PLAYERS_PER_ROOM}</strong>
+            </div>
+          </div>
+
+          <div className="setup-actions">
+            <button className="command primary" type="button" onClick={onGameStart} disabled={roomExpired}>
+              <Play size={19} aria-hidden="true" />
+              게임 시작
+            </button>
+            <button className="command secondary" type="button" onClick={onCreateRoom}>
+              <Radio size={19} aria-hidden="true" />
+              새 방 생성
+            </button>
+          </div>
+        </section>
+
+        <section className="student-monitor">
+          <div className="panel-heading split">
+            <div>
+              <Users size={22} aria-hidden="true" />
+              <h2>접속 학생 현황</h2>
+            </div>
+            <span className="limit-pill">{players.length}/{MAX_PLAYERS_PER_ROOM}</span>
+          </div>
+          <div className="setup-student-list">
+            {players.length ? (
+              players.map((player) => (
+                <article key={player.id}>
+                  <strong>{getStudentDisplayName(player.studentNumber, player.name)}</strong>
+                  <span>
+                    {roomMode === 'team' && player.teamKey ? `${teamTemplates.find((team) => team.key === player.teamKey)?.name ?? player.teamKey}` : '개인 계좌 대기'}
+                    {' · '}
+                    {getPlayerConnectionLabel(player)}
+                  </span>
+                </article>
+              ))
+            ) : (
+              <p>아직 접속한 학생이 없습니다.</p>
+            )}
+          </div>
+        </section>
+      </section>
+
+      <aside className="host-sidebar">
+        <JoinQrCard roomPin={roomPin} />
+        <RoomExpiryNotice roomPin={roomPin} expiresAt={expiresAt} expired={roomExpired} canCreateRoom onCreateRoom={onCreateRoom} />
+        <section className="news-panel">
+          <div className="panel-heading">
+            <BellRing size={22} aria-hidden="true" />
+            <h2>연결 상태</h2>
+          </div>
+          <p className="sync-note">{syncStatus}</p>
+        </section>
+      </aside>
+    </main>
+  );
+}
+
 function HostView({
   roomPin,
+  hostId,
   round,
+  totalRounds,
   phase,
   roomMode,
   gameStarted,
   isPaused,
   assets,
+  teamAccounts,
   players,
   rankingPlayers,
   newsFeed,
@@ -2684,16 +3259,31 @@ function HostView({
   currentRoundEvents,
   latestRoundSummary,
   submissions,
+  syncStatus,
   gameFinished,
+  finalRoundClosed,
+  finalReportsDownloaded,
+  submittedCount,
+  participantCount,
+  allSubmissionsComplete,
+  canEndGame,
+  resetDialogOpen,
+  resetPassword,
+  resetError,
   onCreateRoom,
   onGameStart,
   onRoomModeChange,
+  onTotalRoundsChange,
   onIssueDraftChange,
   onStartRound,
   onCloseRound,
   onNextRound,
   onTogglePause,
   onEndGame,
+  onRequestReset,
+  onCancelReset,
+  onConfirmReset,
+  onResetPasswordChange,
   onRegisterIssue,
   onCancelIssue,
   onClearIssues,
@@ -2711,6 +3301,25 @@ function HostView({
     ? scenarioEvents
     : scenarioEvents.filter((event) => getEventCategory(event) === eventCategory);
 
+  if (!gameStarted) {
+    return (
+      <HostSetupView
+        roomPin={roomPin}
+        hostId={hostId}
+        totalRounds={totalRounds}
+        roomMode={roomMode}
+        players={players}
+        expiresAt={expiresAt}
+        roomExpired={roomExpired}
+        syncStatus={syncStatus}
+        onCreateRoom={onCreateRoom}
+        onGameStart={onGameStart}
+        onRoomModeChange={onRoomModeChange}
+        onTotalRoundsChange={onTotalRoundsChange}
+      />
+    );
+  }
+
   return (
     <main className="host-layout">
       <section className="host-main">
@@ -2725,19 +3334,21 @@ function HostView({
           </div>
         </div>
 
-        <RoomExpiryNotice roomPin={roomPin} expiresAt={expiresAt} expired={roomExpired} canCreateRoom onCreateRoom={onCreateRoom} />
+        <RoomExpiryNotice roomPin={roomPin} expiresAt={expiresAt} expired={roomExpired} canCreateRoom={phase === 'ended' || roomExpired} onCreateRoom={onCreateRoom} />
         <JoinQrCard roomPin={roomPin} />
 
         <div className="control-strip">
           <div className="round-meter">
             <span>Round</span>
             <strong>{round}</strong>
-            <small>/ {TOTAL_ROUNDS} 분기</small>
+            <small>/ {totalRounds} 분기</small>
           </div>
-          <button className="command secondary" type="button" onClick={onCreateRoom}>
-            <Radio size={19} aria-hidden="true" />
-            새 방 생성
-          </button>
+          {phase === 'ended' ? (
+            <button className="command primary" type="button" onClick={onCreateRoom}>
+              <Radio size={19} aria-hidden="true" />
+              새 게임 시작
+            </button>
+          ) : null}
           <button className="command primary" type="button" onClick={onGameStart} disabled={roomExpired || gameStarted || phase !== 'setup'}>
             <Play size={19} aria-hidden="true" />
             게임 시작
@@ -2746,11 +3357,15 @@ function HostView({
             <Play size={19} aria-hidden="true" />
             라운드 시작
           </button>
+          <button className="command secondary" type="button" onClick={onStartWithRandomIssues} disabled={roomExpired || !gameStarted || phase !== 'setup'}>
+            <Shuffle size={19} aria-hidden="true" />
+            랜덤 이슈 3개로 장 시작
+          </button>
           <button className="command primary" type="button" onClick={onCloseRound} disabled={roomExpired || phase !== 'open'}>
             <Activity size={19} aria-hidden="true" />
             장 마감
           </button>
-          <button className="command secondary" type="button" onClick={onNextRound} disabled={roomExpired || phase !== 'closed' || round >= TOTAL_ROUNDS}>
+          <button className="command secondary" type="button" onClick={onNextRound} disabled={roomExpired || phase !== 'closed' || round >= totalRounds}>
             <ChevronRight size={19} aria-hidden="true" />
             다음 라운드 준비
           </button>
@@ -2758,10 +3373,33 @@ function HostView({
             {isPaused ? <Play size={19} aria-hidden="true" /> : <Pause size={19} aria-hidden="true" />}
             {isPaused ? '재개' : '일시 정지'}
           </button>
-          <button className="command danger" type="button" onClick={onEndGame}>
+          <button className="command danger" type="button" onClick={onEndGame} disabled={!canEndGame}>
             게임 종료
           </button>
+          <button className="command danger" type="button" onClick={onRequestReset}>
+            <RotateCcw size={19} aria-hidden="true" />
+            초기화
+          </button>
         </div>
+
+        <EndGameFlowPanel
+          finalRoundClosed={finalRoundClosed}
+          submittedCount={submittedCount}
+          participantCount={participantCount}
+          allSubmissionsComplete={allSubmissionsComplete}
+          finalReportsDownloaded={finalReportsDownloaded}
+          phase={phase}
+        />
+
+        {resetDialogOpen ? (
+          <ResetRoomModal
+            value={resetPassword}
+            error={resetError}
+            onChange={onResetPasswordChange}
+            onCancel={onCancelReset}
+            onConfirm={onConfirmReset}
+          />
+        ) : null}
 
         <section className="mode-panel" aria-label="수업 방식 설정">
           <div>
@@ -2791,7 +3429,7 @@ function HostView({
                   이슈 없이 장 시작
                 </button>
                 <button className="command primary" type="button" onClick={onStartWithRandomIssues}>
-                  랜덤 이슈 3가지 선정
+                  랜덤 이슈 3개로 장 시작
                 </button>
                 <button className="command secondary" type="button" onClick={onCloseStartIssueChoice}>
                   돌아가기
@@ -2922,11 +3560,22 @@ function HostView({
           activeStudent={roomMode === 'team' ? buildStudentSnapshot({ id: 'team-mode', name: '모둠 계좌 (대기)', totalAsset: 0, holdings: [] }) : activeStudent}
           assets={assets}
         />
+        <TeacherTeamPanel
+          roomMode={roomMode}
+          teamAccounts={teamAccounts}
+          assets={assets}
+          players={players}
+          gameStarted={gameStarted}
+          round={round}
+          phase={phase}
+        />
         <TeacherSubmissionPanel
           players={players}
           activeStudent={roomMode === 'team' ? buildStudentSnapshot({ id: 'team-mode', name: '모둠 계좌 (대기)', totalAsset: 0, holdings: [] }) : activeStudent}
           submissions={submissions}
           gameFinished={gameFinished}
+          allSubmissionsComplete={allSubmissionsComplete}
+          finalReportsDownloaded={finalReportsDownloaded}
           onDownloadSubmissions={onDownloadSubmissions}
         />
 
@@ -3109,7 +3758,7 @@ function StudentView({
             <LogIn size={19} aria-hidden="true" />
             {roomFull ? '정원 마감' : '입장하기'}
           </button>
-          <p className="help-text">같은 학번은 먼저 등록한 이름과 개인 비밀번호가 맞을 때만 재입장할 수 있습니다. 라운드마다 생활 소득 {formatWon(ROUND_SALARY)}을 받습니다.</p>
+          <p className="help-text">같은 학번은 먼저 등록한 이름과 개인 비밀번호가 맞을 때만 재입장할 수 있습니다. 다른 기기에서 접속 중이면 잠시 후 다시 시도하세요.</p>
         </section>
       </main>
     );
@@ -3155,7 +3804,7 @@ function StudentView({
               </p>
             </div>
             <div className="team-trade-actions">
-              <button className="command primary" type="button" onClick={onClaimTeamTrade} disabled={activeTeam?.bankrupt || teamTradeAllowed || Boolean(activeTeam?.tradeHolder)}>
+              <button className="command primary" type="button" onClick={onClaimTeamTrade} disabled={!gameStarted || gameFinished || activeTeam?.bankrupt || teamTradeAllowed || Boolean(activeTeam?.tradeHolder)}>
                 거래권 잡기
               </button>
               <button className="command secondary" type="button" onClick={onReleaseTeamTrade} disabled={!teamTradeAllowed}>
@@ -3170,6 +3819,8 @@ function StudentView({
         {gameFinished ? (
           <FinalReport
             nickname={getStudentDisplayName(studentNumber, nickname)}
+            mode={roomMode}
+            teamName={teamMode ? activeTeam?.name : ''}
             cash={cash}
             deposit={deposit}
             depositInterestEarned={depositInterestEarned}
@@ -3329,12 +3980,14 @@ export function App() {
   const [view, setView] = useState(getInitialView);
   const [studentEntryAllowed] = useState(getInitialStudentEntryAllowed);
   const [hostAuthenticated, setHostAuthenticated] = useState(false);
+  const [hostId, setHostId] = useState('');
   const [hostLogin, setHostLogin] = useState({ id: '', password: '' });
   const [hostLoginError, setHostLoginError] = useState('');
   const [roomPin, setRoomPin] = useState(getInitialRoomPin);
   const [roomCreatedAt, setRoomCreatedAt] = useState(() => Date.now());
   const [roomExpired, setRoomExpired] = useState(false);
   const [round, setRound] = useState(1);
+  const [totalRounds, setTotalRounds] = useState(DEFAULT_TOTAL_ROUNDS);
   const [phase, setPhase] = useState('setup');
   const [roomMode, setRoomMode] = useState('individual');
   const [gameStarted, setGameStarted] = useState(false);
@@ -3356,6 +4009,7 @@ export function App() {
   const [studentPasscode, setStudentPasscode] = useState('');
   const [studentJoinError, setStudentJoinError] = useState('');
   const [studentPasscodeHash, setStudentPasscodeHash] = useState('');
+  const [studentSessionToken, setStudentSessionToken] = useState('');
   const [joined, setJoined] = useState(false);
   const [cash, setCash] = useState(0);
   const [deposit, setDeposit] = useState(0);
@@ -3373,6 +4027,10 @@ export function App() {
   const [salaryPaidRounds, setSalaryPaidRounds] = useState([]);
   const [reflection, setReflection] = useState({ good: '', improve: '', next: '' });
   const [submissions, setSubmissions] = useState([]);
+  const [finalReportsDownloaded, setFinalReportsDownloaded] = useState(false);
+  const [resetDialogOpen, setResetDialogOpen] = useState(false);
+  const [resetPassword, setResetPassword] = useState('');
+  const [resetError, setResetError] = useState('');
   const [remoteRoomId, setRemoteRoomId] = useState(null);
   const [syncStatus, setSyncStatus] = useState(supabaseConfigured ? '실시간 수업 연결 준비 중' : '로컬 연습 모드');
   const remoteRefreshTimer = useRef(null);
@@ -3384,10 +4042,11 @@ export function App() {
   const currentRoundEvents = triggeredEventsByRound[round] ?? [];
   const publicCurrentRoundEvents = currentRoundEvents.filter((event) => event.published);
   const expiresAt = roomCreatedAt + ROOM_TTL_MS;
-  const gameFinished = phase === 'ended' || (round === TOTAL_ROUNDS && phase === 'closed');
+  const gameFinished = phase === 'ended' || (round === totalRounds && phase === 'closed');
   const teamMode = roomMode === 'team';
   const activeTeam = cleanTeamTradeLock(teamAccounts.find((team) => team.key === selectedTeamKey) ?? teamAccounts[0]);
-  const teamTradeAllowed = teamMode ? isTeamTradeLockActive(activeTeam, nickname) : true;
+  const studentNameLabel = getStudentDisplayName(studentNumber, nickname.trim());
+  const teamTradeAllowed = teamMode ? isTeamTradeLockActive(activeTeam, studentNameLabel) : true;
   const teamParticipantRows = teamMode ? getTeamParticipantRows(teamAccounts, assets, players, gameStarted, round, phase) : [];
   const displayedPlayers = teamMode ? teamParticipantRows : players;
   const { playerCount, roomFull } = getRoomCapacityState({
@@ -3399,7 +4058,6 @@ export function App() {
   const effectiveDeposit = gameStarted ? (teamMode ? activeTeam.deposit : deposit) : 0;
   const effectiveDepositInterestEarned = teamMode ? activeTeam.depositInterestEarned : depositInterestEarned;
   const effectivePortfolio = gameStarted ? (teamMode ? activeTeam.portfolio : portfolio) : {};
-  const studentNameLabel = getStudentDisplayName(studentNumber, nickname.trim());
   const studentDisplayName = teamMode && joined ? `${activeTeam.name} · ${studentNameLabel}` : studentNameLabel;
   const reportNickname = studentNameLabel;
   const studentHoldingsValue = getPortfolioValue(effectivePortfolio, assets);
@@ -3417,6 +4075,13 @@ export function App() {
     investmentAsset: studentHoldingsValue,
     investedPrincipal,
   });
+  const submissionParticipantNames = getSubmissionParticipantNames(players, activeStudent);
+  const submittedNames = new Set(submissions.map((submission) => submission.nickname));
+  const submittedCount = submissionParticipantNames.filter((name) => submittedNames.has(name)).length;
+  const participantCount = submissionParticipantNames.length;
+  const finalRoundClosed = round === totalRounds && phase === 'closed';
+  const allSubmissionsComplete = participantCount > 0 && submittedCount === participantCount;
+  const canEndGame = finalRoundClosed && allSubmissionsComplete && finalReportsDownloaded;
 
   const applyRemoteRoomBundle = useCallback((bundle) => {
     if (!bundle?.room) return;
@@ -3429,12 +4094,15 @@ export function App() {
 
     setRemoteRoomId(bundle.room.id);
     setRoomPin(bundle.room.pin);
+    setHostId((current) => current || bundle.room.host_id || '');
     setRoomCreatedAt(createdAt);
     setRoomExpired(isExpired);
     setRound(remoteRound);
+    setTotalRounds(Number(bundle.room.total_rounds ?? DEFAULT_TOTAL_ROUNDS));
     setPhase(isExpired ? 'expired' : bundle.room.phase);
     setRoomMode(bundle.room.mode ?? 'individual');
     setGameStarted(Boolean(bundle.room.game_started));
+    setFinalReportsDownloaded(Boolean(bundle.room.final_reports_downloaded));
     setIsPaused(bundle.room.is_paused);
     setBaseRate(Number(bundle.room.base_rate));
     setExchangeRate(Number(bundle.room.exchange_rate ?? INITIAL_EXCHANGE_RATE));
@@ -3512,6 +4180,8 @@ export function App() {
       name: nickname.trim(),
       studentNumber,
       passcodeHash: studentPasscodeHash,
+      sessionToken: studentSessionToken,
+      lastSeenAt: Date.now(),
       teamKey: teamMode ? selectedTeamKey : '',
       cash: effectiveCash,
       deposit: effectiveDeposit,
@@ -3519,7 +4189,41 @@ export function App() {
       returnRate: getInvestmentReturnRate(studentTotalAsset, investedPrincipal),
     };
     upsertRemotePlayer(remoteRoomId, remotePlayer).catch((error) => setSyncStatus(`학생 정보 저장 실패: ${error.message}`));
-  }, [effectiveCash, effectiveDeposit, investedPrincipal, joined, nickname, remoteRoomId, selectedTeamKey, studentNumber, studentPasscodeHash, studentTotalAsset, teamMode]);
+  }, [effectiveCash, effectiveDeposit, investedPrincipal, joined, nickname, remoteRoomId, selectedTeamKey, studentNumber, studentPasscodeHash, studentSessionToken, studentTotalAsset, teamMode]);
+
+  useEffect(() => {
+    if (!joined || !studentSessionToken || !nickname.trim()) return undefined;
+
+    const updateHeartbeat = () => {
+      const lastSeenAt = Date.now();
+      setPlayers((current) =>
+        current.map((player) =>
+          Number(player.studentNumber) === Number(studentNumber)
+            ? { ...player, sessionToken: studentSessionToken, lastSeenAt }
+            : player,
+        ),
+      );
+
+      if (supabaseConfigured && remoteRoomId) {
+        upsertRemotePlayer(remoteRoomId, {
+          name: nickname.trim(),
+          studentNumber,
+          passcodeHash: studentPasscodeHash,
+          sessionToken: studentSessionToken,
+          lastSeenAt,
+          teamKey: teamMode ? selectedTeamKey : '',
+          cash: effectiveCash,
+          deposit: effectiveDeposit,
+          totalAsset: studentTotalAsset,
+          returnRate: getInvestmentReturnRate(studentTotalAsset, investedPrincipal),
+        }).catch((error) => setSyncStatus(`접속 상태 저장 실패: ${error.message}`));
+      }
+    };
+
+    updateHeartbeat();
+    const timer = window.setInterval(updateHeartbeat, PLAYER_HEARTBEAT_MS);
+    return () => window.clearInterval(timer);
+  }, [effectiveCash, effectiveDeposit, investedPrincipal, joined, nickname, remoteRoomId, selectedTeamKey, studentNumber, studentPasscodeHash, studentSessionToken, studentTotalAsset, teamMode]);
 
   useEffect(() => {
     if (!gameStarted || !joined || teamMode || phase !== 'open' || salaryPaidRounds.includes(round)) return;
@@ -3568,7 +4272,9 @@ export function App() {
 
   function handleHostLogin(event) {
     event.preventDefault();
-    if (hostLogin.id === HOST_CREDENTIALS.id && hostLogin.password === HOST_CREDENTIALS.password) {
+    const authorizedHostId = getAuthorizedHostId(hostLogin.id, hostLogin.password);
+    if (authorizedHostId) {
+      setHostId(authorizedHostId);
       setHostAuthenticated(true);
       setHostLoginError('');
       setView('host');
@@ -3615,10 +4321,10 @@ export function App() {
   }
 
   function handleClaimTeamTrade() {
-    if (!teamMode || !joined || !nickname.trim() || activeTeam.bankrupt) return;
+    if (!teamMode || !gameStarted || gameFinished || !joined || !nickname.trim() || activeTeam.bankrupt) return;
     updateActiveTeamAccount((team) => ({
       ...team,
-      tradeHolder: nickname.trim(),
+      tradeHolder: studentNameLabel,
       tradeHolderExpiresAt: Date.now() + TEAM_TRADE_LOCK_MS,
     }));
   }
@@ -3645,6 +4351,18 @@ export function App() {
     }
   }
 
+  async function handleTotalRoundsChange(nextTotalRounds) {
+    if (phase !== 'setup' || gameStarted || !ROUND_OPTIONS.includes(nextTotalRounds)) return;
+    setTotalRounds(nextTotalRounds);
+    if (remoteRoomId) {
+      try {
+        await updateRemoteRoom(remoteRoomId, { total_rounds: nextTotalRounds });
+      } catch (error) {
+        setSyncStatus(`라운드 설정 저장 실패: ${error.message}`);
+      }
+    }
+  }
+
   function handleReflectionChange(key, value) {
     setReflection((current) => ({ ...current, [key]: value }));
   }
@@ -3667,9 +4385,15 @@ export function App() {
     }
 
     const passcodeHash = hashStudentPasscode(roomPin, parsedNumber, normalizedPasscode);
+    const storedSessionToken = getStoredStudentSessionToken(roomPin, parsedNumber);
+    const nextSessionToken = storedSessionToken || createStudentSessionToken();
     const existingPlayer = players.find((player) => Number(player.studentNumber) === parsedNumber);
     if (existingPlayer && (existingPlayer.name !== trimmedName || existingPlayer.passcodeHash !== passcodeHash)) {
       setStudentJoinError('이미 사용 중인 학번입니다. 이름과 개인 비밀번호를 확인하세요.');
+      return;
+    }
+    if (existingPlayer && hasActiveDifferentSession(existingPlayer, nextSessionToken)) {
+      setStudentJoinError('해당 학번은 다른 기기에서 접속 중입니다. 기존 화면을 닫고 잠시 후 다시 시도하세요.');
       return;
     }
     if (!existingPlayer && players.length >= MAX_PLAYERS_PER_ROOM) {
@@ -3682,6 +4406,8 @@ export function App() {
       name: trimmedName,
       studentNumber: parsedNumber,
       passcodeHash,
+      sessionToken: nextSessionToken,
+      lastSeenAt: Date.now(),
       teamKey: teamMode ? selectedTeamKey : '',
       cash: gameStarted && !teamMode ? INITIAL_CASH : effectiveCash,
       deposit: gameStarted ? effectiveDeposit : 0,
@@ -3700,6 +4426,8 @@ export function App() {
         playerToStore,
       ].sort((a, b) => Number(a.studentNumber ?? 99) - Number(b.studentNumber ?? 99)));
       setStudentPasscodeHash(passcodeHash);
+      setStudentSessionToken(playerToStore.sessionToken ?? nextSessionToken);
+      storeStudentSessionToken(roomPin, parsedNumber, playerToStore.sessionToken ?? nextSessionToken);
       setStudentNumber(String(parsedNumber));
       setNickname(trimmedName);
       if (gameStarted && !teamMode) {
@@ -3717,6 +4445,7 @@ export function App() {
     if (roomExpired || gameStarted || phase !== 'setup') return;
     const fundedTeams = fundTeamAccounts(teamAccounts.length ? teamAccounts : createDefaultTeamAccounts());
     setGameStarted(true);
+    setFinalReportsDownloaded(false);
     setCash(INITIAL_CASH);
     setInitialCapitalGranted(true);
     setDeposit(0);
@@ -3737,7 +4466,7 @@ export function App() {
     if (remoteRoomId) {
       try {
         await Promise.all([
-          updateRemoteRoom(remoteRoomId, { game_started: true }),
+          updateRemoteRoom(remoteRoomId, { game_started: true, final_reports_downloaded: false }),
           upsertRemoteTeamAccounts(remoteRoomId, fundedTeams),
           ...players.map((player) =>
             upsertRemotePlayer(remoteRoomId, {
@@ -3783,14 +4512,10 @@ export function App() {
     }
   }
 
-  async function createNewRoom() {
-    if (!hostAuthenticated) {
-      setView('host-login');
-      return;
-    }
-
-    const nextPin = String(Math.floor(100000 + Math.random() * 900000));
+  async function applyFreshRoom({ nextPin, statusMessage = '새 수업 방 저장 중' }) {
     const now = Date.now();
+    const selectedTotalRounds = totalRounds;
+    const selectedRoomMode = roomMode;
     const nextAssets = createRandomizedAssets();
     const nextTeams = createDefaultTeamAccounts();
     const nextRoom = buildNewRoomState({
@@ -3807,8 +4532,9 @@ export function App() {
     setRoomCreatedAt(nextRoom.roomCreatedAt);
     setRoomExpired(nextRoom.roomExpired);
     setRound(nextRoom.round);
+    setTotalRounds(selectedTotalRounds);
     setPhase(nextRoom.phase);
-    setRoomMode(roomMode);
+    setRoomMode(selectedRoomMode);
     setGameStarted(false);
     setIsPaused(nextRoom.isPaused);
     setBaseRate(nextRoom.baseRate);
@@ -3825,6 +4551,7 @@ export function App() {
     setStudentJoinError('');
     setStudentPasscode('');
     setStudentPasscodeHash('');
+    setStudentSessionToken('');
     setCash(nextRoom.cash);
     setDeposit(nextRoom.deposit);
     setDepositPrincipal(0);
@@ -3841,19 +4568,26 @@ export function App() {
     setSalaryPaidRounds([]);
     setReflection(nextRoom.reflection);
     setSubmissions([]);
+    setFinalReportsDownloaded(false);
+    setResetDialogOpen(false);
+    setResetPassword('');
+    setResetError('');
+    setRemoteRoomId(null);
 
     if (!supabaseConfigured) return;
-    setSyncStatus('새 수업 방 저장 중');
+    setSyncStatus(statusMessage);
     try {
       const bundle = await createRemoteRoom({
         pin: nextPin,
         now,
+        hostId: hostId || 'geography',
+        totalRounds: selectedTotalRounds,
         baseRate: INITIAL_BASE_RATE,
         exchangeRate: INITIAL_EXCHANGE_RATE,
         unemploymentRate: INITIAL_UNEMPLOYMENT_RATE,
         assets: nextAssets,
-        mode: roomMode,
-        teams: roomMode === 'team' ? nextTeams : [],
+        mode: selectedRoomMode,
+        teams: selectedRoomMode === 'team' ? nextTeams : [],
       });
       if (bundle) applyRemoteRoomBundle(bundle);
     } catch (error) {
@@ -3861,9 +4595,41 @@ export function App() {
     }
   }
 
+  async function createNewRoom() {
+    if (!hostAuthenticated) {
+      setView('host-login');
+      return;
+    }
+
+    const nextPin = String(Math.floor(100000 + Math.random() * 900000));
+    await applyFreshRoom({ nextPin, statusMessage: '새 수업 방 저장 중' });
+  }
+
+  function handleRequestReset() {
+    setResetPassword('');
+    setResetError('');
+    setResetDialogOpen(true);
+  }
+
+  function handleCancelReset() {
+    setResetDialogOpen(false);
+    setResetPassword('');
+    setResetError('');
+  }
+
+  async function handleConfirmReset(event) {
+    event.preventDefault();
+    if (resetPassword !== HOST_PASSWORD) {
+      setResetError('초기화 암호가 맞지 않습니다.');
+      return;
+    }
+    await applyFreshRoom({ nextPin: roomPin, statusMessage: '현재 방 초기화 중' });
+    setSyncStatus(supabaseConfigured ? '현재 방이 초기화되었습니다.' : '로컬 방이 초기화되었습니다.');
+  }
+
   async function handleNextRound() {
-    if (roomExpired || round >= TOTAL_ROUNDS) return;
-    const nextRound = Math.min(round + 1, TOTAL_ROUNDS);
+    if (roomExpired || round >= totalRounds) return;
+    const nextRound = Math.min(round + 1, totalRounds);
     setRound(nextRound);
     setPhase('setup');
     setIssueDraft('');
@@ -3977,7 +4743,9 @@ export function App() {
     const initialResolvedEvents = eventsForResolution.map((event) => {
       const conflictOutcome = conflictOutcomeMap[event.id];
       const didApply = conflictOutcome ? conflictOutcome.didApply : Math.random() < (event.probability ?? DEFAULT_EVENT_PROBABILITY);
-      const outcomeType = didApply ? (Math.random() < 0.7 ? 'event' : 'expectation') : 'failed';
+      const outcomeType = didApply
+        ? (Math.random() < EXPECTATION_WITHIN_SUCCESS_PROBABILITY ? 'expectation' : 'event')
+        : 'failed';
       return {
         ...event,
         resolved: true,
@@ -4059,7 +4827,9 @@ export function App() {
       if (cleanTeam.bankrupt) return cleanTeam;
       const teamDepositInterest = Math.round(cleanTeam.deposit * (getDepositRate(nextBaseRate) / 100 / 4));
       const nextTeamDeposit = cleanTeam.deposit + teamDepositInterest;
-      const nextNegativeRounds = cleanTeam.cash < 0 || cleanTeam.cash + nextTeamDeposit < 0 ? (cleanTeam.negativeRounds ?? 0) + 1 : 0;
+      const nextTeamHoldingsValue = getPortfolioValue(cleanTeam.portfolio, nextAssets);
+      const nextTeamTotalAsset = cleanTeam.cash + nextTeamDeposit + nextTeamHoldingsValue;
+      const nextNegativeRounds = cleanTeam.cash < 0 || cleanTeam.cash + nextTeamDeposit < 0 || nextTeamTotalAsset < 0 ? (cleanTeam.negativeRounds ?? 0) + 1 : 0;
       const bankrupt = nextNegativeRounds >= 2;
       return {
         ...cleanTeam,
@@ -4077,24 +4847,33 @@ export function App() {
     setAssets(nextAssets);
     setDeposit(nextDeposit);
     setTeamAccounts(nextTeamAccounts);
+    const bankruptedTeams = nextTeamAccounts
+      .filter((team) => team.bankrupt && !teamAccounts.find((item) => item.key === team.key)?.bankrupt)
+      .map((team) => team.name);
     if (depositInterest > 0) {
       setDepositInterestEarned((current) => current + depositInterest);
       addTradeLog('예금 이자', `${round}라운드 분기 복리 이자 +${formatWon(depositInterest)}`);
     }
     setLatestRoundSummary({ round, events: resolvedEvents, delistedAssets, macroMove });
     setPhase('closed');
+    const selectedTeamAfterRound = nextTeamAccounts.find((team) => team.key === selectedTeamKey) ?? activeTeam;
+    const logCash = teamMode ? selectedTeamAfterRound.cash : cash;
+    const logDeposit = teamMode ? selectedTeamAfterRound.deposit : nextDeposit;
+    const logPortfolio = teamMode ? selectedTeamAfterRound.portfolio : portfolio;
     setRoundLogs((current) => [
       buildRoundLog({
         round,
         now: Date.now(),
-        totalAsset: getTotalAsset({ cash, deposit: nextDeposit, portfolio, assets: nextAssets }),
-        holdings: getHoldingSummary(portfolio, nextAssets),
+        totalAsset: getTotalAsset({ cash: logCash, deposit: logDeposit, portfolio: logPortfolio, assets: nextAssets }),
+        holdings: getHoldingSummary(logPortfolio, nextAssets),
         events: resolvedEvents.map((event) => `${event.title}: ${getResultLabel(event, false)}`).join(' / '),
       }),
       ...current.filter((item) => item.round !== round),
     ].sort((a, b) => a.round - b.round));
     const failedEvents = resolvedEvents.filter((event) => !event.didApply);
-    if (delistedAssets.length) {
+    if (bankruptedTeams.length) {
+      pushNews('모둠 파산 발생', `${bankruptedTeams.join(', ')} 계좌가 2라운드 연속 잔고 문제로 파산 처리되었습니다.`);
+    } else if (delistedAssets.length) {
       pushNews('상장폐지 발생', `${delistedAssets.map((asset) => asset.name).join(', ')} 거래가 중단되었습니다. 한 종목 집중 투자의 위험이 현실화됐습니다.`);
     } else if (failedEvents.length) {
       pushNews(failedEvents[0].failureTitle, failedEvents[0].failureDetail);
@@ -4134,6 +4913,7 @@ export function App() {
   }
 
   async function handleEndGame() {
+    if (!canEndGame) return;
     setIsPaused(true);
     setPhase('ended');
     pushNews('게임 종료', '최종 수익률을 확인하고 자산 배분 판단을 회고합니다.');
@@ -4154,6 +4934,9 @@ export function App() {
     if (!gameFinished || !joined || submittedReport) return;
     const report = buildFinalSubmissionReport({
       nickname: reportNickname,
+      mode: roomMode,
+      teamKey: teamMode ? activeTeam.key : '',
+      teamName: teamMode ? activeTeam.name : '',
       cash: effectiveCash,
       deposit: effectiveDeposit,
       depositInterestEarned: effectiveDepositInterestEarned,
@@ -4179,11 +4962,14 @@ export function App() {
   }
 
   function handleDownloadSubmissions() {
+    if (!gameFinished || !allSubmissionsComplete) return;
     const rows = [
-      ['순위', '이름', '총자산', '투입원금', '현금성자산', '투자평가금', '예금이자수익', '수익률', '투자성향', '보유자산', '잘한점', '부족한점', '다음계획'],
+      ['순위', '이름', '투자방식', '모둠', '총자산', '투입원금', '현금성자산', '투자평가금', '예금이자수익', '수익률', '투자성향', '보유자산', '잘한점', '부족한점', '다음계획'],
       ...[...submissions].sort((a, b) => b.totalAsset - a.totalAsset).map((submission, index) => [
         index + 1,
         submission.nickname,
+        submission.mode === 'team' ? '모둠 투자' : '개인 투자',
+        submission.teamName ?? '',
         submission.totalAsset,
         submission.investedPrincipal ?? INITIAL_CASH,
         submission.cashLikeAsset,
@@ -4198,6 +4984,10 @@ export function App() {
       ]),
     ];
     downloadCsv(`market-class-${roomPin}-final-reports.csv`, rows);
+    setFinalReportsDownloaded(true);
+    if (remoteRoomId) {
+      updateRemoteRoom(remoteRoomId, { final_reports_downloaded: true }).catch((error) => setSyncStatus(`다운로드 상태 저장 실패: ${error.message}`));
+    }
   }
 
   function handleBuy() {
@@ -4303,6 +5093,8 @@ export function App() {
           setView={setView}
           roomPin={roomPin}
           round={round}
+          totalRounds={totalRounds}
+          gameStarted={gameStarted}
           playerCount={playerCount}
           baseRate={baseRate}
           exchangeRate={exchangeRate}
@@ -4322,12 +5114,15 @@ export function App() {
       {view === 'host' && hostAuthenticated && !joined ? (
         <HostView
           roomPin={roomPin}
+          hostId={hostId}
           round={round}
+          totalRounds={totalRounds}
           phase={phase}
           roomMode={roomMode}
           gameStarted={gameStarted}
           isPaused={isPaused}
           assets={assets}
+          teamAccounts={teamAccounts}
           players={players}
           rankingPlayers={displayedPlayers}
           newsFeed={newsFeed}
@@ -4341,10 +5136,21 @@ export function App() {
           currentRoundEvents={currentRoundEvents}
           latestRoundSummary={latestRoundSummary}
           submissions={submissions}
+          syncStatus={syncStatus}
           gameFinished={gameFinished}
+          finalRoundClosed={finalRoundClosed}
+          finalReportsDownloaded={finalReportsDownloaded}
+          submittedCount={submittedCount}
+          participantCount={participantCount}
+          allSubmissionsComplete={allSubmissionsComplete}
+          canEndGame={canEndGame}
+          resetDialogOpen={resetDialogOpen}
+          resetPassword={resetPassword}
+          resetError={resetError}
           onCreateRoom={createNewRoom}
           onGameStart={handleGameStart}
           onRoomModeChange={handleRoomModeChange}
+          onTotalRoundsChange={handleTotalRoundsChange}
           onIssueDraftChange={setIssueDraft}
           onStartRound={handleStartRound}
           onCloseRound={handleCloseRound}
@@ -4361,6 +5167,10 @@ export function App() {
             }
           }}
           onEndGame={handleEndGame}
+          onRequestReset={handleRequestReset}
+          onCancelReset={handleCancelReset}
+          onConfirmReset={handleConfirmReset}
+          onResetPasswordChange={setResetPassword}
           onRegisterIssue={handleRegisterIssue}
           onCancelIssue={handleCancelIssue}
           onClearIssues={handleClearIssues}

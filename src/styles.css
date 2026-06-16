@@ -233,6 +233,8 @@ p {
 .ranking-panel,
 .news-panel,
 .mode-panel,
+.room-setup-panel,
+.end-flow-panel,
 .macro-panel,
 .explain-panel,
 .issue-panel,
@@ -242,6 +244,7 @@ p {
 .portfolio-donut-panel,
 .holdings-panel,
 .student-monitor,
+.team-dashboard-panel,
 .submission-panel,
 .asset-panel,
 .deposit-ticket,
@@ -258,6 +261,8 @@ p {
 }
 
 .mode-panel,
+.room-setup-panel,
+.end-flow-panel,
 .team-trade-panel,
 .team-picker,
 .waiting-panel,
@@ -274,6 +279,111 @@ p {
   gap: 1rem;
   padding: 1rem;
   margin: 1rem 0;
+}
+
+.setup-mode {
+  align-items: start;
+}
+
+.room-setup-panel {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+}
+
+.setup-header {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.setup-header div,
+.prestart-stats div,
+.setup-options-grid article {
+  display: grid;
+  gap: 0.35rem;
+  border: 1px solid #e1e7ef;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 0.85rem;
+}
+
+.setup-header span,
+.prestart-stats span,
+.setup-options-grid span {
+  color: #64748b;
+  font-size: 0.8rem;
+  font-weight: 850;
+  line-height: 1.45;
+}
+
+.setup-header strong {
+  color: #101827;
+  font-size: clamp(1.35rem, 3vw, 2rem);
+  line-height: 1.05;
+}
+
+.setup-options-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.setup-options-grid article {
+  align-content: space-between;
+}
+
+.setup-options-grid strong {
+  color: #101827;
+}
+
+.prestart-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.prestart-stats strong {
+  color: #101827;
+  font-size: clamp(1rem, 1.5vw, 1.35rem);
+}
+
+.setup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.setup-student-list {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.setup-student-list article {
+  display: grid;
+  gap: 0.25rem;
+  border: 1px solid #e1e7ef;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 0.7rem;
+}
+
+.setup-student-list p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #64748b;
+  line-height: 1.5;
+}
+
+.setup-student-list strong {
+  color: #101827;
+}
+
+.setup-student-list span {
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 850;
 }
 
 .mode-panel div:first-child,
@@ -441,6 +551,13 @@ p {
   margin: 0.45rem 0 0;
   color: #64748b;
   line-height: 1.6;
+}
+
+.reset-modal label {
+  display: grid;
+  gap: 0.35rem;
+  color: #334155;
+  font-weight: 900;
 }
 
 .choice-actions {
@@ -791,6 +908,58 @@ p {
   font-weight: 850;
 }
 
+.end-flow-panel {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.9rem;
+}
+
+.end-flow-panel > div {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.end-flow-panel strong {
+  color: #101827;
+}
+
+.end-flow-panel span {
+  color: #64748b;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.end-flow-panel ol {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.55rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.end-flow-panel li {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #64748b;
+  padding: 0.55rem;
+  font-size: 0.84rem;
+  font-weight: 950;
+  text-align: center;
+}
+
+.end-flow-panel li.done,
+.end-flow-panel.complete {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+  color: #166534;
+}
+
 .event-panel,
 .market-board,
 .ranking-panel,
@@ -902,6 +1071,11 @@ p {
 .teacher-hint.warning {
   background: #fef2f2;
   color: #b91c1c;
+}
+
+.teacher-hint.success {
+  background: #f0fdf4;
+  color: #166534;
 }
 
 .issue-input {
@@ -1194,6 +1368,85 @@ p {
 .student-monitor {
   display: grid;
   gap: 0.9rem;
+}
+
+.team-dashboard-panel {
+  display: grid;
+  gap: 0.9rem;
+  padding: 1rem;
+}
+
+.team-dashboard-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.team-dashboard-list article {
+  display: grid;
+  gap: 0.65rem;
+  border: 1px solid #e1e7ef;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 0.8rem;
+}
+
+.team-dashboard-list article.bankrupt {
+  border-color: #fecaca;
+  background: #fff1f2;
+}
+
+.team-dashboard-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.65rem;
+}
+
+.team-dashboard-head > div {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.team-dashboard-head strong {
+  color: #101827;
+}
+
+.team-dashboard-head span,
+.team-dashboard-list p {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.8rem;
+  font-weight: 850;
+  line-height: 1.45;
+}
+
+.team-dashboard-head em {
+  flex: 0 0 auto;
+  border-radius: 8px;
+  background: #e0ecff;
+  color: #1d4ed8;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.74rem;
+  font-style: normal;
+  font-weight: 950;
+}
+
+.team-dashboard-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.4rem;
+}
+
+.team-dashboard-metrics span {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #334155;
+  padding: 0.45rem;
+  font-size: 0.78rem;
+  font-weight: 900;
 }
 
 .submission-panel {
@@ -2241,7 +2494,10 @@ input {
   }
 
   .event-grid,
-  .macro-panel {
+  .macro-panel,
+  .setup-options-grid,
+  .prestart-stats,
+  .setup-student-list {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -2302,13 +2558,19 @@ input {
 
   .event-grid,
   .macro-panel,
+  .end-flow-panel ol,
+  .setup-header,
+  .setup-options-grid,
+  .prestart-stats,
+  .setup-student-list,
   .preview-grid,
   .metric-grid,
   .signal-grid,
   .macro-guide-tabs,
   .donut-layout,
   .report-summary,
-  .student-monitor-list {
+  .student-monitor-list,
+  .team-dashboard-list {
     grid-template-columns: 1fr;
   }
 
