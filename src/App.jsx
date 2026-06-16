@@ -86,6 +86,8 @@ const PASSIVE_MOVE_SMALL_MULT = 1.6;
 const PASSIVE_MOVE_BOND_MULT = 0.3;
 const PASSIVE_MOVE_FOREX_MULT = 0.4;
 const PASSIVE_MOVE_GOLD_MULT = 0.6;
+// 이슈 적중 종목은 인과 학습을 위해 PASSIVE 노이즈 감쇠 (학습 보호 장치)
+const ISSUE_IMPACT_PASSIVE_DAMP = 0.6;
 // 이슈 impact 에 사이즈 가중치 (호재/악재 진폭도 사이즈 차등)
 const SIZE_ISSUE_MULT = { large: 0.8, small: 1.4 };
 // 정기예금 (잠금형 정기예금) — 목돈 일시 예치, 만기 잠금
@@ -97,13 +99,25 @@ const RECURRING_BONUS_RATE = 0.8;
 const RECURRING_EARLY_PENALTY = 0.02;
 // 거시지표 임계점 트리거
 const MACRO_TRIGGERS = [
-  { id: 'emergency-stimulus', when: (m) => m.unemploymentRate > 8.0, cooldown: 3 },
-  { id: 'wage-spiral', when: (m) => m.unemploymentRate < 2.5, cooldown: 3 },
-  { id: 'credit-crunch', when: (m) => m.baseRate > 7.0, cooldown: 4 },
-  { id: 'liquidity-flood', when: (m) => m.baseRate < 1.0, cooldown: 4 },
-  { id: 'fx-intervention', when: (m) => m.exchangeRate > 1600, cooldown: 3 },
-  { id: 'realty-cooling-policy', when: (m) => m.propertyIndex > 350000, cooldown: 3 },
+  { id: 'emergency-stimulus', when: (m) => m.unemploymentRate > 8.0, cooldown: 6 },
+  { id: 'wage-spiral', when: (m) => m.unemploymentRate < 2.5, cooldown: 6 },
+  { id: 'credit-crunch', when: (m) => m.baseRate > 7.0, cooldown: 6 },
+  { id: 'liquidity-flood', when: (m) => m.baseRate < 1.0, cooldown: 6 },
+  { id: 'fx-intervention', when: (m) => m.exchangeRate > 1600, cooldown: 5 },
+  { id: 'realty-cooling-policy', when: (m) => m.propertyIndex > 350000, cooldown: 5 },
 ];
+// 한 라운드에 동시 발동 가능한 트리거 최대 개수 (인지 과부하 방지, 옵션 4 패치 #2)
+const MAX_TRIGGERS_PER_ROUND = 2;
+// 라운드를 분기로 매핑 — 한 라운드 = 1분기(3개월) (옵션 4 패치 #4)
+const GAME_START_YEAR = 2026;
+const GAME_START_QUARTER = 4; // 2026년 4분기부터 시작
+function getQuarterLabel(roundNumber) {
+  if (!roundNumber || roundNumber < 1) return '';
+  const totalQ = GAME_START_QUARTER + (roundNumber - 1);
+  const year = GAME_START_YEAR + Math.floor((totalQ - 1) / 4);
+  const quarter = ((totalQ - 1) % 4) + 1;
+  return `${year}년 ${quarter}분기`;
+}
 const INITIAL_EXCHANGE_RATE = 1350;
 const ROOM_TTL_MS = 24 * 60 * 60 * 1000;
 const PLAYER_SESSION_TIMEOUT_MS = 90_000;
@@ -625,7 +639,7 @@ const scenarioEvents = [
         failureDetail: '비용 부담이 여전히 크다는 평가가 나오며 시장 영향은 제한됐습니다.',
       },
     ],
-    impact: { kospi: 0.08, sp500: 0.06, enter: 0.08, air: 0.09, oceanair: 0.1, neo: 0.05, realty: 0.05, bank: 0.04, riverbank: 0.04, usBond: -0.05, argBond: -0.04, goldFut: -0.03 },
+    impact: { kospi: 0.08, sp500: 0.06, enter: 0.08, air: 0.09, oceanair: 0.1, neo: 0.05, realty: 0.05, bank: 0.04, riverbank: 0.04, usBond: -0.05, argBond: -0.04, goldFut: -0.03, medi: 0.04, eco: 0.05, food: 0.03, purefood: 0.03, oil: 0.04, hychip: 0.07, hankki: 0.04 },
   },
   {
     id: 'recession-risk',
@@ -649,7 +663,7 @@ const scenarioEvents = [
         failureDetail: '일부 업종에 국한된 조정으로 확인되며 전체 경기 영향은 작게 평가됐습니다.',
       },
     ],
-    impact: { kospi: -0.09, sp500: -0.07, enter: -0.08, air: -0.12, oceanair: -0.13, neo: -0.06, realty: -0.06, infra: -0.06, metroinfra: -0.07, usBond: 0.08, food: 0.03, purefood: 0.04, goldFut: 0.08 },
+    impact: { kospi: -0.09, sp500: -0.07, enter: -0.08, air: -0.12, oceanair: -0.13, neo: -0.06, realty: -0.06, infra: -0.06, metroinfra: -0.07, usBond: 0.08, food: 0.03, purefood: 0.04, goldFut: 0.08, medi: 0.02, eco: -0.06, hychip: -0.06, hankki: -0.04, oil: -0.05 },
   },
   {
     id: 'jobs-improve',
@@ -673,7 +687,7 @@ const scenarioEvents = [
         failureDetail: '계절 채용 영향이 컸다는 분석이 나오며 기대감이 약해졌습니다.',
       },
     ],
-    impact: { enter: 0.08, air: 0.1, oceanair: 0.09, bank: 0.05, riverbank: 0.04, realty: 0.04, kospi: 0.05, sp500: 0.03, food: 0.03, purefood: 0.03 },
+    impact: { enter: 0.08, air: 0.1, oceanair: 0.09, bank: 0.05, riverbank: 0.04, realty: 0.04, kospi: 0.05, sp500: 0.03, food: 0.03, purefood: 0.03, medi: 0.05, eco: 0.04, hychip: 0.05, hankki: 0.03, oil: 0.02 },
   },
   {
     id: 'unemployment-worse',
@@ -697,7 +711,7 @@ const scenarioEvents = [
         failureDetail: '서비스업과 공공부문 채용이 유지되며 전체 고용 충격은 제한됐습니다.',
       },
     ],
-    impact: { enter: -0.1, air: -0.12, oceanair: -0.14, bank: -0.06, riverbank: -0.07, realty: -0.06, kospi: -0.06, sp500: -0.04, usBond: 0.07, argBond: -0.05 },
+    impact: { enter: -0.1, air: -0.12, oceanair: -0.14, bank: -0.06, riverbank: -0.07, realty: -0.06, kospi: -0.06, sp500: -0.04, usBond: 0.07, argBond: -0.05, medi: 0.02, eco: -0.04, food: -0.04, purefood: -0.05, hychip: -0.05, hankki: -0.04, oil: -0.04 },
   },
   {
     id: 'inflation-cool',
@@ -745,7 +759,7 @@ const scenarioEvents = [
         failureDetail: '재고와 공급 계약 안정으로 가격 상승 압력이 빠르게 낮아졌습니다.',
       },
     ],
-    impact: { core: -0.08, dogemars: -0.1, neo: -0.07, sp500: -0.06, kospi: -0.05, usBond: -0.09, argBond: -0.05, oilFut: 0.08, grainFut: 0.08, bank: 0.04, riverbank: 0.04, air: -0.07, oceanair: -0.08, food: -0.05, purefood: -0.04 },
+    impact: { core: -0.08, dogemars: -0.1, neo: -0.07, sp500: -0.06, kospi: -0.05, usBond: -0.09, argBond: -0.05, oilFut: 0.08, grainFut: 0.08, bank: 0.04, riverbank: 0.04, air: -0.07, oceanair: -0.08, food: -0.05, purefood: -0.04, medi: -0.03, eco: 0.04, hychip: -0.03, hankki: 0.06, oil: 0.06 },
   },
   {
     id: 'fx-stabilize',
@@ -891,7 +905,7 @@ const scenarioEvents = [
         failureDetail: '환율과 물류비 부담이 커지며 수출 증가의 긍정 효과가 약해졌습니다.',
       },
     ],
-    impact: { kospi: 0.09, core: 0.06, neo: 0.03, dogemars: 0.02, bank: 0.02, riverbank: 0.02 },
+    impact: { kospi: 0.09, core: 0.06, neo: 0.03, dogemars: 0.02, bank: 0.02, riverbank: 0.02, hychip: 0.08, hankki: 0.03, oil: 0.04, food: 0.03, purefood: 0.03, eco: 0.04 },
   },
   {
     id: 'rare',
@@ -1075,7 +1089,7 @@ const scenarioEvents = [
         failureDetail: '미국 정부가 당장 추가 규제를 검토하지 않는다고 밝히며 시장 영향이 줄었습니다.',
       },
     ],
-    impact: { core: -0.12, dogemars: -0.14, kospi: -0.05, neo: -0.04, sp500: -0.03 },
+    impact: { core: -0.12, dogemars: -0.14, kospi: -0.05, neo: -0.04, sp500: -0.03, hychip: -0.08, eco: 0.03, medi: -0.02 },
   },
   {
     id: 'oil-supply-shock',
@@ -1105,7 +1119,7 @@ const scenarioEvents = [
         failureDetail: '일시적 통계 요인이 컸다는 분석이 나오며 공급 부족 우려가 약해졌습니다.',
       },
     ],
-    impact: { oilFut: 0.18, oil: 0.1, air: -0.12, oceanair: -0.15, food: -0.04, purefood: -0.03, grainFut: 0.03, usBond: 0.02 },
+    impact: { oilFut: 0.18, oil: 0.1, air: -0.12, oceanair: -0.15, food: -0.04, purefood: -0.03, grainFut: 0.03, usBond: 0.02, hankki: 0.07, eco: 0.05, medi: -0.02 },
   },
   {
     id: 'oil-supply-relief',
@@ -1135,7 +1149,7 @@ const scenarioEvents = [
         failureDetail: '일부 항로 불안이 다시 부각되며 공급 안정 기대가 이어지지 못했습니다.',
       },
     ],
-    impact: { oilFut: -0.18, oil: -0.1, air: 0.12, oceanair: 0.15, food: 0.04, purefood: 0.04, usBond: -0.02, grainFut: -0.03 },
+    impact: { oilFut: -0.18, oil: -0.1, air: 0.12, oceanair: 0.15, food: 0.04, purefood: 0.04, usBond: -0.02, grainFut: -0.03, hankki: -0.04, eco: -0.03 },
   },
   {
     id: 'grain-shock',
@@ -1226,7 +1240,7 @@ const scenarioEvents = [
       },
     ],
     baseRateDelta: 0.3,
-    impact: { usBond: -0.12, sp500: -0.06, core: -0.07, dogemars: -0.11, enter: -0.05, argBond: -0.08, bank: 0.04, riverbank: 0.03 },
+    impact: { usBond: -0.12, sp500: -0.06, core: -0.07, dogemars: -0.11, enter: -0.05, argBond: -0.08, bank: 0.04, riverbank: 0.03, medi: -0.04, hychip: -0.05, eco: -0.03 },
   },
   {
     id: 'us-yield-cooldown',
@@ -1660,7 +1674,7 @@ function getHoldingSummary(portfolio, assets) {
     : '보유 종목 없음';
 }
 
-function getPassiveMarketMove(asset) {
+function getPassiveMarketMove(asset, hasIssueImpact = false) {
   let mult = 1;
   if (asset?.type === 'stock') {
     if (asset.size === 'large') mult = PASSIVE_MOVE_LARGE_MULT;
@@ -1668,6 +1682,8 @@ function getPassiveMarketMove(asset) {
   } else if (asset?.type === 'bond') mult = PASSIVE_MOVE_BOND_MULT;
   else if (asset?.type === 'forex') mult = PASSIVE_MOVE_FOREX_MULT;
   else if (asset?.type === 'futures' && asset.id === 'goldFut') mult = PASSIVE_MOVE_GOLD_MULT;
+  // 이슈 적중 종목은 인과 가시성을 위해 노이즈 감쇠 (옵션 4 패치 #1)
+  if (hasIssueImpact) mult *= ISSUE_IMPACT_PASSIVE_DAMP;
   const raw = (Math.random() * 2 - 1) * PASSIVE_MARKET_MOVE * mult;
   return Number(raw.toFixed(3));
 }
@@ -1850,6 +1866,7 @@ function detectMacroTriggers(macroSnapshot, triggerCooldowns) {
   const fired = [];
   const nextCooldowns = { ...(triggerCooldowns ?? {}) };
   for (const trig of MACRO_TRIGGERS) {
+    if (fired.length >= MAX_TRIGGERS_PER_ROUND) break; // 동시 발동 캡 (옵션 4 패치 #2)
     const onCooldown = (nextCooldowns[trig.id] ?? 0) > 0;
     if (!onCooldown && trig.when(macroSnapshot)) {
       fired.push(trig.id);
@@ -2127,7 +2144,8 @@ function moveAssetsLocally(currentAssets, modifier = {}, delistedIds = [], round
       };
     }
     const eventImpact = modifier[asset.id] ?? 0;
-    const marketMove = getPassiveMarketMove(asset);
+    const hasImpact = Math.abs(eventImpact) > 0.001;
+    const marketMove = getPassiveMarketMove(asset, hasImpact);
     const nextPrice = Math.max(1000, Math.round((asset.price * (1 + marketMove + eventImpact)) / 100) * 100);
     return {
       ...asset,
@@ -2368,7 +2386,7 @@ function RoundExplanation({ summary, assets, compact = false }) {
     <section className={compact ? 'explain-panel compact' : 'explain-panel'} aria-label="라운드 해설">
       <div className="panel-heading">
         <BadgePercent size={22} aria-hidden="true" />
-        <h2>{summary.round}라운드 해설</h2>
+        <h2>{summary.round}라운드 해설<small className="quarter-tag" style={{ fontSize: '0.65em', fontWeight: 400, color: '#64748b', marginLeft: 8 }}>{summary.round > 0 ? `· ${getQuarterLabel(summary.round)}` : ''}</small></h2>
       </div>
       <div className="explain-list">
         {summary.macroMove && !compact ? (
@@ -4023,6 +4041,7 @@ function HostView({
             <span>Round</span>
             <strong>{round}</strong>
             <small>/ {totalRounds} 분기</small>
+            {round > 0 ? <small className="quarter-tag"> · {getQuarterLabel(round)}</small> : null}
           </div>
           {phase === 'ended' ? (
             <button className="command primary" type="button" onClick={onCreateRoom}>
@@ -4452,7 +4471,7 @@ function StudentView({
         <div className="mobile-notch" />
         <header className="mobile-header">
           <div>
-            <span>Round {round} · {phaseLabels[phase]}</span>
+            <span>Round {round}{round > 0 ? ` · ${getQuarterLabel(round)}` : ''} · {phaseLabels[phase]}</span>
             <strong>{getStudentDisplayName(studentNumber, nickname)}</strong>
           </div>
           <div className="pin-badge">{roomPin}</div>
