@@ -86,19 +86,6 @@ const PASSIVE_MOVE_SMALL_MULT = 1.6;
 const PASSIVE_MOVE_BOND_MULT = 0.3;
 const PASSIVE_MOVE_FOREX_MULT = 0.4;
 const PASSIVE_MOVE_GOLD_MULT = 0.6;
-
-// ▼ NEW (v2): 라운드를 분기로 매핑 (한 라운드 = 1분기 = 3개월)
-const GAME_START_YEAR = 2026;
-const GAME_START_QUARTER = 4;
-
-function getQuarterLabel(roundNumber) {
-  if (!roundNumber || roundNumber < 1) return '';
-  const totalQuarter = GAME_START_QUARTER + (roundNumber - 1);
-  const year = GAME_START_YEAR + Math.floor((totalQuarter - 1) / 4);
-  const quarter = ((totalQuarter - 1) % 4) + 1;
-  return year + '년 ' + quarter + '분기';
-}
-
 // 이슈 impact 에 사이즈 가중치 (호재/악재 진폭도 사이즈 차등)
 const SIZE_ISSUE_MULT = { large: 0.8, small: 1.4 };
 // 정기예금 (잠금형 정기예금) — 목돈 일시 예치, 만기 잠금
@@ -110,16 +97,13 @@ const RECURRING_BONUS_RATE = 0.8;
 const RECURRING_EARLY_PENALTY = 0.02;
 // 거시지표 임계점 트리거
 const MACRO_TRIGGERS = [
-  { id: 'emergency-stimulus', when: (m) => m.unemploymentRate > 8.0, cooldown: 6 },
-  { id: 'wage-spiral', when: (m) => m.unemploymentRate < 2.5, cooldown: 6 },
-  { id: 'credit-crunch', when: (m) => m.baseRate > 7.0, cooldown: 6 },
-  { id: 'liquidity-flood', when: (m) => m.baseRate < 1.0, cooldown: 6 },
-  { id: 'fx-intervention', when: (m) => m.exchangeRate > 1600, cooldown: 5 },
-  { id: 'realty-cooling-policy', when: (m) => m.propertyIndex > 350000, cooldown: 5 },
+  { id: 'emergency-stimulus', when: (m) => m.unemploymentRate > 8.0, cooldown: 3 },
+  { id: 'wage-spiral', when: (m) => m.unemploymentRate < 2.5, cooldown: 3 },
+  { id: 'credit-crunch', when: (m) => m.baseRate > 7.0, cooldown: 4 },
+  { id: 'liquidity-flood', when: (m) => m.baseRate < 1.0, cooldown: 4 },
+  { id: 'fx-intervention', when: (m) => m.exchangeRate > 1600, cooldown: 3 },
+  { id: 'realty-cooling-policy', when: (m) => m.propertyIndex > 350000, cooldown: 3 },
 ];
-
-// ▼ NEW (v2): 한 라운드 동시 발동 가능한 트리거 최대 개수 (인지 과부하 방지)
-const MAX_TRIGGERS_PER_ROUND = 2;
 const INITIAL_EXCHANGE_RATE = 1350;
 const ROOM_TTL_MS = 24 * 60 * 60 * 1000;
 const PLAYER_SESSION_TIMEOUT_MS = 90_000;
@@ -534,6 +518,22 @@ const assetLearningProfiles = {
     story: '아르헨티나 정부가 발행한 고위험 국채를 단순화한 자산입니다. 높은 이자 기대가 있지만 환율, 정치, 신용등급 이슈에 크게 민감합니다.',
     metrics: [['발행자', '아르헨티나 정부'], ['신용위험', '높음'], ['금리 민감도', '높음'], ['통화가치 민감도', '매우 높음'], ['원자재 수출 영향', '있음'], ['만기', '중장기'], ['변동성', '매우 높음']],
     signals: { stability: '낮음', growth: '보통', volatility: '높음' },
+  goldFut: {
+    story: '금 가격을 추종하는 선물 상품입니다. 위기·인플레이션·실질금리 하락 국면에서 안전자산으로 주목받습니다.',
+    metrics: [['자산 유형', '귀금속 선물'], ['거래 시장', '글로벌'], ['주요 변수', '실질금리·달러'], ['안전자산성', '높음'], ['배당/이자', '없음'], ['보관 비용', '있음'], ['변동성', '중간']],
+    signals: { stability: '높음', growth: '보통', volatility: '보통' },
+    riskTags: ['안전자산', '인플레이션헤지', '환율민감', '달러반대'],
+    sensitivity: ['실질금리 변화', '달러 강세/약세', '지정학적 위기', '인플레이션 기대'],
+    prompt: '금이 위기에 강한 자산이라고 하는데, 왜 항상 오르지는 않을까요?',
+  },
+  usdKrw: {
+    story: '원/달러 환율을 추종하는 ETN입니다. 환율이 오르면 가격이 오르고, 떨어지면 가격이 떨어지는 외환 파생 상품입니다.',
+    metrics: [['추종 대상', '원/달러 환율'], ['거래 시장', '외환'], ['주요 변수', '한미 금리차'], ['안전자산성', '보통'], ['배당/이자', '없음'], ['보유 비용', '있음'], ['변동성', '낮음']],
+    signals: { stability: '보통', growth: '보통', volatility: '낮음' },
+    riskTags: ['외환', '한미금리차민감', '거시지표연동', '위기시 강세'],
+    sensitivity: ['미국 금리 인상', '한미 금리차', '경상수지', '외국인 자금 흐름'],
+    prompt: '환율 상승이 우리 경제와 자산 가격에 어떤 영향을 줄까요?',
+  },
     riskTags: ['고위험채권', '신용등급민감', '환율민감', '정치위험'],
     sensitivity: ['IMF 협상', '신용등급 하향', '통화가치 급락', '원자재 수출'],
     prompt: '채권은 안전하다고만 생각하기 쉬운데, 저신용 국가 채권은 왜 위험자산처럼 움직일까요?',
@@ -641,7 +641,7 @@ const scenarioEvents = [
         failureDetail: '비용 부담이 여전히 크다는 평가가 나오며 시장 영향은 제한됐습니다.',
       },
     ],
-    impact: {  kospi: 0.08, sp500: 0.06, enter: 0.08, air: 0.09, oceanair: 0.1, neo: 0.05, realty: 0.05, bank: 0.04, riverbank: 0.04, usBond: -0.05, argBond: -0.04, goldFut: -0.03, medi: 0.04, eco: 0.05, food: 0.03, purefood: 0.03, oil: 0.04 },
+    impact: { kospi: 0.08, sp500: 0.06, enter: 0.08, air: 0.09, oceanair: 0.1, neo: 0.05, realty: 0.05, bank: 0.04, riverbank: 0.04, usBond: -0.05, argBond: -0.04, goldFut: -0.03 },
   },
   {
     id: 'recession-risk',
@@ -665,7 +665,7 @@ const scenarioEvents = [
         failureDetail: '일부 업종에 국한된 조정으로 확인되며 전체 경기 영향은 작게 평가됐습니다.',
       },
     ],
-    impact: {  kospi: -0.09, sp500: -0.07, enter: -0.08, air: -0.12, oceanair: -0.13, neo: -0.06, realty: -0.06, infra: -0.06, metroinfra: -0.07, usBond: 0.08, food: 0.03, purefood: 0.04, goldFut: 0.08, medi: 0.02, eco: -0.06, oil: -0.05 },
+    impact: { kospi: -0.09, sp500: -0.07, enter: -0.08, air: -0.12, oceanair: -0.13, neo: -0.06, realty: -0.06, infra: -0.06, metroinfra: -0.07, usBond: 0.08, food: 0.03, purefood: 0.04, goldFut: 0.08 },
   },
   {
     id: 'jobs-improve',
@@ -689,7 +689,7 @@ const scenarioEvents = [
         failureDetail: '계절 채용 영향이 컸다는 분석이 나오며 기대감이 약해졌습니다.',
       },
     ],
-    impact: {  enter: 0.08, air: 0.1, oceanair: 0.09, bank: 0.05, riverbank: 0.04, realty: 0.04, kospi: 0.05, sp500: 0.03, food: 0.03, purefood: 0.03, medi: 0.05, eco: 0.04, oil: 0.02 },
+    impact: { enter: 0.08, air: 0.1, oceanair: 0.09, bank: 0.05, riverbank: 0.04, realty: 0.04, kospi: 0.05, sp500: 0.03, food: 0.03, purefood: 0.03 },
   },
   {
     id: 'unemployment-worse',
@@ -713,7 +713,7 @@ const scenarioEvents = [
         failureDetail: '서비스업과 공공부문 채용이 유지되며 전체 고용 충격은 제한됐습니다.',
       },
     ],
-    impact: {  enter: -0.1, air: -0.12, oceanair: -0.14, bank: -0.06, riverbank: -0.07, realty: -0.06, kospi: -0.06, sp500: -0.04, usBond: 0.07, argBond: -0.05, medi: 0.02, eco: -0.04, food: -0.04, purefood: -0.05, oil: -0.04 },
+    impact: { enter: -0.1, air: -0.12, oceanair: -0.14, bank: -0.06, riverbank: -0.07, realty: -0.06, kospi: -0.06, sp500: -0.04, usBond: 0.07, argBond: -0.05 },
   },
   {
     id: 'inflation-cool',
@@ -761,7 +761,7 @@ const scenarioEvents = [
         failureDetail: '재고와 공급 계약 안정으로 가격 상승 압력이 빠르게 낮아졌습니다.',
       },
     ],
-    impact: {  core: -0.08, dogemars: -0.1, neo: -0.07, sp500: -0.06, kospi: -0.05, usBond: -0.09, argBond: -0.05, oilFut: 0.08, grainFut: 0.08, bank: 0.04, riverbank: 0.04, air: -0.07, oceanair: -0.08, food: -0.05, purefood: -0.04, medi: -0.03, eco: 0.04, oil: 0.06 },
+    impact: { core: -0.08, dogemars: -0.1, neo: -0.07, sp500: -0.06, kospi: -0.05, usBond: -0.09, argBond: -0.05, oilFut: 0.08, grainFut: 0.08, bank: 0.04, riverbank: 0.04, air: -0.07, oceanair: -0.08, food: -0.05, purefood: -0.04 },
   },
   {
     id: 'fx-stabilize',
@@ -907,7 +907,7 @@ const scenarioEvents = [
         failureDetail: '환율과 물류비 부담이 커지며 수출 증가의 긍정 효과가 약해졌습니다.',
       },
     ],
-    impact: {  kospi: 0.09, core: 0.06, neo: 0.03, dogemars: 0.02, bank: 0.02, riverbank: 0.02, oil: 0.04, food: 0.03, purefood: 0.03, eco: 0.04 },
+    impact: { kospi: 0.09, core: 0.06, neo: 0.03, dogemars: 0.02, bank: 0.02, riverbank: 0.02 },
   },
   {
     id: 'rare',
@@ -1121,7 +1121,7 @@ const scenarioEvents = [
         failureDetail: '일시적 통계 요인이 컸다는 분석이 나오며 공급 부족 우려가 약해졌습니다.',
       },
     ],
-    impact: {  oilFut: 0.18, oil: 0.1, air: -0.12, oceanair: -0.15, food: -0.04, purefood: -0.03, grainFut: 0.03, usBond: 0.02, eco: 0.05, medi: -0.02 },
+    impact: { oilFut: 0.18, oil: 0.1, air: -0.12, oceanair: -0.15, food: -0.04, purefood: -0.03, grainFut: 0.03, usBond: 0.02 },
   },
   {
     id: 'oil-supply-relief',
@@ -1151,7 +1151,7 @@ const scenarioEvents = [
         failureDetail: '일부 항로 불안이 다시 부각되며 공급 안정 기대가 이어지지 못했습니다.',
       },
     ],
-    impact: {  oilFut: -0.18, oil: -0.1, air: 0.12, oceanair: 0.15, food: 0.04, purefood: 0.04, usBond: -0.02, grainFut: -0.03, eco: -0.03 },
+    impact: { oilFut: -0.18, oil: -0.1, air: 0.12, oceanair: 0.15, food: 0.04, purefood: 0.04, usBond: -0.02, grainFut: -0.03 },
   },
   {
     id: 'grain-shock',
@@ -1242,7 +1242,7 @@ const scenarioEvents = [
       },
     ],
     baseRateDelta: 0.3,
-    impact: {  usBond: -0.12, sp500: -0.06, core: -0.07, dogemars: -0.11, enter: -0.05, argBond: -0.08, bank: 0.04, riverbank: 0.03, medi: -0.04, eco: -0.03 },
+    impact: { usBond: -0.12, sp500: -0.06, core: -0.07, dogemars: -0.11, enter: -0.05, argBond: -0.08, bank: 0.04, riverbank: 0.03 },
   },
   {
     id: 'us-yield-cooldown',
@@ -1676,10 +1676,7 @@ function getHoldingSummary(portfolio, assets) {
     : '보유 종목 없음';
 }
 
-// ▼ NEW (v2): 이슈 적중 종목은 인과 학습을 위해 PASSIVE 노이즈 감쇠
-const ISSUE_IMPACT_PASSIVE_DAMP = 0.6;
-
-function getPassiveMarketMove(asset, hasIssueImpact = false) {
+function getPassiveMarketMove(asset) {
   let mult = 1;
   if (asset?.type === 'stock') {
     if (asset.size === 'large') mult = PASSIVE_MOVE_LARGE_MULT;
@@ -1687,8 +1684,6 @@ function getPassiveMarketMove(asset, hasIssueImpact = false) {
   } else if (asset?.type === 'bond') mult = PASSIVE_MOVE_BOND_MULT;
   else if (asset?.type === 'forex') mult = PASSIVE_MOVE_FOREX_MULT;
   else if (asset?.type === 'futures' && asset.id === 'goldFut') mult = PASSIVE_MOVE_GOLD_MULT;
-  // 이슈 영향 받는 종목은 인과 가시성 ↑ 위해 노이즈 감쇠
-  if (hasIssueImpact) mult *= ISSUE_IMPACT_PASSIVE_DAMP;
   const raw = (Math.random() * 2 - 1) * PASSIVE_MARKET_MOVE * mult;
   return Number(raw.toFixed(3));
 }
@@ -1871,7 +1866,6 @@ function detectMacroTriggers(macroSnapshot, triggerCooldowns) {
   const fired = [];
   const nextCooldowns = { ...(triggerCooldowns ?? {}) };
   for (const trig of MACRO_TRIGGERS) {
-    if (fired.length >= MAX_TRIGGERS_PER_ROUND) break;  // ▼ NEW: 동시 발동 캡
     const onCooldown = (nextCooldowns[trig.id] ?? 0) > 0;
     if (!onCooldown && trig.when(macroSnapshot)) {
       fired.push(trig.id);
@@ -2149,9 +2143,7 @@ function moveAssetsLocally(currentAssets, modifier = {}, delistedIds = [], round
       };
     }
     const eventImpact = modifier[asset.id] ?? 0;
-    // 이슈 적중 여부(0이 아닌 영향이 있으면 노이즈 감쇠)
-    const hasImpact = Number.isFinite(eventImpact) && Math.abs(eventImpact) > 0.001;
-    const marketMove = getPassiveMarketMove(asset, hasImpact);
+    const marketMove = getPassiveMarketMove(asset);
     const nextPrice = Math.max(1000, Math.round((asset.price * (1 + marketMove + eventImpact)) / 100) * 100);
     return {
       ...asset,
@@ -3488,7 +3480,24 @@ function MacroGuide({ baseRate, depositRate, propertyIndex, exchangeRate, unempl
 }
 
 function AssetLearningPanel({ asset }) {
-  const profile = getAssetProfile(asset);
+  if (!asset) return null;
+  let profile;
+  try {
+    profile = getAssetProfile(asset);
+  } catch (err) {
+    return (
+      <section className="asset-learning-panel" aria-label="자산 분석">
+        <p style={{ padding: '12px', color: '#64748b', fontSize: '13px' }}>자산 정보를 불러올 수 없습니다.</p>
+      </section>
+    );
+  }
+  if (!profile || !profile.signals) {
+    return (
+      <section className="asset-learning-panel" aria-label="자산 분석">
+        <p style={{ padding: '12px', color: '#64748b', fontSize: '13px' }}>자산 정보를 불러올 수 없습니다.</p>
+      </section>
+    );
+  }
   const signalEntries = [
     ['안정성', profile.signals.stability],
     ['성장성', profile.signals.growth],
@@ -4476,7 +4485,7 @@ function StudentView({
         <div className="mobile-notch" />
         <header className="mobile-header">
           <div>
-            <span>Round {round} · {getQuarterLabel(round)} · {phaseLabels[phase]}</span>
+            <span>Round {round} · {phaseLabels[phase]}</span>
             <strong>{getStudentDisplayName(studentNumber, nickname)}</strong>
           </div>
           <div className="pin-badge">{roomPin}</div>
@@ -4623,12 +4632,16 @@ function StudentView({
             <p>같은 총 납입금이라도 한 번에 맡기는 정기예금이 더 많은 이자를 받습니다. 직접 비교해 보세요.</p>
           </header>
           {(() => {
-            const totalAmount = 6_000_000;
-            const rounds = 6;
-            const sim = simulateSavingsComparison(totalAmount, rounds, getDepositRate(baseRate) + 0.6);
-            const maxInterest = Math.max(sim.timeDepositInterest, sim.recurringInterest, 1);
-            const tdBarWidth = (sim.timeDepositInterest / maxInterest) * 100;
-            const raBarWidth = (sim.recurringInterest / maxInterest) * 100;
+            try {
+              const totalAmount = 6_000_000;
+              const rounds = 6;
+              const safeRate = Number.isFinite(baseRate) ? baseRate : 3.0;
+              const sim = simulateSavingsComparison(totalAmount, rounds, getDepositRate(safeRate) + 0.6);
+              const tdInterest = Number.isFinite(sim.timeDepositInterest) ? sim.timeDepositInterest : 0;
+              const raInterest = Number.isFinite(sim.recurringInterest) ? sim.recurringInterest : 0;
+              const maxInterest = Math.max(tdInterest, raInterest, 1);
+              const tdBarWidth = (tdInterest / maxInterest) * 100;
+              const raBarWidth = (raInterest / maxInterest) * 100;
             return (
               <div className="savings-compare-grid">
                 <div className="compare-row">
@@ -4656,6 +4669,13 @@ function StudentView({
                 </p>
               </div>
             );
+            } catch (err) {
+              return (
+                <p style={{ padding: '12px', color: '#64748b', fontSize: '13px' }}>
+                  비교 학습 정보를 불러올 수 없습니다.
+                </p>
+              );
+            }
           })()}
         </section>
 
