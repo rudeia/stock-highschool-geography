@@ -11,8 +11,10 @@ create table if not exists public.rooms (
   game_started boolean not null default false,
   final_reports_downloaded boolean not null default false,
   base_rate numeric(5, 2) not null default 3.5,
+  property_index bigint not null default 250000,
   exchange_rate integer not null default 1350,
   unemployment_rate numeric(5, 2) not null default 3.5,
+  open_macro_context jsonb not null default '{}'::jsonb,
   is_paused boolean not null default false,
   created_at timestamptz not null default now(),
   expires_at timestamptz not null default now() + interval '24 hours',
@@ -23,6 +25,8 @@ alter table public.rooms add column if not exists host_id text not null default 
 alter table public.rooms add column if not exists total_rounds integer not null default 12 check (total_rounds in (4, 12));
 alter table public.rooms add column if not exists exchange_rate integer not null default 1350;
 alter table public.rooms add column if not exists unemployment_rate numeric(5, 2) not null default 3.5;
+alter table public.rooms add column if not exists property_index bigint not null default 250000;
+alter table public.rooms add column if not exists open_macro_context jsonb not null default '{}'::jsonb;
 alter table public.rooms add column if not exists mode text not null default 'individual';
 alter table public.rooms add column if not exists game_started boolean not null default false;
 alter table public.rooms add column if not exists final_reports_downloaded boolean not null default false;

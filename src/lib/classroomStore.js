@@ -16,6 +16,7 @@ export function buildNewRoomState({
   pin,
   now,
   initialBaseRate,
+  initialPropertyIndex,
   assets,
   players,
   initialCash,
@@ -29,6 +30,7 @@ export function buildNewRoomState({
     phase: 'setup',
     isPaused: false,
     baseRate: initialBaseRate,
+    propertyIndex: initialPropertyIndex,
     assets,
     triggeredEventsByRound: {},
     latestRoundSummary: null,
@@ -78,13 +80,14 @@ export function buildTradeLog({ round, type, detail, sequence, now }) {
   };
 }
 
-export function buildRoundLog({ round, now, totalAsset, holdings, events }) {
+export function buildRoundLog({ round, now, totalAsset, holdings, events, ...extra }) {
   return {
     id: `${round}-${now}`,
     round,
     totalAsset,
     holdings,
     events,
+    ...extra,
   };
 }
 

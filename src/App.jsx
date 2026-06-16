@@ -208,6 +208,18 @@ function createRandomizedAssets() {
   });
 }
 
+function getInitialPropertyIndexFromAssets(assets) {
+  return assets.find((asset) => asset.type === 'property')?.price ?? 250_000;
+}
+
+function createInitialAssetBundle() {
+  const assets = createRandomizedAssets();
+  return {
+    assets,
+    propertyIndex: getInitialPropertyIndexFromAssets(assets),
+  };
+}
+
 const assetTypeLabels = {
   stock: '주식',
   etf: 'ETF',
@@ -780,6 +792,29 @@ const scenarioEvents = [
     impact: { realty: 0.12, infra: 0.05, metroinfra: 0.08, bank: 0.03, riverbank: 0.03, kospi: 0.02 },
   },
   {
+    id: 'property-tighten',
+    title: '부동산 규제 강화',
+    detail: '가계부채와 집값 불안을 잡기 위해 대출 규제와 세금 부담을 다시 높이는 방안이 부각됐습니다.',
+    principle: '부동산을 사기 어려워지면 거래와 개발 기대가 약해지고, 건설사와 은행의 관련 수익 기대도 함께 줄 수 있습니다.',
+    affectedAssets: ['부동산 하락 압력', '건설/인프라 부담 가능성', '은행 대출 성장 둔화', '국내 지수 일부 부담'],
+    discussionPrompt: '부동산 규제 강화가 집값뿐 아니라 건설회사와 은행에도 영향을 줄 수 있는 이유는 무엇일까요?',
+    issueOptions: [
+      {
+        title: '정부, 주택담보대출 규제 강화 검토',
+        detail: '가계부채 관리 차원에서 대출 한도와 심사 기준을 강화하는 방안이 논의되고 있습니다.',
+        failureTitle: '대출 규제 강화안 보류',
+        failureDetail: '경기 둔화 우려가 커지며 대출 규제 강화 결정이 미뤄졌습니다.',
+      },
+      {
+        title: '부동산 세제 강화 논의',
+        detail: '투기 수요를 억제하기 위한 보유세·거래세 강화 논의가 부동산 심리를 위축시켰습니다.',
+        failureTitle: '세제 강화안 후퇴',
+        failureDetail: '정책 부담 우려로 세제 강화안이 축소되며 시장 충격이 줄었습니다.',
+      },
+    ],
+    impact: { realty: -0.13, infra: -0.06, metroinfra: -0.08, bank: -0.04, riverbank: -0.04, kospi: -0.03 },
+  },
+  {
     id: 'us-rally',
     title: '미국 증시 강세',
     detail: '빅테크 실적 호조로 미국 대표지수가 상승했습니다.',
@@ -878,6 +913,29 @@ const scenarioEvents = [
     impact: { infra: 0.16, metroinfra: 0.18, realty: 0.06, core: 0.05, dogemars: 0.04, bank: 0.03, riverbank: 0.02, eco: 0.02 },
   },
   {
+    id: 'green-subsidy',
+    title: '친환경 보조금 확대',
+    detail: '정부와 주요국이 재생에너지와 전기차 전환 지원을 늘릴 수 있다는 기대가 커졌습니다.',
+    principle: '친환경 지원이 늘면 관련 설비와 소재 수요 기대가 높아지고, 화석연료 의존 산업에는 상대적인 부담이 생길 수 있습니다.',
+    affectedAssets: ['재생에너지 상승 압력', '전기차 상승 압력', '원유 관련주 부담 가능성', '국내 지수 일부 상승'],
+    discussionPrompt: '정책 지원만으로도 아직 실적이 나오지 않은 산업의 주가가 먼저 움직일 수 있는 이유는 무엇일까요?',
+    issueOptions: [
+      {
+        title: '재생에너지 설비 보조금 확대 검토',
+        detail: '태양광, 풍력, ESS 설비 지원 확대 가능성이 제기되며 친환경 관련주 기대가 커졌습니다.',
+        failureTitle: '보조금 확대안 재검토',
+        failureDetail: '재정 부담 우려가 커지며 친환경 지원 확대 논의가 속도를 내지 못했습니다.',
+      },
+      {
+        title: '전기차 전환 세제 혜택 논의',
+        detail: '전기차와 배터리 산업 지원을 위한 세제 혜택 확대 논의가 부각됐습니다.',
+        failureTitle: '세제 혜택 확대 지연',
+        failureDetail: '정책 협의가 길어지며 전기차 지원 기대가 시장에 크게 이어지지 못했습니다.',
+      },
+    ],
+    impact: { eco: 0.14, neo: 0.06, dogemars: 0.03, kospi: 0.03, oil: -0.06, oilFut: -0.08 },
+  },
+  {
     id: 'us-regulation',
     title: '미국 기술 규제 강화',
     detail: '미국 정부가 대형 기술 기업에 대한 규제를 강화할 수 있다는 소식이 나왔습니다.',
@@ -899,6 +957,52 @@ const scenarioEvents = [
       },
     ],
     impact: { core: -0.1, dogemars: -0.13, enter: -0.08, medi: -0.07, sp500: -0.05, kospi: 0.01 },
+  },
+  {
+    id: 'drug-breakthrough',
+    title: '신약 승인 기대',
+    detail: '바이오 기업의 임상 결과와 신약 승인 가능성이 부각되며 헬스케어 업종 기대가 커졌습니다.',
+    principle: '헬스케어 기업은 생산설비보다 임상 성공과 승인 여부가 미래 매출 기대를 크게 좌우할 수 있습니다.',
+    affectedAssets: ['헬스케어 상승 압력', '성장주 심리 개선 가능성', '국내 지수 일부 상승'],
+    discussionPrompt: '바이오 기업은 현재 매출보다 미래 승인 가능성이 더 크게 가격에 반영될 수 있는 이유가 무엇일까요?',
+    issueOptions: [
+      {
+        title: '신약 3상 결과 기대 확대',
+        detail: '주요 치료제의 임상 3상 결과 발표를 앞두고 시장 기대가 빠르게 커졌습니다.',
+        failureTitle: '임상 기대감 과열 진정',
+        failureDetail: '세부 일정과 결과 불확실성이 부각되며 기대감이 가격에 크게 반영되지 못했습니다.',
+      },
+      {
+        title: '해외 보건당국 승인 심사 진전',
+        detail: '핵심 신약 후보의 승인 심사가 진전되고 있다는 소식이 전해졌습니다.',
+        failureTitle: '승인 심사 진전 확인 지연',
+        failureDetail: '추가 자료 요청 가능성이 제기되며 승인 기대가 다소 약해졌습니다.',
+      },
+    ],
+    impact: { medi: 0.16, kospi: 0.02, sp500: 0.01 },
+  },
+  {
+    id: 'drug-setback',
+    title: '임상 실패 우려',
+    detail: '핵심 신약 후보의 임상 지연과 약가 규제 우려가 겹치며 헬스케어 업종 변동성이 커졌습니다.',
+    principle: '바이오 기업은 임상 실패나 약가 부담이 생기면 미래 매출 기대가 빠르게 낮아질 수 있습니다.',
+    affectedAssets: ['헬스케어 하락 압력', '성장주 변동성 확대 가능성', '국내 지수 일부 부담'],
+    discussionPrompt: '바이오 기업은 왜 단일 임상 결과 하나로도 가격 변동 폭이 커질 수 있을까요?',
+    issueOptions: [
+      {
+        title: '주요 임상 일정 지연',
+        detail: '핵심 치료제의 임상 결과 발표가 늦어질 수 있다는 공시가 나오며 불안이 커졌습니다.',
+        failureTitle: '임상 일정 지연 우려 완화',
+        failureDetail: '회사 측이 일정 차질이 크지 않다고 설명하며 시장 충격이 줄었습니다.',
+      },
+      {
+        title: '약가 인하 압박 부각',
+        detail: '보건당국의 약가 통제 강화 가능성이 부각되며 헬스케어 수익성 우려가 커졌습니다.',
+        failureTitle: '약가 인하 압박 완화',
+        failureDetail: '정책 논의가 장기 과제로 밀리며 단기 부담은 제한됐습니다.',
+      },
+    ],
+    impact: { medi: -0.16, kospi: -0.02, sp500: -0.01 },
   },
   {
     id: 'fx-spike',
@@ -977,6 +1081,36 @@ const scenarioEvents = [
     impact: { oilFut: 0.18, oil: 0.1, air: -0.12, oceanair: -0.15, food: -0.04, purefood: -0.03, grainFut: 0.03, usBond: 0.02 },
   },
   {
+    id: 'oil-supply-relief',
+    title: '원유 공급 안정',
+    detail: '산유국 증산과 재고 증가 기대가 겹치며 원유 가격 부담이 완화될 수 있다는 전망이 나왔습니다.',
+    principle: '원유 공급이 안정되면 에너지 가격 부담이 줄고, 유류비 비중이 큰 산업은 비용 완화 기대를 받을 수 있습니다.',
+    affectedAssets: ['원유 선물 하락 압력', '정유/원자재 조정 가능성', '항공주 비용 부담 완화', '식품 원가 부담 완화'],
+    discussionPrompt: '유가가 안정되면 왜 항공과 식품처럼 비용 민감 업종이 상대적으로 좋아질 수 있을까요?',
+    financialLinks: ['원유 선물', '유류비', '원자재 의존도', '물가'],
+    issueOptions: [
+      {
+        title: '산유국 증산 가능성 부각',
+        detail: '주요 산유국이 생산량을 늘릴 수 있다는 보도가 나오며 유가 안정 기대가 커졌습니다.',
+        failureTitle: '증산 기대 약화',
+        failureDetail: '산유국이 실제 증산에는 신중한 태도를 보이며 공급 안정 기대가 줄었습니다.',
+      },
+      {
+        title: '원유 재고 예상보다 큰 폭 증가',
+        detail: '글로벌 원유 재고가 예상보다 빠르게 늘었다는 통계가 발표됐습니다.',
+        failureTitle: '원유 재고 증가 일시적 해석',
+        failureDetail: '단기 통계 왜곡이라는 분석이 나오며 유가 안정 기대가 약해졌습니다.',
+      },
+      {
+        title: '해상 운송 정상화 확인',
+        detail: '주요 항로 운송 차질 우려가 완화되며 원유 공급 불안이 줄었습니다.',
+        failureTitle: '운송 정상화 기대 후퇴',
+        failureDetail: '일부 항로 불안이 다시 부각되며 공급 안정 기대가 이어지지 못했습니다.',
+      },
+    ],
+    impact: { oilFut: -0.18, oil: -0.1, air: 0.12, oceanair: 0.15, food: 0.04, purefood: 0.04, usBond: -0.02, grainFut: -0.03 },
+  },
+  {
     id: 'grain-shock',
     title: '곡물 공급 충격',
     detail: '주요 곡물 생산 지역의 작황과 수출 정책이 흔들리며 식량 원자재 불확실성이 커졌습니다.',
@@ -1005,6 +1139,36 @@ const scenarioEvents = [
       },
     ],
     impact: { grainFut: 0.2, food: -0.11, purefood: -0.08, argBond: 0.04, usBond: 0.02, kospi: -0.02 },
+  },
+  {
+    id: 'grain-relief',
+    title: '곡물 공급 안정',
+    detail: '풍작 기대와 수출 제한 완화 가능성이 겹치며 식량 원자재 가격 부담이 낮아질 수 있다는 전망이 나왔습니다.',
+    principle: '곡물 공급이 안정되면 식품 기업의 원가 부담이 줄고, 물가 압력도 일부 완화될 수 있습니다.',
+    affectedAssets: ['곡물 선물 하락 압력', '식품 기업 원가 완화 가능성', '물가 부담 완화 가능성', '고위험 수출국 채권 변수 점검'],
+    discussionPrompt: '곡물 가격이 내려가면 식품 기업과 물가, 금리 기대에 어떤 변화가 생길 수 있을까요?',
+    financialLinks: ['곡물 선물', '식품 원가', '원자재 의존도', '물가'],
+    issueOptions: [
+      {
+        title: '주요 곡창지대 풍작 전망',
+        detail: '기상 여건이 개선되며 주요 곡물 생산량이 늘어날 것이라는 전망이 확산됐습니다.',
+        failureTitle: '풍작 전망 과도 평가',
+        failureDetail: '병해충과 지역별 기상 차이로 실제 수확량 증가 기대가 약해졌습니다.',
+      },
+      {
+        title: '곡물 수출 제한 완화 기대',
+        detail: '주요 수출국이 식량 안보 우려 완화에 따라 수출 제한을 완화할 수 있다는 보도가 나왔습니다.',
+        failureTitle: '수출 제한 완화 지연',
+        failureDetail: '국내 물가 우려가 남아 수출 제한 완화 논의가 미뤄졌습니다.',
+      },
+      {
+        title: '비료 가격 안정세 확인',
+        detail: '에너지 가격 안정과 공급 계약 확대로 비료 가격이 진정되고 있다는 분석이 나왔습니다.',
+        failureTitle: '비료 가격 안정세 제한적',
+        failureDetail: '물류비 부담이 남아 있어 생산비 완화 기대가 크게 이어지지 못했습니다.',
+      },
+    ],
+    impact: { grainFut: -0.18, food: 0.11, purefood: 0.09, usBond: 0.03, kospi: 0.02, argBond: -0.03 },
   },
   {
     id: 'us-yield-spike',
@@ -1038,6 +1202,37 @@ const scenarioEvents = [
     impact: { usBond: -0.12, sp500: -0.06, core: -0.07, dogemars: -0.11, enter: -0.05, argBond: -0.08, bank: 0.04, riverbank: 0.03 },
   },
   {
+    id: 'us-yield-cooldown',
+    title: '미국 국채시장 안정',
+    detail: '미국 물가 둔화와 재정 우려 완화가 겹치며 장기 국채금리가 안정되고 채권 가격 부담이 줄었습니다.',
+    principle: '장기 금리가 내려가면 채권 가격은 오를 수 있고, 미래 이익 기대가 큰 성장자산의 할인율 부담도 완화될 수 있습니다.',
+    affectedAssets: ['미국 국채 가격 상승 압력', '성장주 부담 완화 가능성', '고위험 채권 안정 가능성', '은행주 금리 기대 조정'],
+    discussionPrompt: '장기 금리가 안정되면 왜 채권과 성장주가 함께 안도할 수 있을까요?',
+    financialLinks: ['금리 민감도', '부채비율', '할인율', '안전자산'],
+    issueOptions: [
+      {
+        title: '미국 물가 지표 안정',
+        detail: '미국 물가 상승세가 예상보다 빠르게 둔화되며 장기 금리 부담이 줄었습니다.',
+        failureTitle: '물가 둔화 신호 재해석',
+        failureDetail: '세부 지표에서 끈질긴 물가 압력이 확인되며 채권시장 안도감이 약해졌습니다.',
+      },
+      {
+        title: '미국 재정 안정화 방안 발표',
+        detail: '재정 적자 관리 방안이 제시되며 국채시장 불안이 완화됐습니다.',
+        failureTitle: '재정 안정화 신뢰 부족',
+        failureDetail: '시장에서는 정책 실효성에 의문을 제기하며 장기 금리 안정이 이어지지 못했습니다.',
+      },
+      {
+        title: '연준 완화 가능성 재부각',
+        detail: '경기 둔화 신호가 나오며 연준이 긴축을 오래 끌지 않을 것이라는 기대가 커졌습니다.',
+        failureTitle: '연준 완화 기대 후퇴',
+        failureDetail: '연준 인사들의 매파적 발언으로 채권시장 안도감이 줄었습니다.',
+      },
+    ],
+    baseRateDelta: -0.2,
+    impact: { usBond: 0.14, sp500: 0.06, core: 0.07, dogemars: 0.1, enter: 0.04, argBond: 0.06, bank: -0.03, riverbank: -0.03 },
+  },
+  {
     id: 'em-credit-stress',
     title: '신흥국 신용위험 확대',
     detail: '저신용 국가의 채무 상환 능력에 대한 의심이 커지며 고위험 채권과 위험자산 변동성이 확대됐습니다.',
@@ -1066,6 +1261,36 @@ const scenarioEvents = [
       },
     ],
     impact: { argBond: -0.22, usBond: 0.08, sp500: -0.03, kospi: -0.04, bank: -0.03, riverbank: -0.03 },
+  },
+  {
+    id: 'em-credit-relief',
+    title: '신흥국 신용안정 기대',
+    detail: 'IMF 협상 진전과 재정 안정 신호가 겹치며 고위험 국가 채권에 대한 불안이 다소 완화됐습니다.',
+    principle: '신용위험이 완화되면 높은 이자를 받는 대신 감수해야 했던 손실 우려가 줄고, 위험자산 선호도 일부 회복될 수 있습니다.',
+    affectedAssets: ['고위험 신흥국 채권 반등 가능성', '미국 국채 선호 완화 가능성', '위험자산 심리 회복 가능성'],
+    discussionPrompt: '고위험 채권도 정책 신뢰가 회복되면 왜 가격이 반등할 수 있을까요?',
+    financialLinks: ['신용위험', '통화가치', '국가 부채', '안전자산 선호'],
+    issueOptions: [
+      {
+        title: '아르헨티나 IMF 협상 진전',
+        detail: '채무 조정과 지원 조건에 대한 합의 가능성이 높아지며 시장 불안이 완화됐습니다.',
+        failureTitle: 'IMF 협상 진전 보도 부인',
+        failureDetail: '핵심 조건 이견이 남아 있다는 보도가 나오며 신용안정 기대가 약해졌습니다.',
+      },
+      {
+        title: '신흥국 통화 안정 조치 효과',
+        detail: '외환시장 안정 조치와 자금 유입으로 일부 신흥국 통화가치 급락 우려가 진정됐습니다.',
+        failureTitle: '통화 안정 조치 효과 제한',
+        failureDetail: '달러 강세 압력이 이어지며 통화 안정 기대가 충분히 이어지지 못했습니다.',
+      },
+      {
+        title: '국가 신용등급 전망 상향',
+        detail: '국제 신용평가사가 재정 개선 가능성을 반영해 일부 신흥국의 전망을 높였습니다.',
+        failureTitle: '신용등급 전망 상향 보류',
+        failureDetail: '정치 불확실성이 남아 있어 등급 전망 조정이 보류됐습니다.',
+      },
+    ],
+    impact: { argBond: 0.2, usBond: -0.05, sp500: 0.03, kospi: 0.04, bank: 0.03, riverbank: 0.03 },
   },
   {
     id: 'war-risk',
@@ -1098,6 +1323,36 @@ const scenarioEvents = [
     impact: { oilFut: 0.18, oil: 0.12, air: -0.15, oceanair: -0.17, usBond: 0.08, sp500: -0.06, dogemars: -0.05, kospi: -0.05, grainFut: 0.06 },
   },
   {
+    id: 'peace-progress',
+    title: '지정학적 긴장 완화',
+    detail: '휴전 협상과 운송 정상화 기대가 겹치며 전쟁 관련 불안이 다소 누그러졌습니다.',
+    principle: '전쟁 위험이 줄면 공급망과 물류비 부담이 완화되고, 위험자산 투자심리도 회복될 수 있습니다.',
+    affectedAssets: ['항공주 부담 완화 가능성', '원유 선물 안정 가능성', '미국 국채 선호 완화 가능성', '글로벌 ETF 심리 회복'],
+    discussionPrompt: '전쟁 위험이 줄어들면 왜 항공, ETF, 원자재 가격이 함께 반응할 수 있을까요?',
+    financialLinks: ['안전자산 선호', '물류비', '유류비', '공급망'],
+    issueOptions: [
+      {
+        title: '휴전 협상 진전 보도',
+        detail: '분쟁 지역에서 휴전 협상이 진전되고 있다는 보도가 나오며 군사 충돌 우려가 낮아졌습니다.',
+        failureTitle: '휴전 협상 진전 보도 후퇴',
+        failureDetail: '핵심 쟁점에서 합의가 이뤄지지 않으며 긴장 완화 기대가 약해졌습니다.',
+      },
+      {
+        title: '주요 해상 운송로 정상화 기대',
+        detail: '국제 감시와 호위 강화로 해상 운송 차질 우려가 줄었습니다.',
+        failureTitle: '운송로 정상화 기대 제한',
+        failureDetail: '국지적 충돌 우려가 남아 있어 운송 정상화 기대가 충분히 이어지지 못했습니다.',
+      },
+      {
+        title: '에너지 안보 협력 발표',
+        detail: '각국이 전략 비축분 활용과 공급망 협력을 발표하며 시장 불안이 완화됐습니다.',
+        failureTitle: '에너지 안보 협력 실효성 논란',
+        failureDetail: '실제 공급 차질 우려가 남아 있어 시장 안도감이 제한됐습니다.',
+      },
+    ],
+    impact: { oilFut: -0.15, oil: -0.08, air: 0.14, oceanair: 0.16, usBond: -0.06, sp500: 0.06, dogemars: 0.05, kospi: 0.05, grainFut: -0.05 },
+  },
+  {
     id: 'election-risk',
     title: '정치 불확실성 확대',
     detail: '선거와 정책 갈등으로 규제, 세금, 재정 지출 방향이 불확실해졌습니다.',
@@ -1126,6 +1381,36 @@ const scenarioEvents = [
       },
     ],
     impact: { kospi: -0.08, bank: -0.06, riverbank: -0.05, infra: -0.06, metroinfra: -0.08, realty: -0.04, argBond: -0.08, usBond: 0.04 },
+  },
+  {
+    id: 'policy-stability',
+    title: '정책 불확실성 완화',
+    detail: '선거 이후 정책 방향이 비교적 명확해지고 재정·규제 계획이 정리되며 시장 불안이 줄었습니다.',
+    principle: '정책 방향이 분명해지면 기업은 투자 계획을 세우기 쉬워지고, 정책 민감 업종의 할인 요인도 줄 수 있습니다.',
+    affectedAssets: ['국내 지수 심리 회복', '은행·건설 정책 민감도 완화', '부동산 심리 안정 가능성', '신흥국 채권 불안 완화 가능성'],
+    discussionPrompt: '정치 불확실성이 줄어들면 실제 실적이 바로 바뀌지 않아도 왜 가격이 움직일 수 있을까요?',
+    financialLinks: ['정책 민감도', '규제 위험', '국가 부채', '환율'],
+    issueOptions: [
+      {
+        title: '선거 이후 정책 연속성 확인',
+        detail: '핵심 경제정책의 큰 방향이 유지될 것이라는 신호가 나오며 투자자들의 불안이 줄었습니다.',
+        failureTitle: '정책 연속성 신호 혼선',
+        failureDetail: '구체적 실행 계획이 부족하다는 평가로 시장 안도감이 오래가지 못했습니다.',
+      },
+      {
+        title: '기업 규제안 조정 발표',
+        detail: '시장과의 협의를 거쳐 기업 규제안이 완화 조정되며 성장 산업 부담 우려가 줄었습니다.',
+        failureTitle: '규제안 조정 효과 제한',
+        failureDetail: '정치권 이견이 남아 있어 규제 부담 완화 기대가 충분히 반영되지 못했습니다.',
+      },
+      {
+        title: '재정 계획 명확화',
+        detail: '정부가 지출 우선순위와 재정 관리 계획을 함께 제시하며 시장 신뢰가 회복됐습니다.',
+        failureTitle: '재정 계획 신뢰도 부족',
+        failureDetail: '실행 방안이 불분명하다는 평가로 시장 반응이 제한됐습니다.',
+      },
+    ],
+    impact: { kospi: 0.08, bank: 0.05, riverbank: 0.05, infra: 0.06, metroinfra: 0.08, realty: 0.05, argBond: 0.05, usBond: -0.04 },
   },
   {
     id: 'argentina-reform',
@@ -1326,19 +1611,29 @@ const eventMacroImpacts = {
   'fx-stabilize': { baseRateDelta: -0.05, propertyMove: 0.01, exchangeMove: -0.035, unemploymentDelta: -0.04 },
   'fx-volatility': { baseRateDelta: 0.05, propertyMove: -0.015, exchangeMove: 0.045, unemploymentDelta: 0.06 },
   'property-ease': { baseRateDelta: 0, propertyMove: 0.06, exchangeMove: 0, unemploymentDelta: -0.05 },
+  'property-tighten': { baseRateDelta: 0.05, propertyMove: -0.06, exchangeMove: 0.005, unemploymentDelta: 0.06 },
   'us-rally': { baseRateDelta: 0, propertyMove: 0.01, exchangeMove: -0.015, unemploymentDelta: -0.08 },
   'korea-export': { baseRateDelta: 0, propertyMove: 0.01, exchangeMove: -0.01, unemploymentDelta: -0.12 },
   rare: { baseRateDelta: 0, propertyMove: -0.01, exchangeMove: 0.02, unemploymentDelta: 0.05 },
   housing: { baseRateDelta: 0, propertyMove: 0.04, exchangeMove: 0, unemploymentDelta: -0.08 },
+  'green-subsidy': { baseRateDelta: -0.05, propertyMove: 0.01, exchangeMove: -0.005, unemploymentDelta: -0.04 },
   'us-regulation': { baseRateDelta: 0, propertyMove: -0.01, exchangeMove: 0.01, unemploymentDelta: 0.08 },
+  'drug-breakthrough': { baseRateDelta: 0, propertyMove: 0, exchangeMove: 0, unemploymentDelta: -0.03 },
+  'drug-setback': { baseRateDelta: 0, propertyMove: -0.005, exchangeMove: 0.005, unemploymentDelta: 0.03 },
   'fx-spike': { baseRateDelta: 0, propertyMove: -0.01, exchangeMove: 0.06, unemploymentDelta: 0.04 },
   'korea-us-chip-tension': { baseRateDelta: 0, propertyMove: -0.01, exchangeMove: 0.02, unemploymentDelta: 0.08 },
   'oil-supply-shock': { baseRateDelta: 0.1, propertyMove: -0.01, exchangeMove: 0.025, unemploymentDelta: 0.08 },
+  'oil-supply-relief': { baseRateDelta: -0.1, propertyMove: 0.01, exchangeMove: -0.02, unemploymentDelta: -0.06 },
   'grain-shock': { baseRateDelta: 0.1, propertyMove: -0.005, exchangeMove: 0.015, unemploymentDelta: 0.06 },
+  'grain-relief': { baseRateDelta: -0.08, propertyMove: 0.005, exchangeMove: -0.01, unemploymentDelta: -0.04 },
   'us-yield-spike': { baseRateDelta: 0.3, propertyMove: -0.03, exchangeMove: 0.03, unemploymentDelta: 0.1 },
+  'us-yield-cooldown': { baseRateDelta: -0.2, propertyMove: 0.025, exchangeMove: -0.025, unemploymentDelta: -0.06 },
   'em-credit-stress': { baseRateDelta: 0, propertyMove: -0.02, exchangeMove: 0.035, unemploymentDelta: 0.12 },
+  'em-credit-relief': { baseRateDelta: -0.05, propertyMove: 0.015, exchangeMove: -0.025, unemploymentDelta: -0.08 },
   'war-risk': { baseRateDelta: 0.1, propertyMove: -0.025, exchangeMove: 0.04, unemploymentDelta: 0.15 },
+  'peace-progress': { baseRateDelta: -0.08, propertyMove: 0.02, exchangeMove: -0.03, unemploymentDelta: -0.12 },
   'election-risk': { baseRateDelta: 0.05, propertyMove: -0.025, exchangeMove: 0.025, unemploymentDelta: 0.08 },
+  'policy-stability': { baseRateDelta: -0.02, propertyMove: 0.02, exchangeMove: -0.015, unemploymentDelta: -0.06 },
   'argentina-reform': { baseRateDelta: 0, propertyMove: -0.01, exchangeMove: 0.025, unemploymentDelta: 0.05 },
 };
 
@@ -1387,11 +1682,11 @@ function getRandomMacroDelta(max, decimals = 2) {
   return Number(((Math.random() * 2 - 1) * max).toFixed(decimals));
 }
 
-function createMacroMove({ baseRate, propertyIndex, exchangeRate, unemploymentRate, eventMacroImpact = {} }) {
-  const randomBaseRateDelta = getRandomMacroDelta(0.2, 2);
-  const randomPropertyMove = getRandomMacroDelta(0.03, 3);
-  const randomExchangeMove = getRandomMacroDelta(0.04, 3);
-  const randomUnemploymentDelta = getRandomMacroDelta(0.18, 2);
+function createMacroMove({ baseRate, propertyIndex, exchangeRate, unemploymentRate, eventMacroImpact = {}, randomMacroImpact = null }) {
+  const randomBaseRateDelta = randomMacroImpact?.baseRateDelta ?? getRandomMacroDelta(0.2, 2);
+  const randomPropertyMove = randomMacroImpact?.propertyMove ?? getRandomMacroDelta(0.03, 3);
+  const randomExchangeMove = randomMacroImpact?.exchangeMove ?? getRandomMacroDelta(0.04, 3);
+  const randomUnemploymentDelta = randomMacroImpact?.unemploymentDelta ?? getRandomMacroDelta(0.18, 2);
   const baseRateDelta = Number((randomBaseRateDelta + (eventMacroImpact.baseRateDelta ?? 0)).toFixed(2));
   const propertyMove = Number((randomPropertyMove + (eventMacroImpact.propertyMove ?? 0)).toFixed(3));
   const exchangeMove = Number((randomExchangeMove + (eventMacroImpact.exchangeMove ?? 0)).toFixed(3));
@@ -1649,19 +1944,29 @@ function getSimpleExplanation(event) {
     'fx-stabilize': '환율 안정 = 수입 비용과 금융시장 불안 완화',
     'fx-volatility': '환율 불안 = 수출입 손익과 외국인 자금 불확실성',
     'property-ease': '부동산 규제 완화 = 집이나 건물을 사기 쉬워짐',
+    'property-tighten': '부동산 규제 강화 = 대출과 거래 부담 증가',
     'us-rally': '미국 증시 강세 = 글로벌 투자 분위기 개선',
     'korea-export': '한국 수출 호조 = 국내 기업 실적 기대 증가',
     rare: '희토류 통제 = 핵심 원재료 공급 불안',
     housing: '인프라 예산 확대 = 정부가 관련 산업에 돈을 더 씀',
+    'green-subsidy': '친환경 보조금 확대 = 재생에너지 수요 기대 증가',
     'us-regulation': '미국 기술 규제 = 미국 기업 성장 부담',
+    'drug-breakthrough': '신약 승인 기대 = 미래 매출 가능성 확대',
+    'drug-setback': '임상 실패 우려 = 미래 매출 기대 약화',
     'fx-spike': '환율 급등 = 수출입 기업의 손익 변화',
     'korea-us-chip-tension': '국가 간 반도체 갈등 = 공급망 불확실성 증가',
     'oil-supply-shock': '산유국 감산 = 원유 공급 기대 변화',
+    'oil-supply-relief': '원유 공급 안정 = 에너지 비용 부담 완화 기대',
     'grain-shock': '곡물 공급 충격 = 식품 원가와 물가 불확실성 증가',
+    'grain-relief': '곡물 공급 안정 = 식품 원가 부담 완화 기대',
     'us-yield-spike': '미국 국채금리 급등 = 글로벌 돈값 상승',
+    'us-yield-cooldown': '미국 국채시장 안정 = 장기 금리 부담 완화',
     'em-credit-stress': '신흥국 신용위험 = 높은 이자 뒤의 상환 위험 부각',
+    'em-credit-relief': '신흥국 신용안정 = 상환 불안 일부 완화',
     'war-risk': '지정학적 긴장 = 공급망과 안전자산 선호 변화',
+    'peace-progress': '지정학 완화 = 물류와 위험자산 심리 회복',
     'election-risk': '정치 불확실성 = 정책 방향 예측 어려움',
+    'policy-stability': '정책 불확실성 완화 = 투자 계획 세우기 쉬워짐',
     'argentina-reform': '개혁안 충돌 = 국가 신용위험 확대',
   };
 
@@ -1682,19 +1987,29 @@ function getCausalChain(event) {
     'fx-stabilize': ['환율 변동성 완화', '수입 비용 부담 감소', '국내 투자심리 개선'],
     'fx-volatility': ['환율 변동성 확대', '수출입 손익 불확실', '항공·식품·신흥국 채권 부담'],
     'property-ease': ['규제 부담 감소', '거래 기대 증가', '부동산·건설주 선호'],
+    'property-tighten': ['대출·세금 부담 증가', '거래 기대 둔화', '부동산·건설주 부담'],
     'us-rally': ['미국 대형주 기대 증가', '글로벌 투자심리 개선', '미국 ETF 상승 압력'],
     'korea-export': ['수출 증가', '기업 매출 기대 증가', 'KOSPI·제조업 상승 압력'],
     rare: ['원재료 공급 불안', '생산 비용 증가', '제조업 하락 압력'],
     housing: ['정부 투자 확대', '수주 기대 증가', '인프라·부동산 상승 압력'],
+    'green-subsidy': ['정책 지원 확대 기대', '친환경 설비 수요 증가', '재생에너지·전기차 선호'],
     'us-regulation': ['미국 규제 강화', '비용·성장 부담', '미국 기술주 하락 압력'],
+    'drug-breakthrough': ['임상·승인 기대 확대', '미래 매출 기대 상승', '헬스케어 강세 가능성'],
+    'drug-setback': ['임상 차질·약가 우려', '미래 매출 기대 하락', '헬스케어 변동성 확대'],
     'fx-spike': ['달러 강세', '수출입 손익 변화', '업종별 주가 차별화'],
     'korea-us-chip-tension': ['정책 갈등', '수출·보조금 불확실', '반도체주 하락 압력'],
     'oil-supply-shock': ['원유 공급 우려', '에너지 비용 기대 변화', '유가 민감 산업 변동성 확대'],
+    'oil-supply-relief': ['원유 공급 안정 기대', '에너지 비용 부담 완화', '항공·식품 심리 개선'],
     'grain-shock': ['곡물 공급 우려', '식품 원가·물가 부담', '식량 민감 자산 변동성 확대'],
+    'grain-relief': ['곡물 공급 안정 기대', '식품 원가 완화', '물가 부담 일부 둔화'],
     'us-yield-spike': ['미국 금리 상승', '채권 가격·할인율 부담', '성장자산·고위험채 변동성 확대'],
+    'us-yield-cooldown': ['장기 금리 안정', '채권 가격 회복', '성장자산 할인율 부담 완화'],
     'em-credit-stress': ['상환 위험 부각', '위험자산 회피', '고위험 채권 부담·안전자산 선호'],
+    'em-credit-relief': ['상환 불안 완화', '위험자산 심리 회복', '고위험 채권 반등 가능성'],
     'war-risk': ['군사 긴장 확대', '원자재·물류 불안', '안전자산 선호와 위험자산 부담'],
+    'peace-progress': ['군사 긴장 완화', '물류·공급망 안정 기대', '위험자산 심리 회복'],
     'election-risk': ['정책 방향 불확실', '투자 심리 위축', '정책 민감 업종 변동성 확대'],
+    'policy-stability': ['정책 방향 명확화', '투자 계획 정상화', '정책 민감 업종 할인 완화'],
     'argentina-reform': ['재정 개혁 불확실', '통화·신용위험 확대', '고위험 국채 부담'],
   };
 
@@ -1715,15 +2030,29 @@ function getFinancialLinks(event) {
     'fx-stabilize': ['환율노출', '해외 비용', '수출비중', '달러 자산'],
     'fx-volatility': ['환율노출', '달러 부채', '수출비중', '해외 비용'],
     'property-ease': ['대출 의존도', '부동산 민감도', '수주 기대', '가계부채'],
+    'property-tighten': ['대출 의존도', '부동산 민감도', '수주 기대', '가계부채'],
     'us-rally': ['국가노출', '성장성', '기술주 비중', '환율노출'],
     'korea-export': ['수출비중', '환율노출', '제조업 경기', '매출 성장'],
     rare: ['원자재 의존도', '공급망', 'R&D 비중', '재고 부담'],
     housing: ['수주잔고', '부채비율', '원자재 의존도', '정책 민감도'],
+    'green-subsidy': ['정책 민감도', '설비 투자', '원자재 의존도', '미래 수요'],
     'us-regulation': ['국가노출', '규제 민감도', 'R&D 비중', '플랫폼 의존도'],
+    'drug-breakthrough': ['R&D 비중', '임상 일정', '현금보유', '승인 가능성'],
+    'drug-setback': ['R&D 비중', '임상 일정', '현금보유', '약가 규제'],
     'fx-spike': ['수출비중', '환율노출', '해외 비용', '달러 부채'],
     'korea-us-chip-tension': ['국가노출', '공급망', '수출규제', '반도체 의존도'],
+    'oil-supply-shock': ['원유 선물', '유류비', '원자재 의존도', '물가'],
+    'oil-supply-relief': ['원유 선물', '유류비', '원자재 의존도', '물가'],
+    'grain-shock': ['곡물 선물', '식품 원가', '원자재 의존도', '물가'],
+    'grain-relief': ['곡물 선물', '식품 원가', '원자재 의존도', '물가'],
+    'us-yield-spike': ['금리 민감도', '부채비율', '할인율', '안전자산'],
+    'us-yield-cooldown': ['금리 민감도', '부채비율', '할인율', '안전자산'],
+    'em-credit-stress': ['신용위험', '통화가치', '국가 부채', '안전자산 선호'],
+    'em-credit-relief': ['신용위험', '통화가치', '국가 부채', '안전자산 선호'],
     'war-risk': ['안전자산 선호', '물류비', '유류비', '공급망'],
+    'peace-progress': ['안전자산 선호', '물류비', '유류비', '공급망'],
     'election-risk': ['정책 민감도', '규제 위험', '국가 부채', '환율'],
+    'policy-stability': ['정책 민감도', '규제 위험', '국가 부채', '환율'],
     'argentina-reform': ['국가 신용등급', '통화가치', '재정적자', 'IMF 협상'],
   };
 
@@ -2119,6 +2448,17 @@ function buildFinalSubmissionReport({ nickname, mode = 'individual', teamKey = '
     roundLogs,
     reflection,
     submittedAt: Date.now(),
+  };
+}
+
+function buildRoundSummaryFromLog(log) {
+  if (!log?.eventAnalysis?.length) return null;
+
+  return {
+    round: log.round,
+    events: log.eventAnalysis,
+    macroMove: log.macroMove ?? null,
+    delistedAssets: log.delistedAssets ?? [],
   };
 }
 
@@ -2634,7 +2974,18 @@ function FinalReport({
   const holdingsValue = getPortfolioValue(portfolio, assets);
   const totalAsset = cash + deposit + holdingsValue;
   const returnRate = getInvestmentReturnRate(totalAsset, investedPrincipal);
-  const investorType = submission?.investorType ?? buildFinalSubmissionReport({ nickname, mode, teamName, cash, deposit, depositInterestEarned, investedPrincipal, portfolio, assets, tradeLogs, roundLogs, reflection }).investorType;
+  const reportRoundLogs = submission?.roundLogs?.length ? submission.roundLogs : roundLogs;
+  const investorType = submission?.investorType ?? buildFinalSubmissionReport({ nickname, mode, teamName, cash, deposit, depositInterestEarned, investedPrincipal, portfolio, assets, tradeLogs, roundLogs: reportRoundLogs, reflection }).investorType;
+  const sortedRoundLogs = useMemo(
+    () => [...reportRoundLogs].sort((a, b) => a.round - b.round),
+    [reportRoundLogs],
+  );
+  const [selectedRoundPreference, setSelectedRoundPreference] = useState(null);
+  const selectedRound = sortedRoundLogs.some((log) => log.round === selectedRoundPreference)
+    ? selectedRoundPreference
+    : (sortedRoundLogs.at(-1)?.round ?? null);
+  const selectedRoundLog = sortedRoundLogs.find((log) => log.round === selectedRound) ?? sortedRoundLogs.at(-1) ?? null;
+  const selectedRoundSummary = buildRoundSummaryFromLog(selectedRoundLog);
 
   return (
     <section className="final-report" aria-label="나의 투자 결과 보고서">
@@ -2707,15 +3058,34 @@ function FinalReport({
 
       <div className="report-section">
         <h3>라운드별 이벤트 분석</h3>
-        {roundLogs.length ? (
-          <div className="report-list">
-            {roundLogs.map((log) => (
-              <article key={log.id}>
-                <strong>{log.round}라운드 · {formatWon(log.totalAsset)}</strong>
-                <span>{log.events}</span>
-                <em>{log.holdings}</em>
-              </article>
-            ))}
+        {sortedRoundLogs.length ? (
+          <div className="round-analysis-panel">
+            <div className="round-selector" role="tablist" aria-label="라운드 선택">
+              {sortedRoundLogs.map((log) => (
+                <button
+                  key={log.id}
+                  className={log.round === selectedRound ? 'active' : ''}
+                  type="button"
+                  onClick={() => setSelectedRoundPreference(log.round)}
+                >
+                  {log.round}라운드
+                </button>
+              ))}
+            </div>
+            {selectedRoundLog ? (
+              <div className="round-analysis-card">
+                <div className="round-analysis-meta">
+                  <strong>{selectedRoundLog.round}라운드 · 총자산 {formatWon(selectedRoundLog.totalAsset)}</strong>
+                  <span>{selectedRoundLog.events}</span>
+                  <em>{selectedRoundLog.holdings}</em>
+                </div>
+                {selectedRoundSummary ? (
+                  <RoundExplanation summary={selectedRoundSummary} assets={assets} compact />
+                ) : (
+                  <p>이 라운드의 상세 이슈 분석 데이터는 아직 저장되지 않았습니다.</p>
+                )}
+              </div>
+            ) : null}
           </div>
         ) : (
           <p>라운드 마감 기록이 아직 없습니다.</p>
@@ -2785,13 +3155,13 @@ const macroGuideItems = {
   },
 };
 
-function MacroGuide({ baseRate, depositRate, propertyAsset, exchangeRate, unemploymentRate }) {
+function MacroGuide({ baseRate, depositRate, propertyIndex, exchangeRate, unemploymentRate }) {
   const [selectedGuide, setSelectedGuide] = useState('baseRate');
   const item = macroGuideItems[selectedGuide];
   const currentValue = {
     baseRate: `${baseRate.toFixed(1)}%`,
     depositRate: `${depositRate.toFixed(1)}%`,
-    propertyIndex: propertyAsset ? formatWon(propertyAsset.price) : '-',
+    propertyIndex: propertyIndex ? formatWon(propertyIndex) : '-',
     exchangeRate: `${exchangeRate.toLocaleString('ko-KR')}원`,
     unemploymentRate: `${unemploymentRate.toFixed(1)}%`,
   }[selectedGuide];
@@ -3020,18 +3390,18 @@ const eventCategoryLabels = {
   commodity: '원자재/식량',
   geopolitics: '전쟁/정치',
   bond: '채권/국가',
-  tech: '기술/수출',
+  tech: '기술/산업',
   property: '부동산/소비',
 };
 
 function getEventCategory(event) {
   if (['growth-boom', 'recession-risk', 'jobs-improve', 'unemployment-worse', 'inflation-cool', 'inflation-rebound', 'fx-stabilize', 'fx-volatility'].includes(event.id)) return 'macro';
   if (['rate-up', 'rate-down', 'deposit-special', 'fx-spike', 'us-yield-spike'].includes(event.id)) return 'rate';
-  if (['rare', 'oil-supply-shock', 'grain-shock'].includes(event.id)) return 'commodity';
-  if (['war-risk', 'election-risk'].includes(event.id)) return 'geopolitics';
-  if (['em-credit-stress', 'argentina-reform'].includes(event.id)) return 'bond';
-  if (['us-rally', 'korea-export', 'us-regulation', 'korea-us-chip-tension'].includes(event.id)) return 'tech';
-  if (['property-ease', 'housing'].includes(event.id)) return 'property';
+  if (['rare', 'oil-supply-shock', 'oil-supply-relief', 'grain-shock', 'grain-relief'].includes(event.id)) return 'commodity';
+  if (['war-risk', 'peace-progress', 'election-risk', 'policy-stability'].includes(event.id)) return 'geopolitics';
+  if (['us-yield-cooldown', 'em-credit-stress', 'em-credit-relief', 'argentina-reform'].includes(event.id)) return 'bond';
+  if (['us-rally', 'korea-export', 'green-subsidy', 'us-regulation', 'drug-breakthrough', 'drug-setback', 'korea-us-chip-tension'].includes(event.id)) return 'tech';
+  if (['property-ease', 'property-tighten', 'housing'].includes(event.id)) return 'property';
   return 'all';
 }
 
@@ -3043,32 +3413,68 @@ const eventPresetFilters = [
 ];
 
 const eventConflictGroups = [
-  { label: '금리 방향 충돌', eventIds: ['rate-up', 'rate-down'] },
-  { label: '경기 방향 충돌', eventIds: ['growth-boom', 'recession-risk'] },
-  { label: '고용 방향 충돌', eventIds: ['jobs-improve', 'unemployment-worse'] },
-  { label: '물가 방향 충돌', eventIds: ['inflation-cool', 'inflation-rebound'] },
-  { label: '환율 안정성과 불안 충돌', eventIds: ['fx-stabilize', 'fx-volatility', 'fx-spike'] },
-  { label: '부동산 완화와 금리 긴축 충돌', eventIds: ['property-ease', 'rate-up'] },
-  { label: '위험자산 선호와 위험 회피 충돌', eventIds: ['us-rally', 'war-risk', 'election-risk', 'us-regulation'] },
-  { label: '수출 호재와 공급망 갈등 충돌', eventIds: ['korea-export', 'korea-us-chip-tension'] },
+  { label: '금리 방향 충돌', sides: [['rate-up'], ['rate-down']] },
+  { label: '경기 방향 충돌', sides: [['growth-boom'], ['recession-risk']] },
+  { label: '고용 방향 충돌', sides: [['jobs-improve'], ['unemployment-worse']] },
+  { label: '물가 방향 충돌', sides: [['inflation-cool'], ['inflation-rebound']] },
+  { label: '환율 안정성과 불안 충돌', sides: [['fx-stabilize'], ['fx-volatility', 'fx-spike']] },
+  { label: '부동산 정책 방향 충돌', sides: [['property-ease'], ['property-tighten']] },
+  { label: '부동산 완화와 금리 긴축 충돌', sides: [['property-ease'], ['rate-up']] },
+  { label: '원유 공급 충격과 안정 충돌', sides: [['oil-supply-shock'], ['oil-supply-relief']] },
+  { label: '곡물 공급 충격과 안정 충돌', sides: [['grain-shock'], ['grain-relief']] },
+  { label: '미국 채권시장 불안과 안정 충돌', sides: [['us-yield-spike'], ['us-yield-cooldown']] },
+  { label: '신흥국 채권 불안과 안정 충돌', sides: [['em-credit-stress', 'argentina-reform'], ['em-credit-relief']] },
+  { label: '전쟁 위험과 긴장 완화 충돌', sides: [['war-risk'], ['peace-progress']] },
+  { label: '정치 불확실성과 정책 안정 충돌', sides: [['election-risk'], ['policy-stability']] },
+  { label: '바이오 기대와 차질 충돌', sides: [['drug-breakthrough'], ['drug-setback']] },
+  { label: '위험자산 선호와 위험 회피 충돌', sides: [['us-rally', 'peace-progress', 'policy-stability'], ['war-risk', 'election-risk', 'us-regulation']] },
+  { label: '수출 호재와 공급망 갈등 충돌', sides: [['korea-export'], ['korea-us-chip-tension']] },
 ];
 
 function getEventTemplateKey(event) {
   return event.templateId ?? event.id?.split('-')?.[0] ?? event.id;
 }
 
+function getConflictWeight(event) {
+  const impactValues = Object.values(event.impact ?? {}).map((value) => Math.abs(Number(value) || 0));
+  const averageImpact = impactValues.length ? impactValues.reduce((sum, value) => sum + value, 0) / impactValues.length : 0.06;
+  return Number(((event.probability ?? DEFAULT_EVENT_PROBABILITY) + averageImpact * 3).toFixed(3));
+}
+
 function getConflictOutcomeMap(events) {
   const outcome = {};
   eventConflictGroups.forEach((group) => {
-    const matched = events.filter((event) => group.eventIds.includes(getEventTemplateKey(event)));
-    if (matched.length < 2) return;
-    const winner = matched[Math.floor(Math.random() * matched.length)];
-    matched.forEach((event) => {
-      outcome[event.id] = {
-        didApply: event.id === winner.id,
-        label: group.label,
-        winnerTitle: winner.title,
-      };
+    const sides = group.sides
+      .map((eventIds) => events.filter((event) => eventIds.includes(getEventTemplateKey(event))))
+      .filter((matched) => matched.length);
+    if (sides.length < 2) return;
+
+    const rankedSides = sides
+      .map((matchedEvents, index) => ({
+        index,
+        matchedEvents,
+        score: matchedEvents.reduce((sum, event) => sum + getConflictWeight(event), 0),
+        eventCount: matchedEvents.length,
+        strongestWeight: Math.max(...matchedEvents.map(getConflictWeight)),
+      }))
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        if (b.eventCount !== a.eventCount) return b.eventCount - a.eventCount;
+        if (b.strongestWeight !== a.strongestWeight) return b.strongestWeight - a.strongestWeight;
+        return Math.random() - 0.5;
+      });
+
+    const winningSide = rankedSides[0];
+    const winnerTitle = winningSide.matchedEvents.map((event) => event.title).join(', ');
+
+    rankedSides.slice(1).forEach((side) => {
+      side.matchedEvents.forEach((event) => {
+        outcome[event.id] = {
+          blocked: true,
+          label: group.label,
+          winnerTitle,
+        };
+      });
     });
   });
   return outcome;
@@ -3259,6 +3665,7 @@ function HostView({
   rankingPlayers,
   newsFeed,
   baseRate,
+  propertyIndex,
   exchangeRate,
   unemploymentRate,
   activeStudent,
@@ -3303,7 +3710,6 @@ function HostView({
   onCloseSubmissions,
   onDownloadSubmissions,
 }) {
-  const propertyAsset = assets.find((asset) => asset.type === 'property');
   const eventLimitReached = currentRoundEvents.length >= MAX_EVENTS_PER_ROUND;
   const canRegisterIssue = gameStarted && phase === 'setup' && !eventLimitReached && !roomExpired;
   const [eventCategory, setEventCategory] = useState('all');
@@ -3463,7 +3869,7 @@ function HostView({
           <div>
             <Building2 size={20} aria-hidden="true" />
             <span>부동산지수</span>
-            <strong>{propertyAsset ? formatWon(propertyAsset.price) : '-'}</strong>
+            <strong>{formatWon(propertyIndex)}</strong>
           </div>
           <div>
             <Globe2 size={20} aria-hidden="true" />
@@ -3655,6 +4061,7 @@ function StudentView({
   depositInterestEarned,
   investedPrincipal,
   baseRate,
+  propertyIndex,
   exchangeRate,
   unemploymentRate,
   tradeLogs,
@@ -3704,7 +4111,6 @@ function StudentView({
   const selectedHoldingValue = selectedShares * selectedAsset.price;
   const depositRate = getDepositRate(baseRate);
   const nextInterest = deposit * (depositRate / 100 / 4);
-  const propertyAsset = assets.find((asset) => asset.type === 'property');
   const canTradeStocks = gameStarted && phase === 'open' && !gameFinished;
   const canMoveDeposit = gameStarted && !gameFinished;
   const teamMode = roomMode === 'team';
@@ -3887,7 +4293,7 @@ function StudentView({
 
         <PortfolioDonut cash={cash} deposit={deposit} portfolio={portfolio} assets={assets} />
 
-        <MacroGuide baseRate={baseRate} depositRate={depositRate} propertyAsset={propertyAsset} exchangeRate={exchangeRate} unemploymentRate={unemploymentRate} />
+        <MacroGuide baseRate={baseRate} depositRate={depositRate} propertyIndex={propertyIndex} exchangeRate={exchangeRate} unemploymentRate={unemploymentRate} />
 
         <section className="deposit-ticket" aria-labelledby="deposit-heading">
           <div>
@@ -3988,6 +4394,7 @@ function StudentView({
 }
 
 export function App() {
+  const [initialAssetBundle] = useState(createInitialAssetBundle);
   const [view, setView] = useState(getInitialView);
   const [studentEntryAllowed] = useState(getInitialStudentEntryAllowed);
   const [hostAuthenticated, setHostAuthenticated] = useState(false);
@@ -4004,9 +4411,11 @@ export function App() {
   const [gameStarted, setGameStarted] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [baseRate, setBaseRate] = useState(INITIAL_BASE_RATE);
+  const [propertyIndex, setPropertyIndex] = useState(initialAssetBundle.propertyIndex);
   const [exchangeRate, setExchangeRate] = useState(INITIAL_EXCHANGE_RATE);
   const [unemploymentRate, setUnemploymentRate] = useState(INITIAL_UNEMPLOYMENT_RATE);
-  const [assets, setAssets] = useState(() => createRandomizedAssets());
+  const [assets, setAssets] = useState(initialAssetBundle.assets);
+  const [openMacroContext, setOpenMacroContext] = useState(null);
   const [triggeredEventsByRound, setTriggeredEventsByRound] = useState({});
   const [latestRoundSummary, setLatestRoundSummary] = useState(null);
   const [issueDraft, setIssueDraft] = useState('');
@@ -4118,8 +4527,10 @@ export function App() {
     setFinalReportsDownloaded(Boolean(bundle.room.final_reports_downloaded));
     setIsPaused(bundle.room.is_paused);
     setBaseRate(Number(bundle.room.base_rate));
+    setPropertyIndex(Number(bundle.room.property_index ?? getInitialPropertyIndexFromAssets(bundle.assets)));
     setExchangeRate(Number(bundle.room.exchange_rate ?? INITIAL_EXCHANGE_RATE));
     setUnemploymentRate(Number(bundle.room.unemployment_rate ?? INITIAL_UNEMPLOYMENT_RATE));
+    setOpenMacroContext(bundle.room.open_macro_context && Object.keys(bundle.room.open_macro_context).length ? bundle.room.open_macro_context : null);
     if (bundle.assets.length) setAssets(bundle.assets);
     setTriggeredEventsByRound(groupedEvents);
     setLatestRoundSummary(resolvedCurrentEvents.length ? { round: remoteRound, events: resolvedCurrentEvents, delistedAssets: [] } : null);
@@ -4595,11 +5006,13 @@ export function App() {
     const selectedTotalRounds = totalRounds;
     const selectedRoomMode = roomMode;
     const nextAssets = createRandomizedAssets();
+    const nextPropertyIndex = getInitialPropertyIndexFromAssets(nextAssets);
     const nextTeams = createDefaultTeamAccounts();
     const nextRoom = buildNewRoomState({
       pin: nextPin,
       now,
       initialBaseRate: INITIAL_BASE_RATE,
+      initialPropertyIndex: nextPropertyIndex,
       assets: nextAssets,
       players: [],
       initialCash: 0,
@@ -4616,9 +5029,11 @@ export function App() {
     setGameStarted(false);
     setIsPaused(nextRoom.isPaused);
     setBaseRate(nextRoom.baseRate);
+    setPropertyIndex(nextRoom.propertyIndex);
     setExchangeRate(INITIAL_EXCHANGE_RATE);
     setUnemploymentRate(INITIAL_UNEMPLOYMENT_RATE);
     setAssets(nextRoom.assets);
+    setOpenMacroContext(null);
     setTriggeredEventsByRound(nextRoom.triggeredEventsByRound);
     setLatestRoundSummary(nextRoom.latestRoundSummary);
     setIssueDraft(nextRoom.issueDraft);
@@ -4662,6 +5077,7 @@ export function App() {
         hostId: hostId || 'geography',
         totalRounds: selectedTotalRounds,
         baseRate: INITIAL_BASE_RATE,
+        propertyIndex: nextPropertyIndex,
         exchangeRate: INITIAL_EXCHANGE_RATE,
         unemploymentRate: INITIAL_UNEMPLOYMENT_RATE,
         assets: nextAssets,
@@ -4777,11 +5193,37 @@ export function App() {
       returnRate: getInvestmentReturnRate((player.totalAsset ?? INITIAL_CASH) + ROUND_SALARY, nextPrincipal),
     }));
     const salariedTeams = payTeamRoundSalary(teamAccounts, players);
+    const previewConflictOutcomeMap = getConflictOutcomeMap(publishedEvents);
+    const previewMacroImpact = combineEventMacroImpacts(
+      publishedEvents
+        .filter((event) => !previewConflictOutcomeMap[event.id]?.blocked)
+        .map((event) => ({ ...event, didApply: true })),
+    );
+    const previewMacroMove = createMacroMove({
+      baseRate,
+      propertyIndex,
+      exchangeRate,
+      unemploymentRate,
+      eventMacroImpact: previewMacroImpact,
+    });
+    const nextOpenMacroContext = {
+      round,
+      startBaseRate: baseRate,
+      startPropertyIndex: propertyIndex,
+      startExchangeRate: exchangeRate,
+      startUnemploymentRate: unemploymentRate,
+      randomMacroImpact: previewMacroMove.randomMacroImpact,
+    };
     setTriggeredEventsByRound((current) => ({
       ...current,
       [round]: publishedEvents,
     }));
     setStartIssueChoiceOpen(false);
+    setBaseRate(previewMacroMove.nextBaseRate);
+    setPropertyIndex(previewMacroMove.nextPropertyIndex);
+    setExchangeRate(previewMacroMove.nextExchangeRate);
+    setUnemploymentRate(previewMacroMove.nextUnemploymentRate);
+    setOpenMacroContext(nextOpenMacroContext);
     if (teamMode) {
       setTeamAccounts(salariedTeams);
     } else {
@@ -4789,13 +5231,20 @@ export function App() {
     }
     setPhase('open');
     const startNewsDetail = publishedEvents.length
-      ? `${publishedEvents.length}개 이슈가 공개되었습니다. 생활 소득 ${formatWon(ROUND_SALARY)}이 지급됩니다.`
-      : `선택 이슈 없이 장이 시작되었습니다. 생활 소득 ${formatWon(ROUND_SALARY)}과 기본 시장 변동만 반영됩니다.`;
+      ? `${publishedEvents.length}개 이슈가 공개되었습니다. 생활 소득 ${formatWon(ROUND_SALARY)}이 지급되고 거시 지표가 먼저 움직였습니다.`
+      : `선택 이슈 없이 장이 시작되었습니다. 생활 소득 ${formatWon(ROUND_SALARY)}과 기본 거시 변수만 먼저 반영됩니다.`;
     pushNews(`${round}라운드 장 시작`, startNewsDetail);
     if (remoteRoomId) {
       try {
         const remoteUpdates = [
-          updateRemoteRoom(remoteRoomId, { phase: 'open' }),
+          updateRemoteRoom(remoteRoomId, {
+            phase: 'open',
+            base_rate: previewMacroMove.nextBaseRate,
+            property_index: previewMacroMove.nextPropertyIndex,
+            exchange_rate: previewMacroMove.nextExchangeRate,
+            unemployment_rate: previewMacroMove.nextUnemploymentRate,
+            open_macro_context: nextOpenMacroContext,
+          }),
         ];
         if (startMode === 'random') {
           remoteUpdates.push(...publishedEvents.map((event) => insertRemoteIssue(remoteRoomId, event, round)));
@@ -4821,7 +5270,7 @@ export function App() {
     const conflictOutcomeMap = getConflictOutcomeMap(eventsForResolution);
     const initialResolvedEvents = eventsForResolution.map((event) => {
       const conflictOutcome = conflictOutcomeMap[event.id];
-      const didApply = conflictOutcome ? conflictOutcome.didApply : Math.random() < (event.probability ?? DEFAULT_EVENT_PROBABILITY);
+      const didApply = conflictOutcome?.blocked ? false : Math.random() < (event.probability ?? DEFAULT_EVENT_PROBABILITY);
       const outcomeType = didApply
         ? (Math.random() < EXPECTATION_WITHIN_SUCCESS_PROBABILITY ? 'expectation' : 'event')
         : 'failed';
@@ -4859,13 +5308,23 @@ export function App() {
 
     const eventImpact = combineResolvedImpacts(resolvedEvents);
     const eventMacroImpact = combineEventMacroImpacts(resolvedEvents);
-    const propertyAsset = assets.find((asset) => asset.type === 'property');
+    const macroBaseline = openMacroContext?.round === round
+      ? openMacroContext
+      : {
+          round,
+          startBaseRate: baseRate,
+          startPropertyIndex: propertyIndex,
+          startExchangeRate: exchangeRate,
+          startUnemploymentRate: unemploymentRate,
+          randomMacroImpact: null,
+        };
     const macroMove = createMacroMove({
-      baseRate,
-      propertyIndex: propertyAsset?.price ?? 250_000,
-      exchangeRate,
-      unemploymentRate,
+      baseRate: macroBaseline.startBaseRate,
+      propertyIndex: macroBaseline.startPropertyIndex,
+      exchangeRate: macroBaseline.startExchangeRate,
+      unemploymentRate: macroBaseline.startUnemploymentRate,
       eventMacroImpact,
+      randomMacroImpact: macroBaseline.randomMacroImpact,
     });
     const nextBaseRate = macroMove.nextBaseRate;
     const financialImpact = getFinancialImpactMap(assets, macroMove, resolvedEvents);
@@ -4888,8 +5347,10 @@ export function App() {
     );
 
     setBaseRate(nextBaseRate);
+    setPropertyIndex(macroMove.nextPropertyIndex);
     setExchangeRate(macroMove.nextExchangeRate);
     setUnemploymentRate(macroMove.nextUnemploymentRate);
+    setOpenMacroContext(null);
 
     const delistedAssets = round >= DELISTING_START_ROUND
       ? assets
@@ -4946,6 +5407,9 @@ export function App() {
         totalAsset: getTotalAsset({ cash: logCash, deposit: logDeposit, portfolio: logPortfolio, assets: nextAssets }),
         holdings: getHoldingSummary(logPortfolio, nextAssets),
         events: resolvedEvents.map((event) => `${event.title}: ${getResultLabel(event, false)}`).join(' / '),
+        eventAnalysis: resolvedEvents,
+        macroMove,
+        delistedAssets,
       }),
       ...current.filter((item) => item.round !== round),
     ].sort((a, b) => a.round - b.round));
@@ -4978,8 +5442,10 @@ export function App() {
           updateRemoteRoom(remoteRoomId, {
             phase: 'closed',
             base_rate: nextBaseRate,
+            property_index: macroMove.nextPropertyIndex,
             exchange_rate: macroMove.nextExchangeRate,
             unemployment_rate: macroMove.nextUnemploymentRate,
+            open_macro_context: {},
           }),
           upsertRemoteAssets(remoteRoomId, nextAssets),
           updateRemoteIssues(remoteRoomId, resolvedEvents, round),
@@ -5303,6 +5769,7 @@ export function App() {
           rankingPlayers={displayedPlayers}
           newsFeed={newsFeed}
           baseRate={baseRate}
+          propertyIndex={propertyIndex}
           exchangeRate={exchangeRate}
           unemploymentRate={unemploymentRate}
           activeStudent={activeStudent}
@@ -5375,6 +5842,7 @@ export function App() {
           depositInterestEarned={effectiveDepositInterestEarned}
           investedPrincipal={investedPrincipal}
           baseRate={baseRate}
+          propertyIndex={propertyIndex}
           exchangeRate={exchangeRate}
           unemploymentRate={unemploymentRate}
           tradeLogs={tradeLogs}

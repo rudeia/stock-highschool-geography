@@ -239,7 +239,7 @@ async function fetchRoomBundle(query) {
   };
 }
 
-export async function createRemoteRoom({ pin, now, hostId = 'geography', totalRounds = 12, baseRate, exchangeRate = 1350, unemploymentRate = 3.5, assets, mode = 'individual', teams = [] }) {
+export async function createRemoteRoom({ pin, now, hostId = 'geography', totalRounds = 12, baseRate, propertyIndex = 250000, exchangeRate = 1350, unemploymentRate = 3.5, assets, mode = 'individual', teams = [] }) {
   if (!supabaseConfigured) return null;
 
   const { data: existing } = await supabase.from('rooms').select('id').eq('pin', pin).maybeSingle();
@@ -259,8 +259,10 @@ export async function createRemoteRoom({ pin, now, hostId = 'geography', totalRo
       game_started: false,
       final_reports_downloaded: false,
       base_rate: baseRate,
+      property_index: propertyIndex,
       exchange_rate: exchangeRate,
       unemployment_rate: unemploymentRate,
+      open_macro_context: {},
       is_paused: false,
       created_at: toIso(now),
       expires_at: toIso(now + 24 * 60 * 60 * 1000),
