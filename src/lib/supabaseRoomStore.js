@@ -109,6 +109,48 @@ function fromPlayerRow(row) {
   };
 }
 
+function toStudentStateRow(roomId, state) {
+  return {
+    room_id: roomId,
+    student_number: Number(state.studentNumber),
+    nickname: state.nickname,
+    passcode_hash: state.passcodeHash ?? '',
+    team_key: state.teamKey ?? '',
+    cash: Math.round(state.cash ?? 0),
+    deposit: Math.round(state.deposit ?? 0),
+    deposit_principal: Math.round(state.depositPrincipal ?? 0),
+    deposit_interest_earned: Math.round(state.depositInterestEarned ?? 0),
+    portfolio: state.portfolio ?? {},
+    trade_logs: state.tradeLogs ?? [],
+    round_logs: state.roundLogs ?? [],
+    reflection: state.reflection ?? {},
+    salary_paid_rounds: state.salaryPaidRounds ?? [],
+    initial_capital_granted: Boolean(state.initialCapitalGranted),
+    updated_at: toIso(state.updatedAt ?? Date.now()),
+  };
+}
+
+function fromStudentStateRow(row) {
+  return {
+    id: row.id,
+    studentNumber: row.student_number ?? null,
+    nickname: row.nickname,
+    passcodeHash: row.passcode_hash ?? '',
+    teamKey: row.team_key ?? '',
+    cash: Number(row.cash ?? 0),
+    deposit: Number(row.deposit ?? 0),
+    depositPrincipal: Number(row.deposit_principal ?? 0),
+    depositInterestEarned: Number(row.deposit_interest_earned ?? 0),
+    portfolio: row.portfolio ?? {},
+    tradeLogs: row.trade_logs ?? [],
+    roundLogs: row.round_logs ?? [],
+    reflection: row.reflection ?? {},
+    salaryPaidRounds: row.salary_paid_rounds ?? [],
+    initialCapitalGranted: Boolean(row.initial_capital_granted),
+    updatedAt: row.updated_at ? new Date(row.updated_at).getTime() : 0,
+  };
+}
+
 function toTeamRow(roomId, team) {
   return {
     room_id: roomId,
@@ -147,6 +189,7 @@ function fromSubmissionRow(row) {
     mode: row.mode ?? 'individual',
     teamKey: row.team_key ?? '',
     teamName: row.team_name ?? '',
+    submissionMethod: row.submission_method ?? 'student',
     totalAsset: Number(row.total_asset ?? 0),
     cash: Number(row.cash ?? 0),
     deposit: Number(row.deposit ?? 0),
@@ -171,17 +214,19 @@ async function fetchRoomBundle(query) {
     throw roomError;
   }
 
-  const [assetsResult, eventsResult, playersResult, teamsResult] = await Promise.all([
+  const [assetsResult, eventsResult, playersResult, teamsResult, statesResult] = await Promise.all([
     supabase.from('assets').select('*').eq('room_id', room.id).order('name', { ascending: true }),
     supabase.from('round_events').select('*').eq('room_id', room.id).order('created_at', { ascending: true }),
     supabase.from('players').select('*').eq('room_id', room.id).order('joined_at', { ascending: true }),
     supabase.from('team_accounts').select('*').eq('room_id', room.id).order('team_key', { ascending: true }),
+    supabase.from('student_states').select('*').eq('room_id', room.id).order('updated_at', { ascending: true }),
   ]);
 
   if (assetsResult.error) throw assetsResult.error;
   if (eventsResult.error) throw eventsResult.error;
   if (playersResult.error) throw playersResult.error;
   if (teamsResult.error && teamsResult.error.code !== '42P01') throw teamsResult.error;
+  if (statesResult.error && statesResult.error.code !== '42P01') throw statesResult.error;
 
   return {
     room,
@@ -189,6 +234,7 @@ async function fetchRoomBundle(query) {
     events: eventsResult.data.map(fromEventRow),
     players: playersResult.data.map(fromPlayerRow),
     teams: teamsResult.error ? [] : teamsResult.data.map(fromTeamRow),
+    studentStates: statesResult.error ? [] : statesResult.data.map(fromStudentStateRow),
     submissions: [],
   };
 }
@@ -313,7 +359,7 @@ export async function registerRemotePlayer(roomId, player) {
   if (existingError) throw existingError;
 
   if (existing) {
-    if (existing.nickname !== player.name || existing.passcode_hash !== player.passcodeHash) {
+    if (existing.passcode_hash !== player.passcodeHash) {
       throw new Error('이미 사용 중인 학번입니다. 이름과 개인 비밀번호를 확인하세요.');
     }
     const existingLastSeenAt = existing.last_seen_at ? new Date(existing.last_seen_at).getTime() : 0;
@@ -327,6 +373,7 @@ export async function registerRemotePlayer(roomId, player) {
     const { data, error } = await supabase
       .from('players')
       .update({
+        nickname: existing.nickname || player.name,
         team_key: player.teamKey ?? existing.team_key ?? '',
         session_token: player.sessionToken ?? existing.session_token ?? '',
         last_seen_at: toIso(player.lastSeenAt ?? Date.now()),
@@ -406,6 +453,46 @@ export async function upsertRemoteTeamAccounts(roomId, teams) {
   return true;
 }
 
+export async function fetchRemoteStudentStates(roomId) {
+  if (!supabaseConfigured || !roomId) return [];
+  const { data, error } = await supabase
+    .from('student_states')
+    .select('*')
+    .eq('room_id', roomId)
+    .order('updated_at', { ascending: true });
+  if (error) {
+    if (error.code === '42P01') return [];
+    throw error;
+  }
+  return data.map(fromStudentStateRow);
+}
+
+export async function fetchRemoteStudentState(roomId, studentNumber) {
+  if (!supabaseConfigured || !roomId || !studentNumber) return null;
+  const { data, error } = await supabase
+    .from('student_states')
+    .select('*')
+    .eq('room_id', roomId)
+    .eq('student_number', Number(studentNumber))
+    .maybeSingle();
+  if (error) {
+    if (error.code === '42P01') return null;
+    throw error;
+  }
+  return data ? fromStudentStateRow(data) : null;
+}
+
+export async function upsertRemoteStudentState(roomId, state) {
+  if (!supabaseConfigured || !roomId || !state?.studentNumber || !state?.nickname || !state?.passcodeHash) return null;
+  const { data, error } = await supabase
+    .from('student_states')
+    .upsert(toStudentStateRow(roomId, state), { onConflict: 'room_id,student_number' })
+    .select()
+    .single();
+  if (error) throw error;
+  return fromStudentStateRow(data);
+}
+
 export async function fetchRemoteSubmissions(roomId) {
   if (!supabaseConfigured || !roomId) return [];
   const { data, error } = await supabase
@@ -428,6 +515,7 @@ export async function upsertRemoteSubmission(roomId, report) {
         mode: report.mode ?? 'individual',
         team_key: report.teamKey ?? '',
         team_name: report.teamName ?? '',
+        submission_method: report.submissionMethod ?? 'student',
         total_asset: Math.round(report.totalAsset ?? 0),
         cash: Math.round(report.cash ?? 0),
         deposit: Math.round(report.deposit ?? 0),
@@ -469,6 +557,7 @@ export function subscribeRemoteRoom(roomId, onChange) {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'round_events', filter: `room_id=eq.${roomId}` }, onChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'players', filter: `room_id=eq.${roomId}` }, onChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'team_accounts', filter: `room_id=eq.${roomId}` }, onChange)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'student_states', filter: `room_id=eq.${roomId}` }, onChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'final_submissions', filter: `room_id=eq.${roomId}` }, onChange)
     .subscribe();
 

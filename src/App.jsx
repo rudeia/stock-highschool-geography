@@ -39,6 +39,8 @@ import {
   createRemoteRoom,
   deleteRemoteIssue,
   deleteRemoteRoundDraftIssues,
+  fetchRemoteStudentState,
+  fetchRemoteStudentStates,
   fetchRemoteSubmissions,
   fetchRemoteRoomById,
   fetchRemoteRoomByPin,
@@ -52,6 +54,7 @@ import {
   upsertRemotePlayer,
   upsertRemoteTeamAccount,
   upsertRemoteTeamAccounts,
+  upsertRemoteStudentState,
   upsertRemoteSubmission,
 } from './lib/supabaseRoomStore.js';
 
@@ -81,6 +84,7 @@ const INITIAL_EXCHANGE_RATE = 1350;
 const ROOM_TTL_MS = 24 * 60 * 60 * 1000;
 const PLAYER_SESSION_TIMEOUT_MS = 90_000;
 const PLAYER_HEARTBEAT_MS = 30_000;
+const EMPTY_PORTFOLIO = Object.freeze({});
 const HOST_PASSWORD = '72727272';
 const HOST_IDS = ['geography', ...Array.from({ length: 20 }, (_, index) => `geography${index + 1}`)];
 const TEAM_TRADE_LOCK_MS = 60_000;
@@ -2078,7 +2082,7 @@ function getInvestorType({ cashLikeAsset, holdingsValue, portfolioRows, totalAss
   return '균형 분산형 투자자';
 }
 
-function buildFinalSubmissionReport({ nickname, mode = 'individual', teamKey = '', teamName = '', cash, deposit, depositInterestEarned = 0, investedPrincipal = INITIAL_CASH, portfolio, assets, tradeLogs, roundLogs, reflection }) {
+function buildFinalSubmissionReport({ nickname, mode = 'individual', teamKey = '', teamName = '', submissionMethod = 'student', cash, deposit, depositInterestEarned = 0, investedPrincipal = INITIAL_CASH, portfolio, assets, tradeLogs, roundLogs, reflection }) {
   const portfolioRows = getHoldingRows(portfolio, assets);
   const investmentAsset = portfolioRows.reduce((sum, row) => sum + row.value, 0);
   const cashLikeAsset = cash + deposit;
@@ -2100,6 +2104,7 @@ function buildFinalSubmissionReport({ nickname, mode = 'individual', teamKey = '
     mode,
     teamKey,
     teamName,
+    submissionMethod,
     totalAsset,
     cash,
     deposit,
@@ -2320,7 +2325,7 @@ function getSubmissionParticipantNames(players, activeStudent) {
   return [...new Set([activeStudentName, ...players.map((player) => getStudentDisplayName(player.studentNumber, player.name))].filter(Boolean))];
 }
 
-function TeacherSubmissionPanel({ players, activeStudent, submissions, gameFinished, allSubmissionsComplete, finalReportsDownloaded, onDownloadSubmissions }) {
+function TeacherSubmissionPanel({ players, activeStudent, submissions, gameFinished, allSubmissionsComplete, finalReportsDownloaded, onCloseSubmissions, onDownloadSubmissions }) {
   const participantNames = getSubmissionParticipantNames(players, activeStudent);
   const submittedNames = new Set(submissions.map((submission) => submission.nickname));
   const submittedRows = [...submissions].sort((a, b) => b.totalAsset - a.totalAsset);
@@ -2340,11 +2345,14 @@ function TeacherSubmissionPanel({ players, activeStudent, submissions, gameFinis
         <button className="command secondary" type="button" onClick={() => window.print()} disabled={!gameFinished || !submittedRows.length}>
           보고서 인쇄
         </button>
+        <button className="command secondary" type="button" onClick={onCloseSubmissions} disabled={!gameFinished || allSubmissionsComplete}>
+          제출 마감
+        </button>
         <button className="command primary" type="button" onClick={onDownloadSubmissions} disabled={!gameFinished || !allSubmissionsComplete}>
           {finalReportsDownloaded ? 'CSV 다시 다운로드' : 'CSV 다운로드'}
         </button>
       </div>
-      {gameFinished && submittedRows.length && !allSubmissionsComplete ? <p className="teacher-hint warning">아직 제출하지 않은 학생이 있어 CSV 다운로드가 잠겨 있습니다.</p> : null}
+      {gameFinished && submittedRows.length && !allSubmissionsComplete ? <p className="teacher-hint warning">미제출 학생이 있으면 제출 마감으로 현재 저장 상태를 자동 제출할 수 있습니다.</p> : null}
       {finalReportsDownloaded ? <p className="teacher-hint success">CSV 다운로드가 완료되었습니다. 제출이 모두 끝났다면 게임 종료를 진행할 수 있습니다.</p> : null}
       <div className="submission-list">
         {submittedRows.map((submission, index) => (
@@ -2354,6 +2362,7 @@ function TeacherSubmissionPanel({ players, activeStudent, submissions, gameFinis
             <em>{submission.investorType}</em>
             <small>
               {submission.mode === 'team' ? `${submission.teamName || '모둠'} · ` : ''}
+              {submission.submissionMethod === 'teacher-close' ? '교사 마감 제출 · ' : ''}
               {formatWon(submission.totalAsset)} · {formatPercent(submission.returnRate)}
             </small>
           </article>
@@ -3291,6 +3300,7 @@ function HostView({
   onStartWithoutIssues,
   onStartWithRandomIssues,
   onCloseStartIssueChoice,
+  onCloseSubmissions,
   onDownloadSubmissions,
 }) {
   const propertyAsset = assets.find((asset) => asset.type === 'property');
@@ -3576,6 +3586,7 @@ function HostView({
           gameFinished={gameFinished}
           allSubmissionsComplete={allSubmissionsComplete}
           finalReportsDownloaded={finalReportsDownloaded}
+          onCloseSubmissions={onCloseSubmissions}
           onDownloadSubmissions={onDownloadSubmissions}
         />
 
@@ -4027,6 +4038,7 @@ export function App() {
   const [salaryPaidRounds, setSalaryPaidRounds] = useState([]);
   const [reflection, setReflection] = useState({ good: '', improve: '', next: '' });
   const [submissions, setSubmissions] = useState([]);
+  const [studentStates, setStudentStates] = useState([]);
   const [finalReportsDownloaded, setFinalReportsDownloaded] = useState(false);
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
   const [resetPassword, setResetPassword] = useState('');
@@ -4034,6 +4046,7 @@ export function App() {
   const [remoteRoomId, setRemoteRoomId] = useState(null);
   const [syncStatus, setSyncStatus] = useState(supabaseConfigured ? '실시간 수업 연결 준비 중' : '로컬 연습 모드');
   const remoteRefreshTimer = useRef(null);
+  const studentStateSaveTimer = useRef(null);
 
   const selectedAsset = useMemo(
     () => assets.find((asset) => asset.id === selectedAssetId) ?? assets[0],
@@ -4057,7 +4070,7 @@ export function App() {
   const effectiveCash = gameStarted ? (teamMode ? activeTeam.cash : cash) : 0;
   const effectiveDeposit = gameStarted ? (teamMode ? activeTeam.deposit : deposit) : 0;
   const effectiveDepositInterestEarned = teamMode ? activeTeam.depositInterestEarned : depositInterestEarned;
-  const effectivePortfolio = gameStarted ? (teamMode ? activeTeam.portfolio : portfolio) : {};
+  const effectivePortfolio = gameStarted ? (teamMode ? activeTeam.portfolio : portfolio) : EMPTY_PORTFOLIO;
   const studentDisplayName = teamMode && joined ? `${activeTeam.name} · ${studentNameLabel}` : studentNameLabel;
   const reportNickname = studentNameLabel;
   const studentHoldingsValue = getPortfolioValue(effectivePortfolio, assets);
@@ -4112,6 +4125,7 @@ export function App() {
     setLatestRoundSummary(resolvedCurrentEvents.length ? { round: remoteRound, events: resolvedCurrentEvents, delistedAssets: [] } : null);
     setPlayers(bundle.players);
     if (bundle.teams?.length) setTeamAccounts(bundle.teams);
+    setStudentStates(bundle.studentStates ?? []);
     setSyncStatus('실시간 수업 연결 중');
   }, []);
 
@@ -4226,6 +4240,38 @@ export function App() {
   }, [effectiveCash, effectiveDeposit, investedPrincipal, joined, nickname, remoteRoomId, selectedTeamKey, studentNumber, studentPasscodeHash, studentSessionToken, studentTotalAsset, teamMode]);
 
   useEffect(() => {
+    if (!supabaseConfigured || !remoteRoomId || !joined || !studentPasscodeHash || !nickname.trim()) return undefined;
+    const nextState = {
+      studentNumber: Number(studentNumber),
+      nickname: nickname.trim(),
+      passcodeHash: studentPasscodeHash,
+      teamKey: teamMode ? selectedTeamKey : '',
+      cash: effectiveCash,
+      deposit: effectiveDeposit,
+      depositPrincipal: teamMode ? 0 : depositPrincipal,
+      depositInterestEarned: effectiveDepositInterestEarned,
+      portfolio: effectivePortfolio,
+      tradeLogs,
+      roundLogs,
+      reflection,
+      salaryPaidRounds,
+      initialCapitalGranted: teamMode ? gameStarted : initialCapitalGranted,
+      updatedAt: Date.now(),
+    };
+
+    window.clearTimeout(studentStateSaveTimer.current);
+    studentStateSaveTimer.current = window.setTimeout(() => {
+      upsertRemoteStudentState(remoteRoomId, nextState)
+        .then((savedState) => {
+          if (savedState) rememberStudentState(savedState);
+        })
+        .catch((error) => setSyncStatus(`학생 계좌 저장 실패: ${error.message}`));
+    }, 600);
+
+    return () => window.clearTimeout(studentStateSaveTimer.current);
+  }, [depositPrincipal, effectiveCash, effectiveDeposit, effectiveDepositInterestEarned, effectivePortfolio, gameStarted, initialCapitalGranted, joined, nickname, reflection, remoteRoomId, roundLogs, salaryPaidRounds, selectedTeamKey, studentNumber, studentPasscodeHash, teamMode, tradeLogs]);
+
+  useEffect(() => {
     if (!gameStarted || !joined || teamMode || phase !== 'open' || salaryPaidRounds.includes(round)) return;
     const timer = window.setTimeout(() => {
       setCash((current) => current + ROUND_SALARY);
@@ -4294,6 +4340,31 @@ export function App() {
       }),
       ...current,
     ]);
+  }
+
+  function rememberStudentState(nextState) {
+    if (!nextState?.studentNumber) return;
+    setStudentStates((current) => [
+      ...current.filter((state) => Number(state.studentNumber) !== Number(nextState.studentNumber)),
+      nextState,
+    ].sort((a, b) => Number(a.studentNumber ?? 99) - Number(b.studentNumber ?? 99)));
+  }
+
+  function restoreStudentState(savedState) {
+    if (!savedState) return false;
+    setCash(savedState.cash ?? 0);
+    setDeposit(savedState.deposit ?? 0);
+    setDepositPrincipal(savedState.depositPrincipal ?? 0);
+    setDepositInterestEarned(savedState.depositInterestEarned ?? 0);
+    setPortfolio(savedState.portfolio ?? {});
+    setTradeLogs(savedState.tradeLogs ?? []);
+    setRoundLogs(savedState.roundLogs ?? []);
+    setSalaryPaidRounds(savedState.salaryPaidRounds ?? []);
+    setReflection({ good: '', improve: '', next: '', ...(savedState.reflection ?? {}) });
+    setInitialCapitalGranted(Boolean(savedState.initialCapitalGranted));
+    if (teamMode && savedState.teamKey) setSelectedTeamKey(savedState.teamKey);
+    rememberStudentState(savedState);
+    return true;
   }
 
   function syncTeamAccount(nextTeam) {
@@ -4388,7 +4459,7 @@ export function App() {
     const storedSessionToken = getStoredStudentSessionToken(roomPin, parsedNumber);
     const nextSessionToken = storedSessionToken || createStudentSessionToken();
     const existingPlayer = players.find((player) => Number(player.studentNumber) === parsedNumber);
-    if (existingPlayer && (existingPlayer.name !== trimmedName || existingPlayer.passcodeHash !== passcodeHash)) {
+    if (existingPlayer && existingPlayer.passcodeHash !== passcodeHash) {
       setStudentJoinError('이미 사용 중인 학번입니다. 이름과 개인 비밀번호를 확인하세요.');
       return;
     }
@@ -4401,14 +4472,16 @@ export function App() {
       return;
     }
 
+    const resolvedName = existingPlayer?.name || trimmedName;
+    const resolvedTeamKey = teamMode ? (existingPlayer?.teamKey || selectedTeamKey) : '';
     const nextPlayer = {
       id: existingPlayer?.id ?? `local-${parsedNumber}`,
-      name: trimmedName,
+      name: resolvedName,
       studentNumber: parsedNumber,
       passcodeHash,
       sessionToken: nextSessionToken,
       lastSeenAt: Date.now(),
-      teamKey: teamMode ? selectedTeamKey : '',
+      teamKey: resolvedTeamKey,
       cash: gameStarted && !teamMode ? INITIAL_CASH : effectiveCash,
       deposit: gameStarted ? effectiveDeposit : 0,
       totalAsset: gameStarted && !teamMode ? INITIAL_CASH : studentTotalAsset,
@@ -4421,6 +4494,9 @@ export function App() {
         ? await registerRemotePlayer(remoteRoomId, nextPlayer)
         : null;
       const playerToStore = savedPlayer ?? nextPlayer;
+      const savedState = remoteRoomId
+        ? await fetchRemoteStudentState(remoteRoomId, parsedNumber)
+        : studentStates.find((state) => Number(state.studentNumber) === parsedNumber);
       setPlayers((current) => [
         ...current.filter((player) => Number(player.studentNumber) !== parsedNumber),
         playerToStore,
@@ -4429,8 +4505,10 @@ export function App() {
       setStudentSessionToken(playerToStore.sessionToken ?? nextSessionToken);
       storeStudentSessionToken(roomPin, parsedNumber, playerToStore.sessionToken ?? nextSessionToken);
       setStudentNumber(String(parsedNumber));
-      setNickname(trimmedName);
-      if (gameStarted && !teamMode) {
+      setNickname(playerToStore.name ?? resolvedName);
+      const restored = savedState?.passcodeHash === passcodeHash ? restoreStudentState(savedState) : false;
+      if (teamMode && playerToStore.teamKey) setSelectedTeamKey(playerToStore.teamKey);
+      if (!restored && gameStarted && !teamMode) {
         setCash((current) => (current > 0 ? current : INITIAL_CASH));
         setInitialCapitalGranted(true);
       }
@@ -4568,6 +4646,7 @@ export function App() {
     setSalaryPaidRounds([]);
     setReflection(nextRoom.reflection);
     setSubmissions([]);
+    setStudentStates([]);
     setFinalReportsDownloaded(false);
     setResetDialogOpen(false);
     setResetPassword('');
@@ -4930,6 +5009,63 @@ export function App() {
     return Number(String(value).replaceAll(',', '').replace(/[^\d]/g, '')) || 0;
   }
 
+  function buildTeacherClosedSubmission(player, states = studentStates) {
+    const nicknameLabel = getStudentDisplayName(player.studentNumber, player.name);
+    const savedState = states.find((state) => Number(state.studentNumber) === Number(player.studentNumber));
+    const team = teamMode && player.teamKey ? teamAccounts.find((item) => item.key === player.teamKey) : null;
+    const teamMemberCount = team ? players.filter((item) => item.teamKey === team.key).length : 1;
+    const reportCash = team ? team.cash : (savedState?.cash ?? player.cash ?? 0);
+    const reportDeposit = team ? team.deposit : (savedState?.deposit ?? player.deposit ?? 0);
+    const reportDepositInterest = team ? team.depositInterestEarned : (savedState?.depositInterestEarned ?? 0);
+    const reportPortfolio = team ? team.portfolio : (savedState?.portfolio ?? {});
+    const reportInvestedPrincipal = getInvestedPrincipal({
+      gameStarted: true,
+      round,
+      phase: 'closed',
+      memberCount: Math.max(1, teamMemberCount),
+    });
+    const report = buildFinalSubmissionReport({
+      nickname: nicknameLabel,
+      mode: roomMode,
+      teamKey: team?.key ?? '',
+      teamName: team?.name ?? '',
+      submissionMethod: 'teacher-close',
+      cash: reportCash,
+      deposit: reportDeposit,
+      depositInterestEarned: reportDepositInterest,
+      investedPrincipal: reportInvestedPrincipal,
+      portfolio: reportPortfolio,
+      assets,
+      tradeLogs: savedState?.tradeLogs ?? [],
+      roundLogs: savedState?.roundLogs ?? [],
+      reflection: savedState?.reflection ?? {
+        good: '',
+        improve: '',
+        next: '교사 제출 마감으로 현재 저장 상태가 자동 제출되었습니다.',
+      },
+    });
+
+    if (!savedState && !team && player.totalAsset && player.totalAsset > report.totalAsset) {
+      const cashLikeAsset = reportCash + reportDeposit;
+      const investmentAsset = Math.max(0, player.totalAsset - cashLikeAsset);
+      return {
+        ...report,
+        totalAsset: player.totalAsset,
+        cashLikeAsset,
+        investmentAsset,
+        returnRate: getInvestmentReturnRate(player.totalAsset, reportInvestedPrincipal),
+        investorType: getInvestorType({
+          cashLikeAsset,
+          holdingsValue: investmentAsset,
+          portfolioRows: [],
+          totalAsset: player.totalAsset,
+        }),
+      };
+    }
+
+    return report;
+  }
+
   async function handleSubmitReport() {
     if (!gameFinished || !joined || submittedReport) return;
     const report = buildFinalSubmissionReport({
@@ -4937,6 +5073,7 @@ export function App() {
       mode: roomMode,
       teamKey: teamMode ? activeTeam.key : '',
       teamName: teamMode ? activeTeam.name : '',
+      submissionMethod: 'student',
       cash: effectiveCash,
       deposit: effectiveDeposit,
       depositInterestEarned: effectiveDepositInterestEarned,
@@ -4961,13 +5098,52 @@ export function App() {
     }
   }
 
+  async function handleCloseSubmissions() {
+    if (!gameFinished || allSubmissionsComplete) return;
+    let latestStates = studentStates;
+    if (remoteRoomId) {
+      try {
+        latestStates = await fetchRemoteStudentStates(remoteRoomId);
+        setStudentStates(latestStates);
+      } catch (error) {
+        setSyncStatus(`학생 저장 상태 불러오기 실패: ${error.message}`);
+      }
+    }
+
+    const submittedNames = new Set(submissions.map((submission) => submission.nickname));
+    const missingPlayers = players.filter((player) => !submittedNames.has(getStudentDisplayName(player.studentNumber, player.name)));
+    const autoReports = missingPlayers.map((player) => buildTeacherClosedSubmission(player, latestStates));
+    if (!autoReports.length) return;
+
+    setSubmissions((current) => [
+      ...autoReports,
+      ...current.filter((submission) => !autoReports.some((report) => report.nickname === submission.nickname)),
+    ]);
+    setFinalReportsDownloaded(false);
+    pushNews('제출 마감', `${autoReports.length}명의 미제출 보고서가 현재 저장 상태로 자동 제출되었습니다.`);
+
+    if (remoteRoomId) {
+      try {
+        const savedReports = await Promise.all(autoReports.map((report) => upsertRemoteSubmission(remoteRoomId, report)));
+        setSubmissions((current) => [
+          ...savedReports.filter(Boolean),
+          ...current.filter((submission) => !savedReports.some((report) => report?.nickname === submission.nickname)),
+        ]);
+        await updateRemoteRoom(remoteRoomId, { final_reports_downloaded: false });
+      } catch (error) {
+        setSyncStatus(`제출 마감 저장 실패: ${error.message}`);
+      }
+    }
+  }
+
   function handleDownloadSubmissions() {
     if (!gameFinished || !allSubmissionsComplete) return;
     const rows = [
-      ['순위', '이름', '투자방식', '모둠', '총자산', '투입원금', '현금성자산', '투자평가금', '예금이자수익', '수익률', '투자성향', '보유자산', '잘한점', '부족한점', '다음계획'],
+      ['순위', '이름', '제출방식', '투자방식', '모둠', '총자산', '투입원금', '현금성자산', '투자평가금', '예금이자수익', '수익률', '투자성향', '보유자산', '잘한점', '부족한점', '다음계획'],
       ...[...submissions].sort((a, b) => b.totalAsset - a.totalAsset).map((submission, index) => [
         index + 1,
         submission.nickname,
+        submission.submissionMethod === 'teacher-close' ? '교사 마감 제출' : '학생 직접 제출',
         submission.mode === 'team' ? '모둠 투자' : '개인 투자',
         submission.teamName ?? '',
         submission.totalAsset,
@@ -5178,6 +5354,7 @@ export function App() {
           onStartWithoutIssues={() => handleStartRound('none')}
           onStartWithRandomIssues={() => handleStartRound('random')}
           onCloseStartIssueChoice={() => setStartIssueChoiceOpen(false)}
+          onCloseSubmissions={handleCloseSubmissions}
           onDownloadSubmissions={handleDownloadSubmissions}
         />
       ) : null}
