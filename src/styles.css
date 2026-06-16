@@ -2749,3 +2749,128 @@ input {
     display: grid;
   }
 }
+
+
+/* ─── 정기예금 vs 정기적금 학습 카드 ─── */
+.savings-learning-card {
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 16px;
+  margin: 12px 0;
+}
+.savings-learning-header h2 {
+  font-size: 16px;
+  font-weight: 700;
+  color: #0f172a;
+  margin: 0 0 4px;
+}
+.savings-learning-header p {
+  font-size: 13px;
+  color: #475569;
+  margin: 0 0 12px;
+}
+.savings-compare-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.compare-row {
+  display: grid;
+  grid-template-columns: 160px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  font-size: 13px;
+}
+.compare-label {
+  font-weight: 600;
+  color: #1e293b;
+}
+.compare-bar-track {
+  background: #e2e8f0;
+  height: 18px;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.compare-bar {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+.compare-bar.td-bar {
+  background: #2563eb;
+}
+.compare-bar.ra-bar {
+  background: #60a5fa;
+}
+.compare-value {
+  font-weight: 700;
+  color: #1e293b;
+  font-variant-numeric: tabular-nums;
+  min-width: 100px;
+  text-align: right;
+}
+.compare-explain {
+  font-size: 13px;
+  color: #475569;
+  line-height: 1.5;
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  background: #ffffff;
+  border-left: 3px solid #2563eb;
+  border-radius: 4px;
+}
+.compare-explain strong {
+  color: #0f172a;
+}
+.compare-explain.compare-extra {
+  border-left-color: #94a3b8;
+}
+
+/* ─── PASSIVE_MOVE 학습 안내 ─── */
+.passive-move-notice {
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-radius: 8px;
+  padding: 12px 14px;
+  font-size: 13px;
+  color: #78350f;
+  margin: 12px 0;
+}
+.passive-move-notice strong {
+  color: #92400e;
+  display: block;
+  margin-bottom: 4px;
+}
+.passive-move-notice p {
+  margin: 0;
+  line-height: 1.5;
+}
+.passive-move-notice em {
+  font-style: normal;
+  font-weight: 600;
+  color: #b45309;
+}
+
+/* ─── 트리거 이슈 강조 ─── */
+.issue-card[data-triggered='true'],
+.event-card[data-triggered='true'] {
+  border-left: 3px solid #dc2626;
+}
+
+/* ─── 외환 자산 카드 ─── */
+.asset-card[data-type='forex'] {
+  border-top: 2px solid #0284c7;
+}
+
+/* 태블릿 대응 — 비교 카드 반응형 */
+@media (max-width: 600px) {
+  .compare-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+  .compare-value {
+    text-align: left;
+    min-width: 0;
+  }
+}

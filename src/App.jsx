@@ -80,6 +80,30 @@ const DIRECT_REPEATED_IMPACT_THRESHOLD = 0.08;
 const MIN_INDIRECT_REPEATED_EVENT_IMPACT = 0.05;
 const MAX_INDIRECT_REPEATED_EVENT_IMPACT = 0.12;
 const PASSIVE_MARKET_MOVE = 0.05;
+// 우량주 vs 중소형주 대립 난수 (PASSIVE 노이즈에 적용)
+const PASSIVE_MOVE_LARGE_MULT = 0.7;
+const PASSIVE_MOVE_SMALL_MULT = 1.6;
+const PASSIVE_MOVE_BOND_MULT = 0.3;
+const PASSIVE_MOVE_FOREX_MULT = 0.4;
+const PASSIVE_MOVE_GOLD_MULT = 0.6;
+// 이슈 impact 에 사이즈 가중치 (호재/악재 진폭도 사이즈 차등)
+const SIZE_ISSUE_MULT = { large: 0.8, small: 1.4 };
+// 정기예금 (잠금형 정기예금) — 목돈 일시 예치, 만기 잠금
+const TIME_DEPOSIT_LOCK_ROUNDS = 4;
+const TIME_DEPOSIT_BONUS_RATE = 0.6;
+const TIME_DEPOSIT_EARLY_PENALTY = 0.02;
+// 정기적금 (월 적립식) — 매 라운드 일정액 자동 납입
+const RECURRING_BONUS_RATE = 0.8;
+const RECURRING_EARLY_PENALTY = 0.02;
+// 거시지표 임계점 트리거
+const MACRO_TRIGGERS = [
+  { id: 'emergency-stimulus', when: (m) => m.unemploymentRate > 8.0, cooldown: 3 },
+  { id: 'wage-spiral', when: (m) => m.unemploymentRate < 2.5, cooldown: 3 },
+  { id: 'credit-crunch', when: (m) => m.baseRate > 7.0, cooldown: 4 },
+  { id: 'liquidity-flood', when: (m) => m.baseRate < 1.0, cooldown: 4 },
+  { id: 'fx-intervention', when: (m) => m.exchangeRate > 1600, cooldown: 3 },
+  { id: 'realty-cooling-policy', when: (m) => m.propertyIndex > 350000, cooldown: 3 },
+];
 const INITIAL_EXCHANGE_RATE = 1350;
 const ROOM_TTL_MS = 24 * 60 * 60 * 1000;
 const PLAYER_SESSION_TIMEOUT_MS = 90_000;
@@ -145,28 +169,30 @@ const phaseLabels = {
 };
 
 const initialTradableAssets = [
-  { id: 'neo', type: 'stock', country: '한국', name: '네오모빌리티', sector: '전기차/자율주행', priceOptions: [86_000, 126_000, 168_000], color: '#2563eb' },
-  { id: 'core', type: 'stock', country: '미국', name: '코어실리콘', sector: '반도체', priceOptions: [312_000, 482_000, 548_000], color: '#7c3aed' },
-  { id: 'eco', type: 'stock', country: '한국', name: '에코에너지', sector: '재생에너지', priceOptions: [48_000, 74_000, 96_000], color: '#059669' },
-  { id: 'oil', type: 'stock', country: '한국', name: '글로벌오일', sector: '정유/원자재', priceOptions: [63_000, 93_000, 118_000], color: '#b45309' },
-  { id: 'enter', type: 'stock', country: '미국', name: '유니버스엔터', sector: '미디어/콘텐츠', priceOptions: [38_000, 58_000, 82_000], color: '#db2777' },
-  { id: 'food', type: 'stock', country: '한국', name: '미래푸드', sector: '식품/바이오소재', priceOptions: [18_500, 31_500, 46_000], color: '#16a34a' },
-  { id: 'air', type: 'stock', country: '한국', name: '스카이항공', sector: '항공/여행', priceOptions: [9_800, 18_200, 27_500], color: '#0891b2' },
-  { id: 'bank', type: 'stock', country: '한국', name: '대한은행', sector: '금융', priceOptions: [37_000, 51_000, 68_000], color: '#475569' },
-  { id: 'medi', type: 'stock', country: '미국', name: '메디케어', sector: '헬스케어', priceOptions: [142_000, 211_000, 286_000], color: '#0d9488' },
-  { id: 'infra', type: 'stock', country: '한국', name: '한빛인프라', sector: '건설/인프라', priceOptions: [5_400, 8_700, 13_800], color: '#ea580c' },
-  { id: 'dogemars', type: 'stock', country: '미국', name: '도지인마스', sector: 'AI/우주 반도체', priceOptions: [92_000, 154_000, 238_000], color: '#9333ea' },
-  { id: 'riverbank', type: 'stock', country: '한국', name: '한강은행', sector: '금융', priceOptions: [24_000, 39_000, 57_000], color: '#64748b' },
-  { id: 'oceanair', type: 'stock', country: '한국', name: '오션항공', sector: '항공/물류', priceOptions: [7_600, 14_400, 22_800], color: '#0284c7' },
-  { id: 'purefood', type: 'stock', country: '한국', name: '바른푸드', sector: '식품/농산물', priceOptions: [14_500, 24_500, 38_000], color: '#65a30d' },
-  { id: 'metroinfra', type: 'stock', country: '한국', name: '메트로인프라', sector: '건설/인프라', priceOptions: [6_200, 11_600, 19_500], color: '#c2410c' },
+  { id: 'neo', type: 'stock', size: 'large', country: '한국', name: '네오모빌리티', sector: '전기차/자율주행', priceOptions: [86_000, 126_000, 168_000], color: '#2563eb' },
+  { id: 'core', type: 'stock', size: 'large', country: '미국', name: '코어실리콘', sector: '반도체', priceOptions: [312_000, 482_000, 548_000], color: '#7c3aed' },
+  { id: 'eco', type: 'stock', size: 'small', country: '한국', name: '에코에너지', sector: '재생에너지', priceOptions: [48_000, 74_000, 96_000], color: '#059669' },
+  { id: 'oil', type: 'stock', size: 'large', country: '한국', name: '글로벌오일', sector: '정유/원자재', priceOptions: [63_000, 93_000, 118_000], color: '#b45309' },
+  { id: 'enter', type: 'stock', size: 'small', country: '미국', name: '유니버스엔터', sector: '미디어/콘텐츠', priceOptions: [38_000, 58_000, 82_000], color: '#db2777' },
+  { id: 'food', type: 'stock', size: 'small', country: '한국', name: '미래푸드', sector: '식품/바이오소재', priceOptions: [18_500, 31_500, 46_000], color: '#16a34a' },
+  { id: 'air', type: 'stock', size: 'small', country: '한국', name: '스카이항공', sector: '항공/여행', priceOptions: [9_800, 18_200, 27_500], color: '#0891b2' },
+  { id: 'bank', type: 'stock', size: 'large', country: '한국', name: '대한은행', sector: '금융', priceOptions: [37_000, 51_000, 68_000], color: '#475569' },
+  { id: 'medi', type: 'stock', size: 'large', country: '미국', name: '메디케어', sector: '헬스케어', priceOptions: [142_000, 211_000, 286_000], color: '#0d9488' },
+  { id: 'infra', type: 'stock', size: 'small', country: '한국', name: '한빛인프라', sector: '건설/인프라', priceOptions: [5_400, 8_700, 13_800], color: '#ea580c' },
+  { id: 'dogemars', type: 'stock', size: 'large', country: '미국', name: '도지인마스', sector: 'AI/우주 반도체', priceOptions: [92_000, 154_000, 238_000], color: '#9333ea' },
+  { id: 'riverbank', type: 'stock', size: 'small', country: '한국', name: '한강은행', sector: '금융', priceOptions: [24_000, 39_000, 57_000], color: '#64748b' },
+  { id: 'oceanair', type: 'stock', size: 'small', country: '한국', name: '오션항공', sector: '항공/물류', priceOptions: [7_600, 14_400, 22_800], color: '#0284c7' },
+  { id: 'purefood', type: 'stock', size: 'small', country: '한국', name: '바른푸드', sector: '식품/농산물', priceOptions: [14_500, 24_500, 38_000], color: '#65a30d' },
+  { id: 'metroinfra', type: 'stock', size: 'small', country: '한국', name: '메트로인프라', sector: '건설/인프라', priceOptions: [6_200, 11_600, 19_500], color: '#c2410c' },
   { id: 'sp500', type: 'etf', country: '미국', name: 'S&P 500 ETF', sector: '미국 대표지수', priceOptions: [48_000, 62_000, 76_000], color: '#1d4ed8' },
   { id: 'kospi', type: 'etf', country: '한국', name: 'KOSPI 200 ETF', sector: '한국 대표지수', priceOptions: [27_500, 34_500, 42_000], color: '#0f766e' },
-  { id: 'realty', type: 'property', country: '한국', name: '도시부동산지수', sector: '주거/상업 부동산', priceOptions: [180_000, 250_000, 320_000], color: '#a16207' },
+  { id: 'realty', type: 'property', country: '한국', name: '도시부동산지수 추종 ETF', sector: '주거/상업 부동산 지수', priceOptions: [180_000, 250_000, 320_000], color: '#a16207' },
   { id: 'oilFut', type: 'futures', country: '글로벌', name: '글로벌 원유 선물', sector: '에너지 원자재', priceOptions: [71_000, 88_000, 104_000], color: '#92400e' },
   { id: 'grainFut', type: 'futures', country: '글로벌', name: '글로벌 곡물 선물', sector: '식량 원자재', priceOptions: [31_000, 45_000, 59_000], color: '#ca8a04' },
-  { id: 'usBond', type: 'bond', country: '미국', name: '미국 10년 국채', sector: '선진국 국채', priceOptions: [91_000, 100_000, 108_000], color: '#334155' },
-  { id: 'argBond', type: 'bond', country: '아르헨티나', name: '아르헨티나 국채', sector: '고위험 신흥국 국채', priceOptions: [24_000, 36_000, 52_000], color: '#be123c' },
+  { id: 'goldFut', type: 'futures', country: '글로벌', name: '글로벌 금 선물', sector: '귀금속 안전자산', priceOptions: [78_000, 96_000, 118_000], color: '#d4a017' },
+  { id: 'usdKrw', type: 'forex', country: '글로벌', name: '원/달러 환율 추종 ETN', sector: '외환 파생', priceOptions: [12_800, 13_500, 14_200], color: '#7c2d12' },
+  { id: 'usBond', type: 'bond', country: '미국', name: '미국 10년 국채', sector: '선진국 국채', priceOptions: [91_000, 100_000, 108_000], color: '#334155', faceValue: 100_000 },
+  { id: 'argBond', type: 'bond', country: '아르헨티나', name: '아르헨티나 국채', sector: '고위험 신흥국 국채', priceOptions: [64_000, 92_000, 115_000], color: '#be123c', faceValue: 100_000 },
 ];
 
 const financialProfileVariants = [
@@ -223,9 +249,10 @@ function createInitialAssetBundle() {
 const assetTypeLabels = {
   stock: '주식',
   etf: 'ETF',
-  property: '부동산',
+  property: '부동산 ETF',
   futures: '선물',
   bond: '채권',
+  forex: '외환',
 };
 
 function clampNumber(value, min, max) {
@@ -526,7 +553,7 @@ const scenarioEvents = [
       },
     ],
     baseRateDelta: 0.5,
-    impact: { bank: 0.08, riverbank: 0.07, infra: -0.07, metroinfra: -0.09, air: -0.05, oceanair: -0.08, enter: -0.04, dogemars: -0.07, neo: -0.03, realty: -0.08, kospi: -0.03, sp500: -0.02 },
+    impact: { bank: 0.08, riverbank: 0.07, infra: -0.07, metroinfra: -0.09, air: -0.05, oceanair: -0.08, enter: -0.04, dogemars: -0.07, neo: -0.03, realty: -0.08, kospi: -0.03, sp500: -0.02, usBond: -0.06, argBond: -0.05, goldFut: -0.04, usdKrw: -0.02 },
   },
   {
     id: 'rate-down',
@@ -550,7 +577,7 @@ const scenarioEvents = [
       },
     ],
     baseRateDelta: -0.5,
-    impact: { realty: 0.09, infra: 0.05, metroinfra: 0.07, neo: 0.04, enter: 0.04, dogemars: 0.06, bank: -0.04, riverbank: -0.04, kospi: 0.04, sp500: 0.03 },
+    impact: { realty: 0.09, infra: 0.05, metroinfra: 0.07, neo: 0.04, enter: 0.04, dogemars: 0.06, bank: -0.04, riverbank: -0.04, kospi: 0.04, sp500: 0.03, usBond: 0.06, argBond: 0.04, goldFut: 0.04, usdKrw: 0.02 },
   },
   {
     id: 'deposit-special',
@@ -598,7 +625,7 @@ const scenarioEvents = [
         failureDetail: '비용 부담이 여전히 크다는 평가가 나오며 시장 영향은 제한됐습니다.',
       },
     ],
-    impact: { kospi: 0.08, sp500: 0.06, enter: 0.08, air: 0.09, oceanair: 0.1, neo: 0.05, realty: 0.05, bank: 0.04, riverbank: 0.04, usBond: -0.05 },
+    impact: { kospi: 0.08, sp500: 0.06, enter: 0.08, air: 0.09, oceanair: 0.1, neo: 0.05, realty: 0.05, bank: 0.04, riverbank: 0.04, usBond: -0.05, argBond: -0.04, goldFut: -0.03 },
   },
   {
     id: 'recession-risk',
@@ -622,7 +649,7 @@ const scenarioEvents = [
         failureDetail: '일부 업종에 국한된 조정으로 확인되며 전체 경기 영향은 작게 평가됐습니다.',
       },
     ],
-    impact: { kospi: -0.09, sp500: -0.07, enter: -0.08, air: -0.12, oceanair: -0.13, neo: -0.06, realty: -0.06, infra: -0.06, metroinfra: -0.07, usBond: 0.08, food: 0.03, purefood: 0.04 },
+    impact: { kospi: -0.09, sp500: -0.07, enter: -0.08, air: -0.12, oceanair: -0.13, neo: -0.06, realty: -0.06, infra: -0.06, metroinfra: -0.07, usBond: 0.08, food: 0.03, purefood: 0.04, goldFut: 0.08 },
   },
   {
     id: 'jobs-improve',
@@ -742,7 +769,7 @@ const scenarioEvents = [
         failureDetail: '달러 수요가 다시 늘며 원화 안정세가 오래 이어지지 못했습니다.',
       },
     ],
-    impact: { air: 0.1, oceanair: 0.11, food: 0.05, purefood: 0.05, kospi: 0.04, argBond: 0.05, sp500: -0.04, core: -0.02, dogemars: -0.02 },
+    impact: { air: 0.1, oceanair: 0.11, food: 0.05, purefood: 0.05, kospi: 0.02, argBond: 0.05, sp500: -0.04, core: -0.02, dogemars: -0.02, usdKrw: -0.04, goldFut: -0.02 },
   },
   {
     id: 'fx-volatility',
@@ -766,7 +793,7 @@ const scenarioEvents = [
         failureDetail: '국내 기업 실적 기대가 유지되며 자금 유출 우려가 약해졌습니다.',
       },
     ],
-    impact: { air: -0.1, oceanair: -0.12, food: -0.05, purefood: -0.04, kospi: -0.05, argBond: -0.07, sp500: 0.05, core: 0.03, dogemars: 0.03, neo: 0.03 },
+    impact: { air: -0.1, oceanair: -0.12, food: -0.05, purefood: -0.04, kospi: -0.05, argBond: -0.07, sp500: 0.05, core: 0.03, dogemars: 0.03, neo: 0.03, usdKrw: 0.04, goldFut: 0.05 },
   },
   {
     id: 'property-ease',
@@ -1025,7 +1052,7 @@ const scenarioEvents = [
         failureDetail: '후속 지표가 둔화되며 달러 강세 압력이 빠르게 줄었습니다.',
       },
     ],
-    impact: { neo: 0.04, core: 0.03, dogemars: 0.04, kospi: 0.03, sp500: 0.04, air: -0.08, oceanair: -0.1, food: -0.03, purefood: -0.02 },
+    impact: { neo: 0.05, core: 0.04, dogemars: 0.05, air: -0.09, oceanair: -0.11, food: -0.04, purefood: -0.03, oil: -0.04, kospi: -0.02, sp500: 0.05, usdKrw: 0.07, goldFut: 0.04 },
   },
   {
     id: 'korea-us-chip-tension',
@@ -1442,6 +1469,114 @@ const scenarioEvents = [
     ],
     impact: { argBond: -0.24, usBond: 0.06, sp500: -0.03, kospi: -0.03, grainFut: 0.04 },
   },
+  {
+    id: 'emergency-stimulus',
+    triggerOnly: true,
+    title: '실업률 급등 → 긴급 경기부양 패키지 발동',
+    detail: '실업률이 8%를 돌파하자 정부와 중앙은행이 동시 완화 정책을 가동했습니다.',
+    principle: '경기 침체 신호가 짙어지면 정부는 재정지출을 늘리고 중앙은행은 금리를 낮춥니다.',
+    affectedAssets: ['위험자산 단기 반등', '건설/인프라 수혜', '은행 마진 축소', '안전자산 동반 강세'],
+    discussionPrompt: '실업률이 너무 높을 때 정부가 돈을 푸는 정책은 어떤 효과와 부작용이 있을까요?',
+    issueOptions: [
+      {
+        title: '대규모 경기부양 패키지 발표',
+        detail: '재정지출 확대와 금리 인하가 동시 발표됐습니다. 시장은 단기 반등에 들어갑니다.',
+        failureTitle: '부양책 효과 제한',
+        failureDetail: '부양책이 발표됐지만 시장 신뢰가 약해 반응이 미약했습니다.',
+      },
+    ],
+    impact: { kospi: 0.05, sp500: 0.04, neo: 0.06, enter: 0.05, realty: 0.04, infra: 0.06, metroinfra: 0.07, bank: -0.03, riverbank: -0.03, usBond: 0.04, goldFut: 0.03, usdKrw: 0.02 },
+  },
+  {
+    id: 'wage-spiral',
+    triggerOnly: true,
+    title: '완전고용 진입 → 임금-물가 악순환 우려',
+    detail: '실업률이 2.5% 아래로 내려가며 임금 상승이 가파릅니다.',
+    principle: '실업률이 너무 낮으면 임금이 빠르게 올라 기업 비용과 물가가 함께 상승합니다.',
+    affectedAssets: ['금융 수익성 개선', '식품/항공 마진 압박', '안전자산 약세', '원자재 강세'],
+    discussionPrompt: '완전고용은 좋은 일인데 왜 중앙은행은 추가 긴축을 시사할까요?',
+    issueOptions: [
+      {
+        title: '인건비 급등에 따른 마진 압박',
+        detail: '기업들이 임금 인상을 발표하며 물가 자극이 우려됩니다.',
+        failureTitle: '임금 상승 일시적 안정',
+        failureDetail: '임금 상승세가 잠시 둔화돼 우려가 가라앉았습니다.',
+      },
+    ],
+    impact: { food: -0.04, purefood: -0.05, air: -0.05, oceanair: -0.06, enter: -0.03, bank: 0.05, riverbank: 0.04, usBond: -0.04, goldFut: 0.05, oilFut: 0.04 },
+  },
+  {
+    id: 'credit-crunch',
+    triggerOnly: true,
+    title: '고금리 장기화 → 신용경색 현실화',
+    detail: '기준금리가 7%를 넘기며 기업 차입과 가계 대출이 급격히 위축됐습니다.',
+    principle: '금리가 장기간 높으면 부채가 많은 기업과 신흥국이 자금난을 겪습니다.',
+    affectedAssets: ['부채 많은 기업 직격탄', '신흥국 채권 폭락', '안전자산 선호 강화', '금 강세'],
+    discussionPrompt: '금리가 높을수록 모두에게 좋을까요? 누구에게 가장 큰 부담이 될까요?',
+    issueOptions: [
+      {
+        title: '기업 부도 우려 확산',
+        detail: '부채가 많은 기업과 신흥국 채권에서 자금이 빠르게 이탈하고 있습니다.',
+        failureTitle: '신용시장 일시 안정',
+        failureDetail: '중앙은행 구두 개입으로 우려가 잠시 진정됐습니다.',
+      },
+    ],
+    impact: { realty: -0.12, infra: -0.10, metroinfra: -0.13, neo: -0.08, dogemars: -0.10, bank: -0.05, riverbank: -0.07, argBond: -0.14, usBond: 0.05, goldFut: 0.08, usdKrw: 0.04 },
+  },
+  {
+    id: 'liquidity-flood',
+    triggerOnly: true,
+    title: '초저금리 지속 → 유동성 과잉 경고',
+    detail: '기준금리가 1% 아래로 내려가며 시중에 자금이 넘쳐납니다.',
+    principle: '금리가 너무 낮으면 자산 가격이 급등하지만, 거품 위험이 함께 쌓입니다.',
+    affectedAssets: ['위험자산 급등', '부동산 과열', '금융주 마진 압박', '안전자산 약세'],
+    discussionPrompt: '자산 가격이 빠르게 오르는 것이 모두에게 좋은 일일까요?',
+    issueOptions: [
+      {
+        title: '유동성 파티 — 자산 가격 급등',
+        detail: '저금리로 풀린 자금이 위험자산에 몰리며 단기 급등이 나타납니다.',
+        failureTitle: '유동성 효과 제한',
+        failureDetail: '시장이 향후 긴축을 미리 반영해 반응이 약했습니다.',
+      },
+    ],
+    impact: { realty: 0.10, neo: 0.09, dogemars: 0.12, enter: 0.07, kospi: 0.06, sp500: 0.05, argBond: 0.06, goldFut: 0.06, usBond: 0.03, bank: -0.04 },
+  },
+  {
+    id: 'fx-intervention',
+    triggerOnly: true,
+    title: '환율 1,600원 돌파 → 외환당국 시장 개입',
+    detail: '원화 약세가 심화되자 외환보유고를 동원한 시장 안정화에 들어갔습니다.',
+    principle: '환율이 급등하면 외환당국은 보유한 달러를 풀어 환율을 진정시킵니다.',
+    affectedAssets: ['환율 단기 하락', '항공/수입주 회복', '신흥국 채권 안정', '미국 ETF 환차익 축소'],
+    discussionPrompt: '외환보유고를 사용해 환율을 막는 정책의 한계는 무엇일까요?',
+    issueOptions: [
+      {
+        title: '외환당국 강력 개입',
+        detail: '대규모 달러 매도로 환율이 단기 진정됐습니다.',
+        failureTitle: '개입 효과 제한',
+        failureDetail: '시장 압력이 강해 개입 효과가 오래가지 않았습니다.',
+      },
+    ],
+    impact: { usdKrw: -0.05, air: 0.06, oceanair: 0.07, food: 0.03, purefood: 0.03, kospi: 0.02, sp500: -0.03, argBond: -0.04 },
+  },
+  {
+    id: 'realty-cooling-policy',
+    triggerOnly: true,
+    title: '부동산 과열 → 정부 규제 패키지 발표',
+    detail: '부동산 지수가 과열권에 진입하자 대출 규제와 보유세 강화가 발표됐습니다.',
+    principle: '자산 가격이 과열되면 정부는 대출 규제와 세금으로 수요를 억제합니다.',
+    affectedAssets: ['부동산 ETF 조정', '건설 약세', '금융주 부담', '안전자산 선호'],
+    discussionPrompt: '정부가 자산 가격을 직접 통제하는 것은 시장 원리에 어긋날까요?',
+    issueOptions: [
+      {
+        title: '부동산 규제 종합 패키지 시행',
+        detail: '대출 규제와 보유세 강화가 동시 발표되며 부동산 자산이 조정에 들어갑니다.',
+        failureTitle: '규제 효과 제한',
+        failureDetail: '규제가 발표됐지만 시장 충격은 예상보다 작았습니다.',
+      },
+    ],
+    impact: { realty: -0.10, infra: -0.06, metroinfra: -0.07, bank: -0.04, riverbank: -0.05, usBond: 0.04, goldFut: 0.03 },
+  },
 ];
 
 const won = new Intl.NumberFormat('ko-KR', {
@@ -1525,8 +1660,16 @@ function getHoldingSummary(portfolio, assets) {
     : '보유 종목 없음';
 }
 
-function getPassiveMarketMove() {
-  return Number(((Math.random() * 2 - 1) * PASSIVE_MARKET_MOVE).toFixed(3));
+function getPassiveMarketMove(asset) {
+  let mult = 1;
+  if (asset?.type === 'stock') {
+    if (asset.size === 'large') mult = PASSIVE_MOVE_LARGE_MULT;
+    else if (asset.size === 'small') mult = PASSIVE_MOVE_SMALL_MULT;
+  } else if (asset?.type === 'bond') mult = PASSIVE_MOVE_BOND_MULT;
+  else if (asset?.type === 'forex') mult = PASSIVE_MOVE_FOREX_MULT;
+  else if (asset?.type === 'futures' && asset.id === 'goldFut') mult = PASSIVE_MOVE_GOLD_MULT;
+  const raw = (Math.random() * 2 - 1) * PASSIVE_MARKET_MOVE * mult;
+  return Number(raw.toFixed(3));
 }
 
 function getImpactBounds(asset, absoluteImpact) {
@@ -1602,9 +1745,9 @@ const eventMacroImpacts = {
   'rate-up': { baseRateDelta: 0.5, propertyMove: -0.04, exchangeMove: 0.01, unemploymentDelta: 0.1 },
   'rate-down': { baseRateDelta: -0.5, propertyMove: 0.04, exchangeMove: -0.01, unemploymentDelta: -0.08 },
   'deposit-special': { baseRateDelta: 0.25, propertyMove: -0.02, exchangeMove: 0, unemploymentDelta: 0.02 },
-  'growth-boom': { baseRateDelta: 0.1, propertyMove: 0.035, exchangeMove: -0.01, unemploymentDelta: -0.18 },
+  'growth-boom': { baseRateDelta: 0.25, propertyMove: 0.035, exchangeMove: -0.01, unemploymentDelta: -0.18 },
   'recession-risk': { baseRateDelta: -0.15, propertyMove: -0.04, exchangeMove: 0.015, unemploymentDelta: 0.22 },
-  'jobs-improve': { baseRateDelta: 0.05, propertyMove: 0.025, exchangeMove: -0.005, unemploymentDelta: -0.25 },
+  'jobs-improve': { baseRateDelta: 0.15, propertyMove: 0.025, exchangeMove: -0.005, unemploymentDelta: -0.25 },
   'unemployment-worse': { baseRateDelta: -0.1, propertyMove: -0.035, exchangeMove: 0.015, unemploymentDelta: 0.3 },
   'inflation-cool': { baseRateDelta: -0.25, propertyMove: 0.02, exchangeMove: -0.01, unemploymentDelta: -0.04 },
   'inflation-rebound': { baseRateDelta: 0.3, propertyMove: -0.025, exchangeMove: 0.015, unemploymentDelta: 0.06 },
@@ -1613,7 +1756,7 @@ const eventMacroImpacts = {
   'property-ease': { baseRateDelta: 0, propertyMove: 0.06, exchangeMove: 0, unemploymentDelta: -0.05 },
   'property-tighten': { baseRateDelta: 0.05, propertyMove: -0.06, exchangeMove: 0.005, unemploymentDelta: 0.06 },
   'us-rally': { baseRateDelta: 0, propertyMove: 0.01, exchangeMove: -0.015, unemploymentDelta: -0.08 },
-  'korea-export': { baseRateDelta: 0, propertyMove: 0.01, exchangeMove: -0.01, unemploymentDelta: -0.12 },
+  'korea-export': { baseRateDelta: 0.05, propertyMove: 0.01, exchangeMove: -0.01, unemploymentDelta: -0.12 },
   rare: { baseRateDelta: 0, propertyMove: -0.01, exchangeMove: 0.02, unemploymentDelta: 0.05 },
   housing: { baseRateDelta: 0, propertyMove: 0.04, exchangeMove: 0, unemploymentDelta: -0.08 },
   'green-subsidy': { baseRateDelta: -0.05, propertyMove: 0.01, exchangeMove: -0.005, unemploymentDelta: -0.04 },
@@ -1635,6 +1778,12 @@ const eventMacroImpacts = {
   'election-risk': { baseRateDelta: 0.05, propertyMove: -0.025, exchangeMove: 0.025, unemploymentDelta: 0.08 },
   'policy-stability': { baseRateDelta: -0.02, propertyMove: 0.02, exchangeMove: -0.015, unemploymentDelta: -0.06 },
   'argentina-reform': { baseRateDelta: 0, propertyMove: -0.01, exchangeMove: 0.025, unemploymentDelta: 0.05 },
+  'emergency-stimulus': { baseRateDelta: -0.4, propertyMove: 0.02, exchangeMove: 0.005, unemploymentDelta: -0.3 },
+  'wage-spiral': { baseRateDelta: 0.3, propertyMove: -0.01, exchangeMove: -0.005, unemploymentDelta: 0.05 },
+  'credit-crunch': { baseRateDelta: -0.2, propertyMove: -0.04, exchangeMove: 0.01, unemploymentDelta: 0.4 },
+  'liquidity-flood': { baseRateDelta: 0.15, propertyMove: 0.04, exchangeMove: -0.005, unemploymentDelta: -0.1 },
+  'fx-intervention': { baseRateDelta: 0, propertyMove: 0, exchangeMove: -0.025, unemploymentDelta: 0 },
+  'realty-cooling-policy': { baseRateDelta: 0.05, propertyMove: -0.05, exchangeMove: 0, unemploymentDelta: 0.1 },
 };
 
 function combineEventMacroImpacts(events) {
@@ -1678,6 +1827,115 @@ function combineResolvedImpacts(events) {
   }, {});
 }
 
+// 사이즈 팩터: 우량주 vs 중소형주 — 같은 이슈에 다른 진폭으로 반응
+function applySizeFactor(impactMap, assetsList) {
+  if (!impactMap || !assetsList) return impactMap;
+  const out = {};
+  const assetMap = {};
+  for (const a of assetsList) assetMap[a.id] = a;
+  for (const id of Object.keys(impactMap)) {
+    const a = assetMap[id];
+    const val = impactMap[id];
+    if (a?.type === 'stock' && a.size && SIZE_ISSUE_MULT[a.size]) {
+      out[id] = Number((val * SIZE_ISSUE_MULT[a.size]).toFixed(3));
+    } else {
+      out[id] = val;
+    }
+  }
+  return out;
+}
+
+// 거시지표 임계점 트리거 감지 (다음 라운드에 자동 발동될 이슈 결정)
+function detectMacroTriggers(macroSnapshot, triggerCooldowns) {
+  const fired = [];
+  const nextCooldowns = { ...(triggerCooldowns ?? {}) };
+  for (const trig of MACRO_TRIGGERS) {
+    const onCooldown = (nextCooldowns[trig.id] ?? 0) > 0;
+    if (!onCooldown && trig.when(macroSnapshot)) {
+      fired.push(trig.id);
+      nextCooldowns[trig.id] = trig.cooldown;
+    }
+  }
+  for (const id of Object.keys(nextCooldowns)) {
+    nextCooldowns[id] = Math.max(0, (nextCooldowns[id] ?? 0) - 1);
+  }
+  return { fired, nextCooldowns };
+}
+
+// 정기예금: 목돈 일시 예치 + 만기 잠금 + 우대금리
+function getTimeDepositRate(baseRate) {
+  return Math.max(0.6, baseRate + TIME_DEPOSIT_BONUS_RATE);
+}
+function depositToTimeDeposit(account, amount, currentRound, baseRate) {
+  if (amount <= 0 || amount > (account.cash ?? 0)) return account;
+  if ((account.timeDepositBalance ?? 0) > 0) return account;
+  const rate = getTimeDepositRate(baseRate);
+  return {
+    ...account,
+    cash: account.cash - amount,
+    timeDepositBalance: amount,
+    timeDepositPrincipal: amount,
+    timeDepositDepositedAtRound: currentRound,
+    timeDepositLockedUntilRound: currentRound + TIME_DEPOSIT_LOCK_ROUNDS,
+    timeDepositRate: rate,
+  };
+}
+function accrueTimeDepositInterest(account) {
+  if (!(account.timeDepositBalance > 0) || !account.timeDepositRate) return account;
+  const quarterRate = account.timeDepositRate / 100 / 4;
+  return { ...account, timeDepositBalance: Math.round(account.timeDepositBalance * (1 + quarterRate)) };
+}
+function maybeMatureTimeDeposit(account, currentRound) {
+  if (!(account.timeDepositBalance > 0)) return account;
+  if (currentRound < (account.timeDepositLockedUntilRound ?? Infinity)) return account;
+  return {
+    ...account,
+    cash: account.cash + account.timeDepositBalance,
+    timeDepositBalance: 0,
+    timeDepositPrincipal: 0,
+    timeDepositDepositedAtRound: null,
+    timeDepositLockedUntilRound: null,
+    timeDepositRate: null,
+  };
+}
+function withdrawTimeDepositEarly(account) {
+  if (!(account.timeDepositBalance > 0)) return account;
+  const refund = Math.round((account.timeDepositPrincipal ?? account.timeDepositBalance) * (1 - TIME_DEPOSIT_EARLY_PENALTY));
+  return {
+    ...account,
+    cash: account.cash + refund,
+    timeDepositBalance: 0,
+    timeDepositPrincipal: 0,
+    timeDepositDepositedAtRound: null,
+    timeDepositLockedUntilRound: null,
+    timeDepositRate: null,
+  };
+}
+
+// 학습용 비교 시뮬레이션: 같은 총 납입금으로 정기예금 vs 정기적금 만기 금액 비교
+function simulateSavingsComparison(totalAmount, rounds, annualRate) {
+  // 정기예금: 라운드 0에 totalAmount 일시 예치, 만기까지 분기 복리
+  const quarterly = annualRate / 100 / 4;
+  const timeDepositFinal = Math.round(totalAmount * Math.pow(1 + quarterly, rounds));
+  // 정기적금: 매 라운드 monthly만큼 납입 (회차별로 잔여 기간이 다름)
+  const monthly = totalAmount / rounds;
+  let recurringFinal = 0;
+  for (let r = 1; r <= rounds; r++) {
+    // r번째 납입은 (rounds - r + 1) 라운드 동안 이자 받음... 단순화: (rounds - r)
+    const remaining = rounds - r + 1;
+    recurringFinal += monthly * Math.pow(1 + quarterly, remaining);
+  }
+  recurringFinal = Math.round(recurringFinal);
+  return {
+    timeDepositFinal,
+    recurringFinal,
+    timeDepositInterest: timeDepositFinal - totalAmount,
+    recurringInterest: recurringFinal - totalAmount,
+    diff: timeDepositFinal - recurringFinal,
+  };
+}
+
+
 function getRandomMacroDelta(max, decimals = 2) {
   return Number(((Math.random() * 2 - 1) * max).toFixed(decimals));
 }
@@ -1705,13 +1963,19 @@ function createMacroMove({ baseRate, propertyIndex, exchangeRate, unemploymentRa
     infra: propertyMove * 0.5,
     metroinfra: propertyMove * 0.65,
     sp500: exchangeMove * 0.8,
-    kospi: exchangeMove > 0 ? 0.03 : -0.02,
+    // KOSPI: 환율 상승 시 외국인 자금 유출로 하락 압력 (정석)
+    kospi: exchangeMove > 0 ? -0.02 : 0.02,
     air: exchangeMove > 0 ? -0.04 : 0.03,
     oceanair: exchangeMove > 0 ? -0.05 : 0.035,
     food: exchangeMove > 0 ? -0.03 : 0.02,
     purefood: exchangeMove > 0 ? -0.02 : 0.015,
-    usBond: baseRateDelta > 0 ? -0.03 : 0.03,
-    argBond: exchangeMove > 0 ? -0.04 : 0.02,
+    // 채권: 금리 변동에 선형 비례 직접 충격 (금리 +0.5%p → 채권 -4%)
+    usBond: -baseRateDelta * 0.08,
+    argBond: -baseRateDelta * 0.05 + (exchangeMove > 0 ? -0.04 : 0.02),
+    // 금: 실질금리 ↑ 시 약세, 환율 변동성 보호
+    goldFut: -baseRateDelta * 0.04 + (exchangeMove > 0 ? 0.02 : -0.01),
+    // USD/KRW: 환율 변화 직접 추종
+    usdKrw: exchangeMove * 1.0,
   };
   const unemploymentImpact = unemploymentDelta > 0
     ? { air: -0.03, oceanair: -0.04, enter: -0.03, realty: -0.025, infra: -0.02, metroinfra: -0.03, bank: -0.015, riverbank: -0.02, usBond: 0.02, food: 0.01, purefood: 0.015 }
@@ -1863,7 +2127,7 @@ function moveAssetsLocally(currentAssets, modifier = {}, delistedIds = [], round
       };
     }
     const eventImpact = modifier[asset.id] ?? 0;
-    const marketMove = getPassiveMarketMove();
+    const marketMove = getPassiveMarketMove(asset);
     const nextPrice = Math.max(1000, Math.round((asset.price * (1 + marketMove + eventImpact)) / 100) * 100);
     return {
       ...asset,
@@ -3482,6 +3746,7 @@ function getConflictOutcomeMap(events) {
 
 function pickRandomRoundIssues({ round, now, count = 3 }) {
   return [...scenarioEvents]
+    .filter((event) => !event.triggerOnly)
     .sort(() => Math.random() - 0.5)
     .slice(0, count)
     .map((event, index) => {
@@ -4297,7 +4562,7 @@ function StudentView({
 
         <section className="deposit-ticket" aria-labelledby="deposit-heading">
           <div>
-            <h2 id="deposit-heading">예금 계좌</h2>
+            <h2 id="deposit-heading">보통예금 (자유입출금)</h2>
             <span>분기 복리 적용 · 다음 라운드 예상 이자 {formatWon(nextInterest)}</span>
           </div>
           <label>
@@ -4327,6 +4592,58 @@ function StudentView({
             </button>
           </div>
         </section>
+
+        <section className="savings-learning-card" aria-labelledby="savings-learning-heading">
+          <header className="savings-learning-header">
+            <h2 id="savings-learning-heading">정기예금 vs 정기적금 — 같은 돈, 다른 이자</h2>
+            <p>같은 총 납입금이라도 한 번에 맡기는 정기예금이 더 많은 이자를 받습니다. 직접 비교해 보세요.</p>
+          </header>
+          {(() => {
+            const totalAmount = 6_000_000;
+            const rounds = 6;
+            const sim = simulateSavingsComparison(totalAmount, rounds, getDepositRate(baseRate) + 0.6);
+            const maxInterest = Math.max(sim.timeDepositInterest, sim.recurringInterest, 1);
+            const tdBarWidth = (sim.timeDepositInterest / maxInterest) * 100;
+            const raBarWidth = (sim.recurringInterest / maxInterest) * 100;
+            return (
+              <div className="savings-compare-grid">
+                <div className="compare-row">
+                  <div className="compare-label">정기예금 (목돈 일시예치)</div>
+                  <div className="compare-bar-track">
+                    <div className="compare-bar td-bar" style={{ width: tdBarWidth + '%' }} />
+                  </div>
+                  <div className="compare-value">+ {formatWon(sim.timeDepositInterest)}</div>
+                </div>
+                <div className="compare-row">
+                  <div className="compare-label">정기적금 (월 적립식)</div>
+                  <div className="compare-bar-track">
+                    <div className="compare-bar ra-bar" style={{ width: raBarWidth + '%' }} />
+                  </div>
+                  <div className="compare-value">+ {formatWon(sim.recurringInterest)}</div>
+                </div>
+                <p className="compare-explain">
+                  <strong>왜 차이가 날까요?</strong> 정기적금은 매 라운드 나눠 납입하므로, 마지막 회차에 넣은 돈은 이자를 거의 받지 못합니다.
+                  반면 정기예금은 처음부터 모든 돈이 이자를 받아요. 같은 {formatWon(totalAmount)}, {rounds}라운드 기준으로
+                  <strong> {formatWon(sim.diff)} </strong>만큼 정기예금이 더 받습니다.
+                </p>
+                <p className="compare-explain compare-extra">
+                  <strong>그럼 왜 적금을 들까요?</strong> 한 번에 큰 돈이 없을 때 매달 조금씩 저축 습관을 들이는 도구입니다.
+                  "이자 최대화"가 아니라 "저축 훈련"이 적금의 본래 목적이에요.
+                </p>
+              </div>
+            );
+          })()}
+        </section>
+
+        <aside className="passive-move-notice" aria-label="시장 불확실성 안내">
+          <strong>이슈가 없는데도 가격이 움직이는 이유</strong>
+          <p>
+            실제 시장도 뉴스가 없어도 가격은 항상 조금씩 움직입니다. 다른 종목으로 자금이 빠지거나(공급 증가 → 하락),
+            우리가 모르는 작은 이유들이 모여 가격을 변화시키죠. 이 작은 움직임을 <em>시장의 불확실성</em>이라고 합니다.
+            <br />
+            <strong>특히 중소형주는 우량주보다 더 크게 흔들립니다</strong> — 거래량이 적고 정보가 적기 때문이에요.
+          </p>
+        </aside>
 
         <section className="mobile-stock-list" aria-label="투자 상품 목록">
           {assets.map((asset) => {
@@ -4395,6 +4712,8 @@ function StudentView({
 
 export function App() {
   const [initialAssetBundle] = useState(createInitialAssetBundle);
+  const [triggerCooldowns, setTriggerCooldowns] = useState({});
+  const [forcedNextRoundIssues, setForcedNextRoundIssues] = useState([]);
   const [view, setView] = useState(getInitialView);
   const [studentEntryAllowed] = useState(getInitialStudentEntryAllowed);
   const [hostAuthenticated, setHostAuthenticated] = useState(false);
@@ -5180,7 +5499,13 @@ export function App() {
     }
     let publishedEvents = currentRoundEvents.map((event) => ({ ...event, published: true }));
     if (startMode === 'random') {
-      publishedEvents = pickRandomRoundIssues({ round, now: Date.now(), count: 3 });
+      {
+        const forced = forcedNextRoundIssues ?? [];
+        const remaining = Math.max(0, 3 - forced.length);
+        const randomIssues = remaining > 0 ? pickRandomRoundIssues({ round, now: Date.now(), count: remaining }) : [];
+        publishedEvents = [...forced.map((e) => ({ ...e, published: true })), ...randomIssues];
+        if (forced.length > 0) setForcedNextRoundIssues([]);
+      }
     }
     if (startMode === 'none') {
       publishedEvents = [];
@@ -5306,7 +5631,7 @@ export function App() {
       };
     });
 
-    const eventImpact = combineResolvedImpacts(resolvedEvents);
+    const eventImpact = applySizeFactor(combineResolvedImpacts(resolvedEvents), assets);
     const eventMacroImpact = combineEventMacroImpacts(resolvedEvents);
     const macroBaseline = openMacroContext?.round === round
       ? openMacroContext
@@ -5351,6 +5676,38 @@ export function App() {
     setExchangeRate(macroMove.nextExchangeRate);
     setUnemploymentRate(macroMove.nextUnemploymentRate);
     setOpenMacroContext(null);
+
+    // ── 거시지표 트리거 감지: 임계점 돌파 시 다음 라운드 이슈로 자동 발동 ──
+    const triggerResult = detectMacroTriggers(
+      {
+        baseRate: nextBaseRate,
+        propertyIndex: macroMove.nextPropertyIndex,
+        exchangeRate: macroMove.nextExchangeRate,
+        unemploymentRate: macroMove.nextUnemploymentRate,
+      },
+      triggerCooldowns,
+    );
+    setTriggerCooldowns(triggerResult.nextCooldowns);
+    if (triggerResult.fired.length > 0) {
+      const triggeredIssues = triggerResult.fired
+        .map((id) => scenarioEvents.find((event) => event.id === id))
+        .filter(Boolean)
+        .map((event) => {
+          const issueOption = event.issueOptions[Math.floor(Math.random() * event.issueOptions.length)];
+          return {
+            ...event,
+            ...issueOption,
+            uniqueId: `${event.id}-trigger-${Date.now()}`,
+            published: false,
+            resolved: false,
+            triggered: true,
+          };
+        });
+      setForcedNextRoundIssues(triggeredIssues);
+    } else {
+      setForcedNextRoundIssues([]);
+    }
+
 
     const delistedAssets = round >= DELISTING_START_ROUND
       ? assets
