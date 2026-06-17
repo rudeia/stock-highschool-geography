@@ -1989,13 +1989,16 @@ const eventMacroImpacts = {
 function combineEventMacroImpacts(events) {
   return events.reduce(
     (acc, event) => {
-      if (!event.didApply) return acc;
+      // Week 3 H — 반전 이슈도 매크로 영향 반영 (강도 reverseFactor, 기본 -0.5)
+      const isReverse = event.outcomeType === 'reverse';
+      if (!event.didApply && !isReverse) return acc;
+      const factor = isReverse ? (event.reverseFactor ?? -0.5) : 1;
       const impact = event.macroImpact ?? eventMacroImpacts[getEventKey(event)] ?? {};
       return {
-        baseRateDelta: acc.baseRateDelta + (impact.baseRateDelta ?? 0),
-        propertyMove: acc.propertyMove + (impact.propertyMove ?? 0),
-        exchangeMove: acc.exchangeMove + (impact.exchangeMove ?? 0),
-        unemploymentDelta: acc.unemploymentDelta + (impact.unemploymentDelta ?? 0),
+        baseRateDelta: acc.baseRateDelta + (impact.baseRateDelta ?? 0) * factor,
+        propertyMove: acc.propertyMove + (impact.propertyMove ?? 0) * factor,
+        exchangeMove: acc.exchangeMove + (impact.exchangeMove ?? 0) * factor,
+        unemploymentDelta: acc.unemploymentDelta + (impact.unemploymentDelta ?? 0) * factor,
       };
     },
     { baseRateDelta: 0, propertyMove: 0, exchangeMove: 0, unemploymentDelta: 0 },
@@ -2004,7 +2007,9 @@ function combineEventMacroImpacts(events) {
 
 function combineResolvedImpacts(events) {
   const groupedImpacts = events.reduce((groups, event) => {
-    if (!event.didApply) return groups;
+    // Week 3 H — 반전 이슈(outcomeType === 'reverse')도 가격 합산 대상에 포함
+    const isReverse = event.outcomeType === 'reverse';
+    if (!event.didApply && !isReverse) return groups;
     const groupKey = event.repeatedVolatility ? getEventKey(event) : event.id;
     const group = groups[groupKey] ?? {};
 
@@ -2526,6 +2531,8 @@ function getFinancialLinks(event) {
 function getResultLabel(event, compact) {
   if (event.outcomeType === 'event') return compact ? '뉴스가 가격을 움직였어요' : '실제 이벤트 발생';
   if (event.outcomeType === 'expectation') return compact ? '기대감이 가격을 움직였어요' : '이슈 기대감 반영';
+  // Week 3 H — 반전 케이스 라벨
+  if (event.outcomeType === 'reverse') return compact ? '예상이 빗나가 반대로 움직였어요' : '이슈 무산, 반대 흐름 부각';
   if (event.outcomeType === 'failed') return compact ? '뉴스가 실패했어요' : '이슈 실패';
   return event.didApply ? '영향 반영' : '영향 미반영';
 }
@@ -2533,6 +2540,8 @@ function getResultLabel(event, compact) {
 function getResultClass(event) {
   if (event.outcomeType === 'event') return 'applied';
   if (event.outcomeType === 'expectation') return 'expectation';
+  // Week 3 H — 반전 케이스 색상 클래스 (파랑 계열)
+  if (event.outcomeType === 'reverse') return 'reverse';
   return 'skipped';
 }
 
@@ -2635,7 +2644,8 @@ function RoundExplanation({ summary, assets, compact = false }) {
                   </div>
                 </div>
               ) : null}
-              {!compact && event.didApply !== false ? (
+              {/* Week 3 H — 반전 케이스는 영향 자산도 표시 (부호 반전된 값이 그대로 반영됨) */}
+              {!compact && (event.didApply !== false || event.outcomeType === 'reverse') ? (
                 <div className="impact-chips" aria-label={`${event.title} 영향 자산`}>
                   {movers.map((mover) => (
                     <span className={mover.change >= 0 ? 'up-chip' : 'down-chip'} key={mover.name}>
@@ -2650,13 +2660,20 @@ function RoundExplanation({ summary, assets, compact = false }) {
                   <span>{event.expectationDetail}</span>
                 </p>
               ) : null}
+              {/* Week 3 H — 반전 안내 (failure 대신 표시) */}
+              {event.outcomeType === 'reverse' ? (
+                <p className="reverse-note">
+                  <strong>{event.reverseTitle}</strong>
+                  <span>{event.reverseDetail}</span>
+                </p>
+              ) : null}
               {event.repeatedVolatility ? (
                 <p className="volatility-note">
                   <strong>동일 유형 이슈 반복 적용</strong>
                   <span>같은 유형의 이슈가 {event.repeatedCount ?? 2}회 실제로 반영되어 시장 변동성이 단계적으로 확대되었습니다.</span>
                 </p>
               ) : null}
-              {event.didApply === false ? (
+              {event.didApply === false && event.outcomeType !== 'reverse' ? (
                 <p className="no-impact">
                   <strong>{event.failureTitle}</strong>
                   <span>{event.failureDetail}</span>
@@ -2708,6 +2725,103 @@ function IssueTicker({ events, phase, compact = false }) {
           </article>
         ))}
       </div>
+    </section>
+  );
+}
+
+// Week 3 H — 교사 대시보드: 라운드별 이슈 분석 탭
+function TeacherRoundIssuesPanel({ triggeredEventsByRound, totalRounds, currentRound }) {
+  const roundsWithData = Object.keys(triggeredEventsByRound ?? {})
+    .map((k) => Number(k))
+    .filter((r) => Number.isFinite(r) && (triggeredEventsByRound[r] ?? []).length > 0)
+    .sort((a, b) => a - b);
+  const [selected, setSelected] = useState(null);
+  const activeRound = selected && roundsWithData.includes(selected)
+    ? selected
+    : (roundsWithData.at(-1) ?? null);
+  const events = activeRound ? (triggeredEventsByRound[activeRound] ?? []) : [];
+  return (
+    <section className="round-issues-panel" aria-label="라운드별 이슈 분석">
+      <div className="panel-heading split">
+        <div>
+          <Activity size={20} aria-hidden="true" />
+          <h2>라운드별 이슈 분석</h2>
+        </div>
+        <span className="limit-pill">{roundsWithData.length}/{totalRounds} 라운드 기록</span>
+      </div>
+      {roundsWithData.length === 0 ? (
+        <p className="teacher-hint" style={{ padding: 12 }}>
+          아직 등록된 이슈가 없습니다. 라운드를 시작하면 여기에 라운드별로 누적됩니다.
+        </p>
+      ) : (
+        <>
+          <div className="round-selector" role="tablist" aria-label="라운드 선택">
+            {roundsWithData.map((r) => {
+              const list = triggeredEventsByRound[r] ?? [];
+              const triggered = list.filter((e) => e.triggered).length;
+              return (
+                <button
+                  key={r}
+                  type="button"
+                  className={r === activeRound ? 'active' : ''}
+                  onClick={() => setSelected(r)}
+                  title={triggered > 0 ? `트리거 자동 발동 ${triggered}건 포함` : undefined}
+                >
+                  R{r}
+                  {triggered > 0 ? <span style={{ marginLeft: 4, color: '#d97706' }}>•</span> : null}
+                </button>
+              );
+            })}
+          </div>
+          <div className="round-issues-list" style={{ display: 'grid', gap: 8, padding: 12 }}>
+            {events.length === 0 ? (
+              <p>이 라운드에는 등록된 이슈가 없습니다.</p>
+            ) : (
+              events.map((event) => {
+                const resolved = event.resolved === true;
+                const applied = resolved && event.didApply === true;
+                const isReverse = event.outcomeType === 'reverse';
+                const status = !resolved
+                  ? '미마감'
+                  : applied
+                  ? (event.outcomeType === 'expectation' ? '기대 선반영' : '실제 발생')
+                  : isReverse
+                  ? '반대 흐름'
+                  : '발생 안 함';
+                const statusColor = !resolved
+                  ? '#6b7280'
+                  : applied
+                  ? (event.outcomeType === 'expectation' ? '#d97706' : '#047857')
+                  : isReverse
+                  ? '#2563eb'
+                  : '#9ca3af';
+                return (
+                  <article
+                    key={event.uniqueId ?? event.id}
+                    style={{
+                      border: '1px solid var(--border, #d1d5db)',
+                      borderRadius: 8,
+                      padding: '10px 12px',
+                      background: event.triggered ? '#fffbeb' : (isReverse ? '#eff6ff' : '#fff'),
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
+                      <strong style={{ fontSize: 13 }}>
+                        {event.triggered ? '[트리거] ' : ''}{event.title}
+                      </strong>
+                      <span style={{ fontSize: 11, color: statusColor, fontWeight: 600 }}>{status}</span>
+                    </div>
+                    <p style={{ margin: '4px 0', fontSize: 12, color: '#374151' }}>{event.detail}</p>
+                    {event.principle ? (
+                      <p style={{ margin: 0, fontSize: 11, color: '#6b7280' }}>{event.principle}</p>
+                    ) : null}
+                  </article>
+                );
+              })
+            )}
+          </div>
+        </>
+      )}
     </section>
   );
 }
@@ -3587,6 +3701,76 @@ function FinalReport({
         )}
       </div>
 
+      {/* Week 3 H — 회고 작성 보조용: 전체 라운드 이슈 타임라인 (스크롤로 한 번에 확인) */}
+      {sortedRoundLogs.some((log) => (log.eventAnalysis ?? []).length > 0) ? (
+        <details className="report-section round-issue-timeline" open>
+          <summary>
+            <strong>라운드별 이슈 타임라인</strong>
+            <span style={{ marginLeft: 8, fontSize: 12, color: '#6b7280' }}>
+              회고 작성 시 참고
+            </span>
+          </summary>
+          <div style={{ display: 'grid', gap: 12, marginTop: 8 }}>
+            {sortedRoundLogs.map((log) => {
+              const events = log.eventAnalysis ?? [];
+              if (events.length === 0) return null;
+              return (
+                <article
+                  key={log.id}
+                  style={{
+                    border: '1px solid var(--border, #d1d5db)',
+                    borderRadius: 8,
+                    padding: 10,
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
+                    <strong style={{ fontSize: 13 }}>{log.round}라운드</strong>
+                    <span style={{ fontSize: 11, color: '#6b7280' }}>총자산 {formatWon(log.totalAsset)}</span>
+                  </div>
+                  <ul style={{ margin: 0, paddingLeft: 18, display: 'grid', gap: 4 }}>
+                    {events.map((ev, idx) => {
+                      const resolved = ev.resolved === true;
+                      const applied = resolved && ev.didApply === true;
+                      const expectation = applied && ev.outcomeType === 'expectation';
+                      const isReverse = ev.outcomeType === 'reverse';
+                      const status = !resolved
+                        ? '미마감'
+                        : applied
+                        ? (expectation ? '기대 선반영' : '실제 발생')
+                        : isReverse
+                        ? '반대 흐름'
+                        : '발생 안 함';
+                      const color = !resolved
+                        ? '#6b7280'
+                        : applied
+                        ? (expectation ? '#d97706' : '#047857')
+                        : isReverse
+                        ? '#2563eb'
+                        : '#9ca3af';
+                      return (
+                        <li key={`${log.round}-${ev.id}-${idx}`} style={{ fontSize: 12, lineHeight: 1.5 }}>
+                          <span style={{ fontWeight: 600 }}>
+                            {ev.triggered ? '[트리거] ' : ''}{ev.title}
+                          </span>
+                          <span style={{ marginLeft: 6, color, fontSize: 11, fontWeight: 600 }}>
+                            {status}
+                          </span>
+                          {ev.affectedAssets?.length ? (
+                            <div style={{ color: '#6b7280', fontSize: 11 }}>
+                              영향: {ev.affectedAssets.join(' · ')}
+                            </div>
+                          ) : null}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </article>
+              );
+            })}
+          </div>
+        </details>
+      ) : null}
+
       {/* Week 3 G — 라운드별 메모 회고 타임라인 */}
       {roundNotes && Object.keys(roundNotes).filter((k) => (roundNotes[k] ?? '').trim().length > 0).length > 0 ? (
         <details className="round-notes-timeline" open>
@@ -3780,6 +3964,25 @@ function AssetLearningPanel({ asset }) {
         <div>
           <strong>{asset.name}</strong>
           <span>{asset.country} · {asset.sector}</span>
+          {/* Week 3 H — 기업 정보에 배당 티어 노출 */}
+          {asset.type === 'stock' && asset.dividendTier ? (
+            <span
+              className={`dividend-tier-badge tier-${asset.dividendTier}`}
+              title="4·8·12라운드 종료 시점 보유 시 배당 지급 (가격 변동 후 기준, 배당락 = 배당의 절반)"
+              style={{ marginTop: 4 }}
+            >
+              배당: {DIVIDEND_TIER_LABELS[asset.dividendTier]}
+            </span>
+          ) : null}
+          {asset.type === 'bond' && asset.couponRate ? (
+            <span
+              className="dividend-tier-badge tier-stable"
+              title="라운드마다 액면가 기준 단리 이자 지급"
+              style={{ marginTop: 4 }}
+            >
+              쿠폰: 라운드당 {(asset.couponRate * 100).toFixed(1)}%
+            </span>
+          ) : null}
         </div>
         <p>{profile.story}</p>
       </article>
@@ -4277,6 +4480,7 @@ function HostView({
   roomExpired,
   issueDraft,
   currentRoundEvents,
+  triggeredEventsByRound,
   latestRoundSummary,
   submissions,
   syncStatus,
@@ -4577,6 +4781,12 @@ function HostView({
         </section>
 
         <IssueTicker events={currentRoundEvents} phase={phase} />
+        {/* Week 3 H — 교사 대시보드: 라운드별 이슈 분석 탭 */}
+        <TeacherRoundIssuesPanel
+          triggeredEventsByRound={triggeredEventsByRound}
+          totalRounds={totalRounds}
+          currentRound={round}
+        />
         <RoundExplanation summary={latestRoundSummary} assets={assets} />
         <CloseDashboard phase={phase} players={rankingPlayers} />
         <TeacherStudentMonitor
@@ -5029,16 +5239,16 @@ function StudentView({
               수많은 투자자가 각자의 판단으로 매수·매도를 하기 때문이죠. 이 작은 움직임을
               <em> 시장의 불확실성</em>이라고 부릅니다.
             </p>
-            <ul className="noise-multipliers">
-              <li><strong>우량주</strong> 0.7배 — 거래량이 많아 잘 흔들리지 않음</li>
-              <li><strong>일반 종목</strong> 1.0배 — 기본 변동성</li>
-              <li><strong>중소형주</strong> 1.6배 — 거래량이 적어 크게 흔들림</li>
-              <li><strong>채권</strong> 0.3배 — 안전자산은 변동이 작음</li>
-              <li><strong>외환</strong> 0.4배 — 매크로 시장은 비교적 안정</li>
-            </ul>
+            <p>
+              자산마다 흔들리는 폭은 다릅니다.
+              <strong> 우량주와 채권처럼 거래량이 많거나 안전한 자산</strong>은 비교적 덜 흔들리고,
+              <strong> 중소형주처럼 거래량이 적은 자산</strong>은 더 크게 출렁입니다.
+              외환·원자재도 시장 상황에 따라 항상 조금씩 변합니다.
+            </p>
             <p className="noise-tip">
-              <strong>학습 포인트</strong> 매 라운드 ±5% 범위에서 자동으로 발생합니다.
-              단기 변동에 흔들리지 말고 <em>이슈와 함께 움직이는 큰 흐름</em>을 보세요.
+              <strong>학습 포인트</strong> 단기 변동에 흔들리지 말고
+              <em> 이슈와 함께 움직이는 큰 흐름</em>을 보세요.
+              불확실성은 사라지지 않습니다. 다만 분산투자로 충격을 줄일 수 있습니다.
             </p>
           </div>
         </details>
@@ -5444,11 +5654,14 @@ export function App() {
   }, [depositPrincipal, effectiveCash, effectiveDeposit, effectiveDepositInterestEarned, effectivePortfolio, gameStarted, initialCapitalGranted, joined, nickname, reflection, remoteRoomId, roundLogs, roundNotes, salaryPaidRounds, selectedTeamKey, studentNumber, studentPasscodeHash, teamMode, tradeLogs]);
 
   useEffect(() => {
-    if (!gameStarted || !joined || teamMode || phase !== 'open' || salaryPaidRounds.includes(round)) return;
-    const timer = window.setTimeout(() => {
-      setCash((current) => current + ROUND_SALARY);
-      setSalaryPaidRounds((current) => [...current, round]);
-      setTradeLogs((current) => [
+    // Week 3 H — 생활소득 신뢰성 패치
+    if (!gameStarted || !joined || teamMode || phase !== 'open') return;
+    if (salaryPaidRounds.includes(round)) return;
+    setSalaryPaidRounds((current) => (current.includes(round) ? current : [...current, round]));
+    setCash((current) => current + ROUND_SALARY);
+    setTradeLogs((current) => {
+      if (current.some((log) => log.round === round && log.type === '월급')) return current;
+      return [
         buildTradeLog({
           round,
           type: '월급',
@@ -5457,9 +5670,8 @@ export function App() {
           now: Date.now(),
         }),
         ...current,
-      ]);
-    }, 0);
-    return () => window.clearTimeout(timer);
+      ];
+    });
   }, [gameStarted, joined, phase, round, salaryPaidRounds, teamMode]);
 
   useEffect(() => {
@@ -5957,18 +6169,23 @@ export function App() {
       return;
     }
     let publishedEvents = currentRoundEvents.map((event) => ({ ...event, published: true }));
+    // Week 3 H — 거시 트리거 자동 발동 패치 (모든 모드에서 forced 이슈 자동 적용)
+    const forced = forcedNextRoundIssues ?? [];
+    const forcedPublished = forced.map((e) => ({ ...e, published: true, triggered: true }));
     if (startMode === 'random') {
-      {
-        const forced = forcedNextRoundIssues ?? [];
-        const remaining = Math.max(0, 3 - forced.length);
-        const randomIssues = remaining > 0 ? pickRandomRoundIssues({ round, now: Date.now(), count: remaining }) : [];
-        publishedEvents = [...forced.map((e) => ({ ...e, published: true })), ...randomIssues];
-        if (forced.length > 0) setForcedNextRoundIssues([]);
-      }
+      const remaining = Math.max(0, 3 - forcedPublished.length);
+      const randomIssues = remaining > 0 ? pickRandomRoundIssues({ round, now: Date.now(), count: remaining }) : [];
+      publishedEvents = [...forcedPublished, ...randomIssues];
+    } else if (startMode === 'none') {
+      publishedEvents = forcedPublished;
+    } else {
+      const forcedIds = new Set(forcedPublished.map((e) => e.id));
+      publishedEvents = [
+        ...forcedPublished,
+        ...publishedEvents.filter((e) => !forcedIds.has(e.id)),
+      ];
     }
-    if (startMode === 'none') {
-      publishedEvents = [];
-    }
+    if (forced.length > 0) setForcedNextRoundIssues([]);
     const nextPrincipal = getInvestedPrincipal({ gameStarted: true, round, phase: 'open' });
     const salariedPlayers = players.map((player) => ({
       ...player,
@@ -6074,19 +6291,48 @@ export function App() {
       };
     });
 
-    const appliedEventTypeCounts = getAppliedEventTypeCounts(initialResolvedEvents);
-    const resolvedEvents = initialResolvedEvents.map((event) => {
+    // Week 3 H — 반전 효과(reverse): 무산된 이슈 중 40% 확률, 라운드당 최대 1개
+    // 상충(conflict)으로 이미 막힌 이슈는 별도 사유가 있으므로 반전 후보에서 제외
+    const REVERSE_PROBABILITY = 0.4;
+    const REVERSE_FACTOR = -0.5;
+    let reverseRemaining = 1;
+    const reverseAdjustedEvents = initialResolvedEvents.map((event) => {
+      if (event.didApply) return event;
+      if (event.conflictLabel) return event;
+      if (reverseRemaining <= 0) return event;
+      if (Math.random() >= REVERSE_PROBABILITY) return event;
+      reverseRemaining -= 1;
+      return {
+        ...event,
+        outcomeType: 'reverse',
+        reverseFactor: REVERSE_FACTOR,
+        reverseTitle: `${event.title} 무산, 반대 흐름 부각`,
+        reverseDetail: `예상되던 이슈가 무산되면서, 시장 참여자들이 반대 방향 시나리오에 무게를 두기 시작했습니다. (영향 강도 ${Math.abs(REVERSE_FACTOR) * 100}%)`,
+      };
+    });
+
+    const appliedEventTypeCounts = getAppliedEventTypeCounts(reverseAdjustedEvents);
+    const resolvedEvents = reverseAdjustedEvents.map((event) => {
       const repeatedCount = appliedEventTypeCounts[getEventKey(event)] ?? 0;
       const repeatedVolatility = event.didApply && repeatedCount >= 2;
+      const isReverse = event.outcomeType === 'reverse';
+      let resolvedImpact = {};
+      if (event.didApply) {
+        resolvedImpact = repeatedVolatility
+          ? normalizeRepeatedEventImpact(event.impact, repeatedCount, assets)
+          : normalizeEventImpact(event.impact, assets);
+      } else if (isReverse) {
+        const base = normalizeEventImpact(event.impact, assets);
+        const factor = event.reverseFactor ?? -0.5;
+        resolvedImpact = Object.fromEntries(
+          Object.entries(base).map(([assetId, value]) => [assetId, Number((value * factor).toFixed(3))]),
+        );
+      }
       return {
         ...event,
         repeatedVolatility,
         repeatedCount,
-        resolvedImpact: event.didApply
-          ? repeatedVolatility
-            ? normalizeRepeatedEventImpact(event.impact, repeatedCount, assets)
-            : normalizeEventImpact(event.impact, assets)
-          : {},
+        resolvedImpact,
       };
     });
 
@@ -6712,6 +6958,7 @@ export function App() {
           roomExpired={roomExpired}
           issueDraft={issueDraft}
           currentRoundEvents={currentRoundEvents}
+          triggeredEventsByRound={triggeredEventsByRound}
           latestRoundSummary={latestRoundSummary}
           submissions={submissions}
           syncStatus={syncStatus}

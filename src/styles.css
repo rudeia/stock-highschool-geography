@@ -3464,3 +3464,24 @@ input {
     padding: 12px 14px;
   }
 }
+
+
+/* Week 3 H — 반전 이슈(reverse) 색상: 파랑 계열 */
+.result-badge.reverse {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+.reverse-note {
+  display: grid;
+  gap: 0.25rem;
+  border-radius: 8px;
+  background: #eff6ff;
+  padding: 0.55rem;
+  border-left: 3px solid #2563eb;
+}
+.reverse-note strong {
+  color: #1d4ed8;
+}
+.reverse-note span {
+  color: #1e40af;
+}
