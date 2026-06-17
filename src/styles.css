@@ -2874,3 +2874,593 @@ input {
     min-width: 0;
   }
 }
+
+
+/* ============================================
+   Week 1 J + C — Collapsible cards (savings & noise notice)
+   ============================================ */
+.collapsible-card {
+  margin-top: 16px;
+}
+.collapsible-card > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #0f172a;
+  min-height: 44px;
+}
+.collapsible-card > summary::-webkit-details-marker { display: none; }
+.collapsible-card[open] > summary {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  background: #eff6ff;
+}
+.collapsible-card .card-toggle-icon {
+  display: inline-block;
+  width: 14px;
+  text-align: center;
+  font-size: 11px;
+  color: #2563eb;
+  transition: transform 0.18s ease;
+}
+.collapsible-card[open] .card-toggle-icon {
+  transform: rotate(90deg);
+}
+.collapsible-card .card-toggle-label {
+  flex: 1;
+  text-align: left;
+}
+.collapsible-card .card-toggle-hint {
+  font-size: 12px;
+  color: #64748b;
+  font-weight: 500;
+}
+.savings-learning-card[open] > .savings-learning-header,
+.savings-learning-card[open] > .savings-compare-grid {
+  padding: 0 16px;
+}
+.savings-learning-card[open] > .savings-learning-header {
+  padding-top: 14px;
+}
+.savings-learning-card[open] {
+  border: 1px solid #e2e8f0;
+  border-top: 0;
+  border-radius: 0 0 12px 12px;
+  padding-bottom: 16px;
+  background: #ffffff;
+}
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0,0,0,0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Noise notice */
+.passive-move-notice > summary { background: #fef9c3; border-color: #fde68a; }
+.passive-move-notice[open] > summary { background: #fef3c7; }
+.passive-move-notice .noise-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px; height: 22px;
+  border-radius: 6px;
+  background: #f59e0b;
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 13px;
+}
+.passive-move-notice .noise-body {
+  background: #ffffff;
+  border: 1px solid #fde68a;
+  border-top: 0;
+  border-radius: 0 0 12px 12px;
+  padding: 14px 16px;
+}
+.passive-move-notice .noise-body p {
+  font-size: 14px;
+  color: #334155;
+  margin: 0 0 10px;
+  line-height: 1.55;
+}
+.passive-move-notice .noise-multipliers {
+  list-style: none;
+  padding: 10px 12px;
+  margin: 0 0 10px;
+  background: #f8fafc;
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+}
+.passive-move-notice .noise-multipliers li {
+  font-size: 13px;
+  color: #475569;
+}
+.passive-move-notice .noise-multipliers strong {
+  color: #0f172a;
+  display: inline-block;
+  min-width: 70px;
+}
+.passive-move-notice .noise-tip {
+  background: #ecfeff;
+  border: 1px solid #a5f3fc;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #155e75;
+  margin: 0;
+}
+
+/* ============================================
+   Week 1 F — Sector concentration warning (signal light)
+   ============================================ */
+.concentration-alert {
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+}
+.concentration-alert.light-red {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+.concentration-alert.light-amber {
+  background: #fffbeb;
+  border-color: #fde68a;
+}
+.concentration-alert .signal-light {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 4px;
+  background: #1f2937;
+  border-radius: 4px;
+}
+.concentration-alert .signal-light i {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #374151;
+  display: block;
+}
+.concentration-alert .signal-light i[data-color="red"].on { background: #ef4444; box-shadow: 0 0 6px rgba(239,68,68,0.7); }
+.concentration-alert .signal-light i[data-color="amber"].on { background: #f59e0b; box-shadow: 0 0 6px rgba(245,158,11,0.7); }
+.concentration-alert .signal-light i[data-color="green"].on { background: #10b981; box-shadow: 0 0 6px rgba(16,185,129,0.7); }
+.concentration-alert .concentration-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.concentration-alert .concentration-text strong {
+  font-size: 14px;
+  color: #0f172a;
+}
+.concentration-alert.light-red .concentration-text strong { color: #b91c1c; }
+.concentration-alert.light-amber .concentration-text strong { color: #92400e; }
+.concentration-alert .concentration-text span {
+  font-size: 12px;
+  color: #64748b;
+}
+
+/* ============================================
+   Week 1 I — Tablet breakpoints (768-1023 / 1024-1279)
+   ============================================ */
+@media (min-width: 768px) and (max-width: 1023px) {
+  /* iPad 세로 / 일반 태블릿 */
+  .host-layout,
+  .student-layout {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+  .host-sidebar,
+  .student-sidebar {
+    width: 100%;
+    max-width: none;
+  }
+  .control-strip {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .setup-options-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .donut-layout {
+    flex-direction: row;
+    align-items: center;
+  }
+  .mobile-stock-list button {
+    min-height: 56px;
+  }
+  /* 터치 타깃: 모든 버튼 44px 이상 */
+  button,
+  .segmented-control button,
+  .command {
+    min-height: 44px;
+  }
+  input[type="text"],
+  input[type="number"] {
+    min-height: 44px;
+    font-size: 16px; /* iOS Safari zoom 방지 */
+  }
+  /* 거래 패널 상단 고정 */
+  .trade-ticket {
+    position: sticky;
+    top: 8px;
+    z-index: 5;
+  }
+}
+
+@media (min-width: 1024px) and (max-width: 1279px) {
+  /* iPad 가로 / 작은 노트북 */
+  .host-layout {
+    grid-template-columns: 1fr 320px;
+    gap: 16px;
+  }
+  .control-strip {
+    font-size: 13px;
+  }
+  .setup-options-grid {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+  button,
+  .command {
+    min-height: 44px;
+  }
+  .donut-chart {
+    max-width: 200px;
+  }
+}
+
+
+/* === 채권 쿠폰률 안내 (Task A) === */
+.bond-coupon-note {
+  display: block;
+  margin-top: 6px;
+  padding: 6px 10px;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: #1e3a8a;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+}
+
+
+/* ========== Week 2 K — 경제 시드 카드 ========== */
+.economic-seed-card {
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  padding: 14px 16px;
+  background: rgba(37, 99, 235, 0.04);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.economic-seed-card > div:first-child strong {
+  font-size: 14px;
+  color: #111827;
+  display: block;
+  margin-bottom: 4px;
+}
+.economic-seed-card code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: #eff6ff;
+  color: #1d4ed8;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+}
+.economic-seed-card span {
+  font-size: 12px;
+  color: #4b5563;
+  line-height: 1.55;
+}
+.seed-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 8px;
+}
+.seed-grid > div {
+  padding: 8px 10px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.seed-grid span {
+  font-size: 11px;
+  color: #6b7280;
+}
+.seed-grid strong {
+  font-size: 14px;
+  font-weight: 600;
+  color: #111827;
+}
+
+/* ========== Week 2 E — 배당 티어 배지 ========== */
+.dividend-tier-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid;
+}
+.dividend-tier-badge.tier-growth {
+  background: #f3f4f6;
+  color: #374151;
+  border-color: #d1d5db;
+}
+.dividend-tier-badge.tier-stable {
+  background: #ecfdf5;
+  color: #047857;
+  border-color: #6ee7b7;
+}
+.dividend-tier-badge.tier-highYield {
+  background: #fef3c7;
+  color: #92400e;
+  border-color: #fcd34d;
+}
+
+/* 다크 모드 호환 */
+@media (prefers-color-scheme: dark) {
+  .economic-seed-card {
+    background: rgba(37, 99, 235, 0.08);
+    border-color: #374151;
+  }
+  .economic-seed-card > div:first-child strong { color: #f3f4f6; }
+  .economic-seed-card span { color: #9ca3af; }
+  .economic-seed-card code { background: #1e3a8a; color: #bfdbfe; }
+  .seed-grid > div { background: #1f2937; border-color: #374151; }
+  .seed-grid span { color: #9ca3af; }
+  .seed-grid strong { color: #f3f4f6; }
+}
+
+/* ========================================================================
+   Week 2 E + Week 3 G — 추가 스타일 (styles.css 끝부분에 붙여넣기)
+   ======================================================================== */
+
+/* ---- Week 2 E: 배당 안내 배너 ---- */
+.dividend-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  margin: 10px 0 12px;
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  border-left: 3px solid #64748b;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #1e293b;
+  line-height: 1.45;
+}
+
+.dividend-banner.is-today {
+  background: #fef3c7;
+  border-color: #f59e0b;
+  border-left-color: #d97706;
+  color: #78350f;
+}
+
+.dividend-banner-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  background: #64748b;
+  color: #fff;
+  border-radius: 4px;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.dividend-banner.is-today .dividend-banner-icon {
+  background: #d97706;
+}
+
+.dividend-banner-text {
+  flex: 1;
+}
+
+.dividend-banner-text strong {
+  font-weight: 700;
+}
+
+/* ---- Week 3 G: 라운드별 메모 카드 (학생 거래 패널, phase=closed 시) ---- */
+.round-note-card {
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin: 12px 0;
+}
+
+.round-note-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.round-note-head strong {
+  font-size: 14px;
+  color: #78350f;
+  font-weight: 700;
+}
+
+.round-note-meter {
+  font-size: 11px;
+  color: #92400e;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.round-note-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid #fcd34d;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 13px;
+  background: #fff;
+  resize: vertical;
+  min-height: 48px;
+  color: #1e293b;
+  line-height: 1.4;
+}
+
+.round-note-input:focus {
+  outline: 2px solid #f59e0b;
+  outline-offset: 1px;
+  border-color: #f59e0b;
+}
+
+.round-note-input::placeholder {
+  color: #a8956b;
+  font-size: 12px;
+}
+
+.round-note-hint {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: #92400e;
+  line-height: 1.4;
+}
+
+/* ---- Week 3 G: 회고 타임라인 (FinalReport) ---- */
+.round-notes-timeline {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin: 14px 0;
+}
+
+.round-notes-timeline > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  list-style: none;
+  font-size: 14px;
+  color: #0f172a;
+  user-select: none;
+}
+
+.round-notes-timeline > summary::-webkit-details-marker {
+  display: none;
+}
+
+.round-notes-timeline > summary::before {
+  content: '▶';
+  display: inline-block;
+  font-size: 10px;
+  color: #64748b;
+  margin-right: 8px;
+  transition: transform 0.15s;
+}
+
+.round-notes-timeline[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.round-notes-timeline > summary strong {
+  flex: 1;
+  font-weight: 700;
+}
+
+.round-notes-count {
+  font-size: 11px;
+  background: #f1f5f9;
+  color: #475569;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.round-notes-list {
+  list-style: none;
+  padding: 12px 0 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.round-note-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  background: #f8fafc;
+  border-left: 2px solid #cbd5e1;
+  border-radius: 4px;
+}
+
+.round-note-label {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 700;
+  color: #475569;
+  background: #fff;
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid #cbd5e1;
+  font-variant-numeric: tabular-nums;
+  min-width: 28px;
+  text-align: center;
+}
+
+.round-note-text {
+  flex: 1;
+  margin: 0;
+  font-size: 13px;
+  color: #1e293b;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.round-notes-help {
+  margin: 10px 0 0;
+  font-size: 11px;
+  color: #64748b;
+  font-style: italic;
+  line-height: 1.4;
+}
+
+/* ---- 태블릿 분기 (768~1023): 메모 카드 폰트 조정 ---- */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .round-note-input {
+    font-size: 16px; /* iOS Safari 줌 방지 */
+    min-height: 56px;
+  }
+  .dividend-banner {
+    font-size: 14px;
+    padding: 12px 14px;
+  }
+}

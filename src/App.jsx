@@ -80,6 +80,25 @@ const DIRECT_REPEATED_IMPACT_THRESHOLD = 0.08;
 const MIN_INDIRECT_REPEATED_EVENT_IMPACT = 0.05;
 const MAX_INDIRECT_REPEATED_EVENT_IMPACT = 0.12;
 const PASSIVE_MARKET_MOVE = 0.05;
+// Week 2 E — 배당 시스템 상수
+const DIVIDEND_ROUNDS = [4, 8, 12]; // 배당 지급 라운드 (지정 라운드에서만 작동)
+const EX_DIVIDEND_RATIO = 0.5; // 배당락 비율 (배당금의 절반만큼 주가 하락)
+const DIVIDEND_TIER_RATES = { growth: 0, stable: 0.05, highYield: 0.10 };
+const DIVIDEND_TIER_LABELS = { growth: '성장주(배당 없음)', stable: '안정주(5%)', highYield: '고배당주(10%)' };
+const DIVIDEND_TIER_DISTRIBUTION = [
+  { tier: 'growth', weight: 0.40 },
+  { tier: 'stable', weight: 0.40 },
+  { tier: 'highYield', weight: 0.20 },
+];
+// Week 2 K — 방 생성 난수 시드(경제 체질 / 이슈 강도 / 트리거 민감도)
+const SEED_BASE_RATE_RANGE = [3.0, 4.5];
+const SEED_UNEMPLOYMENT_RANGE = [3.0, 4.5];
+const SEED_EXCHANGE_RATE_RANGE = [1280, 1430];
+const SEED_ISSUE_INTENSITY_RANGE = [0.85, 1.15];
+const SEED_TRIGGER_SENSITIVITY_RANGE = [0.90, 1.10];
+// Week 1 B — 거래 수수료(매수·매도 양쪽) + 매도 시 거래세
+const TRADE_FEE_RATE = 0.0025;
+const TRADE_TAX_RATE = 0.0018;
 // 우량주 vs 중소형주 대립 난수 (PASSIVE 노이즈에 적용)
 const PASSIVE_MOVE_LARGE_MULT = 0.7;
 const PASSIVE_MOVE_SMALL_MULT = 1.6;
@@ -97,12 +116,13 @@ const RECURRING_BONUS_RATE = 0.8;
 const RECURRING_EARLY_PENALTY = 0.02;
 // 거시지표 임계점 트리거
 const MACRO_TRIGGERS = [
-  { id: 'emergency-stimulus', when: (m) => m.unemploymentRate > 8.0, cooldown: 3 },
-  { id: 'wage-spiral', when: (m) => m.unemploymentRate < 2.5, cooldown: 3 },
-  { id: 'credit-crunch', when: (m) => m.baseRate > 7.0, cooldown: 4 },
-  { id: 'liquidity-flood', when: (m) => m.baseRate < 1.0, cooldown: 4 },
-  { id: 'fx-intervention', when: (m) => m.exchangeRate > 1600, cooldown: 3 },
-  { id: 'realty-cooling-policy', when: (m) => m.propertyIndex > 350000, cooldown: 3 },
+  // Week 2 K — sensitivity 적용된 _adj 값이 있으면 우선 사용, 없으면 원본 값 사용 (하위 호환)
+  { id: 'emergency-stimulus', when: (m) => (m._adjUnempHigh ?? m.unemploymentRate) > 8.0, cooldown: 3 },
+  { id: 'wage-spiral', when: (m) => (m._adjUnempLow ?? m.unemploymentRate) < 2.5, cooldown: 3 },
+  { id: 'credit-crunch', when: (m) => (m._adjBaseRateHigh ?? m.baseRate) > 7.0, cooldown: 4 },
+  { id: 'liquidity-flood', when: (m) => (m._adjBaseRateLow ?? m.baseRate) < 1.0, cooldown: 4 },
+  { id: 'fx-intervention', when: (m) => (m._adjExchange ?? m.exchangeRate) > 1600, cooldown: 3 },
+  { id: 'realty-cooling-policy', when: (m) => (m._adjProperty ?? m.propertyIndex) > 350000, cooldown: 3 },
 ];
 const INITIAL_EXCHANGE_RATE = 1350;
 const ROOM_TTL_MS = 24 * 60 * 60 * 1000;
@@ -184,6 +204,7 @@ const initialTradableAssets = [
   { id: 'oceanair', type: 'stock', size: 'small', country: '한국', name: '오션항공', sector: '항공/물류', priceOptions: [7_600, 14_400, 22_800], color: '#0284c7' },
   { id: 'purefood', type: 'stock', size: 'small', country: '한국', name: '바른푸드', sector: '식품/농산물', priceOptions: [14_500, 24_500, 38_000], color: '#65a30d' },
   { id: 'metroinfra', type: 'stock', size: 'small', country: '한국', name: '메트로인프라', sector: '건설/인프라', priceOptions: [6_200, 11_600, 19_500], color: '#c2410c' },
+  { id: 'bio', type: 'stock', size: 'small', country: '한국', name: '제노믹스바이오', sector: '바이오/신약', priceOptions: [12_500, 24_000, 41_000], color: '#a21caf' },
   { id: 'sp500', type: 'etf', country: '미국', name: 'S&P 500 ETF', sector: '미국 대표지수', priceOptions: [48_000, 62_000, 76_000], color: '#1d4ed8' },
   { id: 'kospi', type: 'etf', country: '한국', name: 'KOSPI 200 ETF', sector: '한국 대표지수', priceOptions: [27_500, 34_500, 42_000], color: '#0f766e' },
   { id: 'realty', type: 'property', country: '한국', name: '도시부동산지수 추종 ETF', sector: '주거/상업 부동산 지수', priceOptions: [180_000, 250_000, 320_000], color: '#a16207' },
@@ -191,9 +212,36 @@ const initialTradableAssets = [
   { id: 'grainFut', type: 'futures', country: '글로벌', name: '글로벌 곡물 선물', sector: '식량 원자재', priceOptions: [31_000, 45_000, 59_000], color: '#ca8a04' },
   { id: 'goldFut', type: 'futures', country: '글로벌', name: '글로벌 금 선물', sector: '귀금속 안전자산', priceOptions: [78_000, 96_000, 118_000], color: '#d4a017' },
   { id: 'usdKrw', type: 'forex', country: '글로벌', name: '원/달러 환율 추종 ETN', sector: '외환 파생', priceOptions: [12_800, 13_500, 14_200], color: '#7c2d12' },
-  { id: 'usBond', type: 'bond', country: '미국', name: '미국 10년 국채', sector: '선진국 국채', priceOptions: [91_000, 100_000, 108_000], color: '#334155', faceValue: 100_000 },
-  { id: 'argBond', type: 'bond', country: '아르헨티나', name: '아르헨티나 국채', sector: '고위험 신흥국 국채', priceOptions: [64_000, 92_000, 115_000], color: '#be123c', faceValue: 100_000 },
+  { id: 'usBond', type: 'bond', country: '미국', name: '미국 10년 국채', sector: '선진국 국채', priceOptions: [91_000, 100_000, 108_000], color: '#334155', faceValue: 100_000, couponRate: 0.012 },
+  { id: 'argBond', type: 'bond', country: '아르헨티나', name: '아르헨티나 국채', sector: '고위험 신흥국 국채', priceOptions: [64_000, 92_000, 115_000], color: '#be123c', faceValue: 100_000, couponRate: 0.040 },
 ];
+
+// 채권 라운드별 단리 이자 계산
+// portfolio: { [assetId]: shares }, assets: 자산 배열
+// 반환: { totalInterest, breakdown: [{assetId, name, shares, faceValue, rate, interest}] }
+function computeBondInterest(portfolio, assets) {
+  if (!portfolio || !assets) return { totalInterest: 0, breakdown: [] };
+  const breakdown = [];
+  let totalInterest = 0;
+  for (const asset of assets) {
+    if (asset.type !== 'bond') continue;
+    if (!asset.couponRate || !asset.faceValue) continue;
+    const shares = portfolio[asset.id] ?? 0;
+    if (shares <= 0) continue;
+    const interest = Math.round(shares * asset.faceValue * asset.couponRate);
+    if (interest <= 0) continue;
+    totalInterest += interest;
+    breakdown.push({
+      assetId: asset.id,
+      name: asset.name,
+      shares,
+      faceValue: asset.faceValue,
+      rate: asset.couponRate,
+      interest,
+    });
+  }
+  return { totalInterest, breakdown };
+}
 
 const financialProfileVariants = [
   { key: 'stable', label: '재무 안정형', revenue: 0.96, margin: 1.08, debt: 0.72, cash: 1.28, rd: 0.92, credit: 0.78 },
@@ -219,10 +267,24 @@ const financialBaseByAsset = {
   metroinfra: { revenue: 2.8, margin: 4.8, debt: 188, cash: 0.34, rd: 2, exportRatio: 8, commodityExposure: 84, laborSensitivity: 64, cyclicality: 86, policySensitivity: 82, creditRisk: 70 },
 };
 
+// Week 2 E — 가중확률로 주식 배당 티어 추첨 (성장 40% / 안정 40% / 고배당 20%)
+function pickDividendTier() {
+  const r = Math.random();
+  let acc = 0;
+  for (const entry of DIVIDEND_TIER_DISTRIBUTION) {
+    acc += entry.weight;
+    if (r < acc) return entry.tier;
+  }
+  return DIVIDEND_TIER_DISTRIBUTION[DIVIDEND_TIER_DISTRIBUTION.length - 1].tier;
+}
+
 function createRandomizedAssets() {
   return initialTradableAssets.map((asset) => {
     const price = asset.priceOptions[Math.floor(Math.random() * asset.priceOptions.length)];
     const financials = createInitialFinancials(asset);
+    // Week 2 E — 주식 자산에 한해 방 생성 시 배당 티어 난수 부여
+    const dividendTier = asset.type === 'stock' ? pickDividendTier() : null;
+    const dividendRate = dividendTier ? DIVIDEND_TIER_RATES[dividendTier] : 0;
     return {
       ...asset,
       price,
@@ -230,7 +292,90 @@ function createRandomizedAssets() {
       financialProfile: financials?.profile ?? null,
       financials,
       negativeStreak: 0,
+      dividendTier,
+      dividendRate,
     };
+  });
+}
+
+// Week 2 K — 방 생성 시 3가지 난수 시드 생성 + 표시용 짧은 코드
+function createEconomicSeed() {
+  const baseRate = Number((SEED_BASE_RATE_RANGE[0] + Math.random() * (SEED_BASE_RATE_RANGE[1] - SEED_BASE_RATE_RANGE[0])).toFixed(2));
+  const unemploymentRate = Number((SEED_UNEMPLOYMENT_RANGE[0] + Math.random() * (SEED_UNEMPLOYMENT_RANGE[1] - SEED_UNEMPLOYMENT_RANGE[0])).toFixed(2));
+  const exchangeRate = Math.round(SEED_EXCHANGE_RATE_RANGE[0] + Math.random() * (SEED_EXCHANGE_RATE_RANGE[1] - SEED_EXCHANGE_RATE_RANGE[0]));
+  const issueIntensity = Number((SEED_ISSUE_INTENSITY_RANGE[0] + Math.random() * (SEED_ISSUE_INTENSITY_RANGE[1] - SEED_ISSUE_INTENSITY_RANGE[0])).toFixed(3));
+  const triggerSensitivity = Number((SEED_TRIGGER_SENSITIVITY_RANGE[0] + Math.random() * (SEED_TRIGGER_SENSITIVITY_RANGE[1] - SEED_TRIGGER_SENSITIVITY_RANGE[0])).toFixed(3));
+  // 4자리 16진수 코드 생성 (호스트 화면 표시용)
+  const code = Math.floor(Math.random() * 0xFFFF).toString(16).toUpperCase().padStart(4, '0');
+  return {
+    code,
+    economicConstitution: { baseRate, unemploymentRate, exchangeRate },
+    issueIntensity,
+    triggerSensitivity,
+  };
+}
+
+// Week 2 K — 시드 적용된 트리거 임계점 (민감도가 높을수록 더 빨리 발동)
+function applyTriggerSensitivity(macroSnapshot, sensitivity) {
+  // sensitivity > 1 이면 임계점에 더 빨리 닿도록 지표를 약간 부풀려서 비교
+  const factor = sensitivity ?? 1;
+  return {
+    baseRate: macroSnapshot.baseRate,
+    propertyIndex: macroSnapshot.propertyIndex,
+    exchangeRate: macroSnapshot.exchangeRate,
+    unemploymentRate: macroSnapshot.unemploymentRate,
+    // 비교용 sensitivity 적용 값 (트리거 when() 에서 사용)
+    _adjBaseRateHigh: macroSnapshot.baseRate * factor,
+    _adjBaseRateLow: macroSnapshot.baseRate / factor,
+    _adjUnempHigh: macroSnapshot.unemploymentRate * factor,
+    _adjUnempLow: macroSnapshot.unemploymentRate / factor,
+    _adjExchange: macroSnapshot.exchangeRate * factor,
+    _adjProperty: macroSnapshot.propertyIndex * factor,
+  };
+}
+
+// Week 2 E — 배당 정산 계산: 배당 라운드 종료 시점 보유 중인 주식에 지급 (A안: 연속 보유 요건 폐지)
+function computeDividendPayout(portfolio, assets, currentRound) {
+  const result = { totalDividend: 0, exDividendByAsset: {}, breakdown: [] };
+  if (!DIVIDEND_ROUNDS.includes(currentRound)) return result;
+  for (const asset of assets) {
+    if (asset.type !== 'stock' || asset.delisted) continue;
+    const shares = portfolio[asset.id]?.shares ?? 0;
+    if (shares <= 0) continue;
+    const rate = asset.dividendRate ?? 0;
+    if (rate <= 0) continue;
+    // 가격 변동 후 기준
+    const dividendPerShare = Math.round(asset.price * rate);
+    const totalDividend = dividendPerShare * shares;
+    if (totalDividend <= 0) continue;
+    // 배당락: 배당금의 절반만큼 주가 하락 (1주당 가격에 적용)
+    const exDividendDrop = Math.round(dividendPerShare * EX_DIVIDEND_RATIO);
+    result.totalDividend += totalDividend;
+    result.exDividendByAsset[asset.id] = exDividendDrop;
+    result.breakdown.push({
+      id: asset.id,
+      name: asset.name,
+      shares,
+      tier: asset.dividendTier,
+      rate,
+      dividendPerShare,
+      totalDividend,
+      exDividendDrop,
+    });
+  }
+  return result;
+}
+
+// Week 2 E — 배당락을 자산 가격에 적용 + 히스토리 마지막 값도 동기화
+function applyExDividendDrop(assets, exDividendByAsset) {
+  const ids = Object.keys(exDividendByAsset);
+  if (ids.length === 0) return assets;
+  return assets.map((asset) => {
+    const drop = exDividendByAsset[asset.id];
+    if (!drop) return asset;
+    const nextPrice = Math.max(1000, Math.round((asset.price - drop) / 100) * 100);
+    const nextHistory = asset.history.slice(0, -1).concat([nextPrice]);
+    return { ...asset, price: nextPrice, history: nextHistory };
   });
 }
 
@@ -465,6 +610,14 @@ const assetLearningProfiles = {
     riskTags: ['고부채', '정책민감', '부동산민감', '원자재민감'],
     sensitivity: ['인프라 예산', '부동산 규제', '금리 변화', '철강·시멘트 가격'],
     prompt: '비슷한 건설 기업이라도 부채비율이 높으면 금리 인상기에 왜 더 흔들릴까요?',
+  },
+  bio: {
+    story: '항암제와 희귀질환 신약을 개발하는 한국 소형 바이오 기업입니다. 임상 결과에 따라 주가가 크게 출렁이며, 매출보다 R&D 투자가 훨씬 큰 전형적인 신약개발 회사입니다.',
+    metrics: [['매출', '430억 원'], ['영업이익률', '-22%'], ['부채비율', '38%'], ['현금보유', '1,200억 원'], ['R&D 비중', '58%'], ['수출비중', '12%'], ['원자재 의존도', '낮음']],
+    signals: { stability: '낮음', growth: '높음', volatility: '높음' },
+    riskTags: ['임상결과민감', '소형주', '현금소진위험', '뉴스 변동성'],
+    sensitivity: ['임상 시험 결과', '신약 승인', '금리 변화', '벤처 투자 심리'],
+    prompt: '매출은 작지만 R&D 투자가 매출보다 큰 회사를 어떻게 평가해야 할까요?',
   },
   sp500: {
     story: '미국 대표 기업 묶음에 투자하는 ETF입니다. 한 기업이 아니라 미국 대형주의 평균적인 흐름을 따라가도록 설계되었습니다.',
@@ -1606,6 +1759,35 @@ const percent = new Intl.NumberFormat('ko-KR', {
   maximumFractionDigits: 1,
 });
 
+// Week 3 G — UTF-8 바이트 길이 측정 (한글 1자 = 3바이트)
+function getByteLength(str) {
+  if (!str) return 0;
+  try {
+    return new TextEncoder().encode(str).length;
+  } catch (e) {
+    // Fallback: 대략 추정
+    let bytes = 0;
+    for (let i = 0; i < str.length; i++) {
+      const code = str.charCodeAt(i);
+      if (code < 0x80) bytes += 1;
+      else if (code < 0x800) bytes += 2;
+      else bytes += 3;
+    }
+    return bytes;
+  }
+}
+
+// Week 3 G — 입력 문자열을 maxBytes 이하로 자르기 (한글자 단위 절단 보장)
+function clampToByteLength(str, maxBytes) {
+  if (!str) return '';
+  if (getByteLength(str) <= maxBytes) return str;
+  let result = str;
+  while (getByteLength(result) > maxBytes && result.length > 0) {
+    result = result.slice(0, -1);
+  }
+  return result;
+}
+
 function formatWon(value) {
   return won.format(Math.round(value));
 }
@@ -1676,7 +1858,7 @@ function getHoldingSummary(portfolio, assets) {
     : '보유 종목 없음';
 }
 
-function getPassiveMarketMove(asset) {
+function getPassiveMarketMove(asset, volatilityMode = 'standard') {
   let mult = 1;
   if (asset?.type === 'stock') {
     if (asset.size === 'large') mult = PASSIVE_MOVE_LARGE_MULT;
@@ -1684,7 +1866,9 @@ function getPassiveMarketMove(asset) {
   } else if (asset?.type === 'bond') mult = PASSIVE_MOVE_BOND_MULT;
   else if (asset?.type === 'forex') mult = PASSIVE_MOVE_FOREX_MULT;
   else if (asset?.type === 'futures' && asset.id === 'goldFut') mult = PASSIVE_MOVE_GOLD_MULT;
-  const raw = (Math.random() * 2 - 1) * PASSIVE_MARKET_MOVE * mult;
+  // Week 1 M — 변동성 학습 모드: ±5% → ±8% (1.6배)
+  const volatilityBoost = volatilityMode === 'volatility' ? 1.6 : 1;
+  const raw = (Math.random() * 2 - 1) * PASSIVE_MARKET_MOVE * mult * volatilityBoost;
   return Number(raw.toFixed(3));
 }
 
@@ -2129,7 +2313,7 @@ function updateAssetFinancials(asset, totalImpact, macroMove) {
   };
 }
 
-function moveAssetsLocally(currentAssets, modifier = {}, delistedIds = [], roundNumber = 1, macroMove = null, negativeStreakByAsset = {}) {
+function moveAssetsLocally(currentAssets, modifier = {}, delistedIds = [], roundNumber = 1, macroMove = null, negativeStreakByAsset = {}, volatilityMode = 'standard') {
   return currentAssets.map((asset) => {
     if (asset.delisted) return asset;
     if (delistedIds.includes(asset.id)) {
@@ -2143,7 +2327,7 @@ function moveAssetsLocally(currentAssets, modifier = {}, delistedIds = [], round
       };
     }
     const eventImpact = modifier[asset.id] ?? 0;
-    const marketMove = getPassiveMarketMove(asset);
+    const marketMove = getPassiveMarketMove(asset, volatilityMode);
     const nextPrice = Math.max(1000, Math.round((asset.price * (1 + marketMove + eventImpact)) / 100) * 100);
     return {
       ...asset,
@@ -2810,6 +2994,25 @@ function PortfolioDonut({ cash, deposit, portfolio, assets }) {
 
   if (!total) return null;
 
+  // Week 1 F — 섹터 편중 경고: 예금 제외, 단일 투자상품이 60% 초과인지 검사
+  const investableTotal = total - deposit;
+  const investableSlices = slices.filter((s) => s.label !== '예금');
+  const topInvestable = investableSlices.reduce((max, s) => (s.value > max.value ? s : max), { label: '', value: 0 });
+  const topRatio = investableTotal > 0 ? (topInvestable.value / investableTotal) * 100 : 0;
+  let lightStatus = 'green';
+  let lightLabel = '분산이 잘 되어 있습니다';
+  if (topRatio > 60) {
+    lightStatus = 'red';
+    lightLabel = `${topInvestable.label}에 ${Math.round(topRatio)}% 집중 — 위험합니다`;
+  } else if (topRatio > 40) {
+    lightStatus = 'amber';
+    lightLabel = `${topInvestable.label}이 ${Math.round(topRatio)}% — 비중을 점검하세요`;
+  }
+  // 간단한 분산 점수: 보유 자산 종류 × 단일종목 비중 페널티
+  const holdingCount = holdingRows.length;
+  const penaltyFromTop = Math.min(60, Math.max(0, topRatio - 20));
+  const diversificationScore = Math.max(0, Math.min(100, Math.round(20 + holdingCount * 10 - penaltyFromTop)));
+
   return (
     <section className="portfolio-donut-panel" aria-label="내 자산 구성 원 그래프">
       <div className="panel-heading">
@@ -2845,6 +3048,17 @@ function PortfolioDonut({ cash, deposit, portfolio, assets }) {
               {slice.label} {Math.round((slice.value / total) * 100)}%
             </span>
           ))}
+        </div>
+      </div>
+      <div className={`concentration-alert light-${lightStatus}`} role="status" aria-live="polite">
+        <span className="signal-light" aria-hidden="true">
+          <i className={lightStatus === 'red' ? 'on' : ''} data-color="red" />
+          <i className={lightStatus === 'amber' ? 'on' : ''} data-color="amber" />
+          <i className={lightStatus === 'green' ? 'on' : ''} data-color="green" />
+        </span>
+        <div className="concentration-text">
+          <strong>{lightLabel}</strong>
+          <span>분산투자 점수 {diversificationScore}점 / 100점 (보유 {holdingCount}종)</span>
         </div>
       </div>
     </section>
@@ -3250,6 +3464,7 @@ function FinalReport({
   submission,
   onSubmitReport,
   onReflectionChange,
+  roundNotes, // Week 3 G — 라운드별 메모
 }) {
   const holdingsValue = getPortfolioValue(portfolio, assets);
   const totalAsset = cash + deposit + holdingsValue;
@@ -3372,6 +3587,33 @@ function FinalReport({
         )}
       </div>
 
+      {/* Week 3 G — 라운드별 메모 회고 타임라인 */}
+      {roundNotes && Object.keys(roundNotes).filter((k) => (roundNotes[k] ?? '').trim().length > 0).length > 0 ? (
+        <details className="round-notes-timeline" open>
+          <summary>
+            <strong>라운드별 한 줄 메모 회고</strong>
+            <span className="round-notes-count">
+              {Object.keys(roundNotes).filter((k) => (roundNotes[k] ?? '').trim().length > 0).length}건
+            </span>
+          </summary>
+          <ol className="round-notes-list">
+            {sortedRoundLogs.map((log) => {
+              const note = roundNotes[log.round];
+              if (!note || !note.trim()) return null;
+              return (
+                <li key={`note-${log.round}`} className="round-note-item">
+                  <span className="round-note-label">R{log.round}</span>
+                  <p className="round-note-text">{note}</p>
+                </li>
+              );
+            })}
+          </ol>
+          <p className="round-notes-help">
+            라운드별로 남긴 결정 이유를 시간순으로 다시 봅니다. 어떤 판단이 결과로 이어졌는지 추적해 보세요.
+          </p>
+        </details>
+      ) : null}
+
       <div className="reflection-grid print-hide">
         <label>
           잘한 점
@@ -3386,6 +3628,20 @@ function FinalReport({
           <textarea value={reflection.next} onChange={(event) => onReflectionChange('next', event.target.value)} />
         </label>
       </div>
+
+      {/* 출력용 라운드별 메모 (print) */}
+      {roundNotes && Object.keys(roundNotes).filter((k) => (roundNotes[k] ?? '').trim().length > 0).length > 0 ? (
+        <div className="report-section print-only">
+          <h3>라운드별 메모</h3>
+          {sortedRoundLogs.map((log) => {
+            const note = roundNotes[log.round];
+            if (!note || !note.trim()) return null;
+            return (
+              <p key={`print-note-${log.round}`}><strong>R{log.round}</strong> {note}</p>
+            );
+          })}
+        </div>
+      ) : null}
 
       <div className="report-section print-only">
         <h3>나의 투자 분석</h3>
@@ -3803,6 +4059,8 @@ function HostSetupView({
   hostId,
   totalRounds,
   roomMode,
+  volatilityMode,
+  economicSeed,
   players,
   expiresAt,
   roomExpired,
@@ -3811,6 +4069,7 @@ function HostSetupView({
   onGameStart,
   onRoomModeChange,
   onTotalRoundsChange,
+  onVolatilityModeChange,
 }) {
   return (
     <main className="host-layout setup-mode">
@@ -3873,6 +4132,51 @@ function HostSetupView({
                 </button>
               </div>
             </article>
+
+            <article>
+              <div>
+                <strong>시장 변동성</strong>
+                <span>이슈가 없을 때 발생하는 패시브 노이즈 폭을 조절합니다. 변동성 학습 모드는 약 1.6배 더 출렁입니다.</span>
+              </div>
+              <div className="segmented-control">
+                <button className={volatilityMode === 'standard' ? 'active' : ''} type="button" onClick={() => onVolatilityModeChange('standard')} disabled={roomExpired}>
+                  표준 (±5%)
+                </button>
+                <button className={volatilityMode === 'volatility' ? 'active' : ''} type="button" onClick={() => onVolatilityModeChange('volatility')} disabled={roomExpired}>
+                  변동성 학습 (±8%)
+                </button>
+              </div>
+            </article>
+            {economicSeed ? (
+              <article className="economic-seed-card">
+                <div>
+                  <strong>이 방의 경제 체질 시드 <code>#{economicSeed.code}</code></strong>
+                  <span>방을 만들 때마다 자동으로 정해지는 3가지 난수입니다. 같은 이슈도 방마다 조금씩 다르게 작동합니다.</span>
+                </div>
+                <div className="seed-grid">
+                  <div>
+                    <span>초기 기준금리</span>
+                    <strong>{economicSeed.economicConstitution.baseRate.toFixed(2)}%</strong>
+                  </div>
+                  <div>
+                    <span>초기 실업률</span>
+                    <strong>{economicSeed.economicConstitution.unemploymentRate.toFixed(2)}%</strong>
+                  </div>
+                  <div>
+                    <span>초기 환율</span>
+                    <strong>{economicSeed.economicConstitution.exchangeRate}원</strong>
+                  </div>
+                  <div>
+                    <span>이슈 강도</span>
+                    <strong>×{economicSeed.issueIntensity.toFixed(2)}</strong>
+                  </div>
+                  <div>
+                    <span>트리거 민감도</span>
+                    <strong>×{economicSeed.triggerSensitivity.toFixed(2)}</strong>
+                  </div>
+                </div>
+              </article>
+            ) : null}
           </div>
 
           <div className="prestart-stats" aria-label="게임 시작 전 수치">
@@ -3955,6 +4259,8 @@ function HostView({
   totalRounds,
   phase,
   roomMode,
+  volatilityMode,
+  economicSeed,
   gameStarted,
   isPaused,
   assets,
@@ -3988,6 +4294,7 @@ function HostView({
   onGameStart,
   onRoomModeChange,
   onTotalRoundsChange,
+  onVolatilityModeChange,
   onIssueDraftChange,
   onStartRound,
   onCloseRound,
@@ -4022,6 +4329,8 @@ function HostView({
         hostId={hostId}
         totalRounds={totalRounds}
         roomMode={roomMode}
+        volatilityMode={volatilityMode}
+        economicSeed={economicSeed}
         players={players}
         expiresAt={expiresAt}
         roomExpired={roomExpired}
@@ -4030,6 +4339,7 @@ function HostView({
         onGameStart={onGameStart}
         onRoomModeChange={onRoomModeChange}
         onTotalRoundsChange={onTotalRoundsChange}
+        onVolatilityModeChange={onVolatilityModeChange}
       />
     );
   }
@@ -4400,6 +4710,8 @@ function StudentView({
   onWithdrawDeposit,
   onSubmitReport,
   onReflectionChange,
+  roundNotes,
+  onRoundNoteChange,
 }) {
   const selectedAsset = assets.find((asset) => asset.id === selectedAssetId) ?? assets[0];
   const holdingsValue = assets.reduce((sum, asset) => sum + (portfolio[asset.id] ?? 0) * asset.price, 0);
@@ -4531,6 +4843,26 @@ function StudentView({
 
         <IssueTicker events={currentRoundEvents} phase={phase} compact />
         {phase === 'closed' ? <RoundExplanation summary={latestRoundSummary} assets={assets} compact /> : null}
+        {/* Week 3 G — 라운드별 한 줄 메모 (장 마감 후 입력) */}
+        {phase === 'closed' && !gameFinished && joined ? (
+          <section className="round-note-card" aria-label={`${round}라운드 메모`}>
+            <div className="round-note-head">
+              <strong>{round}라운드 한 줄 메모</strong>
+              <span className="round-note-meter">
+                {getByteLength(roundNotes?.[round] ?? '')}/100바이트
+              </span>
+            </div>
+            <textarea
+              className="round-note-input"
+              value={roundNotes?.[round] ?? ''}
+              onChange={(event) => onRoundNoteChange(round, event.target.value)}
+              placeholder="이번 라운드 결정 이유, 학습 포인트 (한글 약 33자)"
+              rows={2}
+              aria-label={`${round}라운드 메모 입력`}
+            />
+            <p className="round-note-hint">결정 이유나 다음 라운드 전략을 짧게 남기면 회고 화면에서 라운드별로 다시 볼 수 있습니다.</p>
+          </section>
+        ) : null}
         {gameFinished ? (
           <FinalReport
             nickname={getStudentDisplayName(studentNumber, nickname)}
@@ -4548,6 +4880,7 @@ function StudentView({
             submission={submittedReport}
             onSubmitReport={onSubmitReport}
             onReflectionChange={onReflectionChange}
+            roundNotes={roundNotes}
           />
         ) : null}
 
@@ -4626,9 +4959,14 @@ function StudentView({
           </div>
         </section>
 
-        <section className="savings-learning-card" aria-labelledby="savings-learning-heading">
+        <details className="savings-learning-card collapsible-card" aria-labelledby="savings-learning-heading">
+          <summary className="savings-learning-summary">
+            <span className="card-toggle-icon" aria-hidden="true">▶</span>
+            <span className="card-toggle-label">정기예금 vs 정기적금 — 같은 돈, 다른 이자</span>
+            <span className="card-toggle-hint">눌러서 비교 보기</span>
+          </summary>
           <header className="savings-learning-header">
-            <h2 id="savings-learning-heading">정기예금 vs 정기적금 — 같은 돈, 다른 이자</h2>
+            <h2 id="savings-learning-heading" className="sr-only">정기예금 vs 정기적금 비교</h2>
             <p>같은 총 납입금이라도 한 번에 맡기는 정기예금이 더 많은 이자를 받습니다. 직접 비교해 보세요.</p>
           </header>
           {(() => {
@@ -4677,17 +5015,33 @@ function StudentView({
               );
             }
           })()}
-        </section>
+        </details>
 
-        <aside className="passive-move-notice" aria-label="시장 불확실성 안내">
-          <strong>이슈가 없는데도 가격이 움직이는 이유</strong>
-          <p>
-            실제 시장도 뉴스가 없어도 가격은 항상 조금씩 움직입니다. 다른 종목으로 자금이 빠지거나(공급 증가 → 하락),
-            우리가 모르는 작은 이유들이 모여 가격을 변화시키죠. 이 작은 움직임을 <em>시장의 불확실성</em>이라고 합니다.
-            <br />
-            <strong>특히 중소형주는 우량주보다 더 크게 흔들립니다</strong> — 거래량이 적고 정보가 적기 때문이에요.
-          </p>
-        </aside>
+        <details className="passive-move-notice collapsible-card" aria-label="시장 불확실성 안내">
+          <summary className="noise-summary">
+            <span className="noise-icon" aria-hidden="true">?</span>
+            <span className="noise-label">이슈가 없는데 왜 가격이 움직일까?</span>
+            <span className="card-toggle-hint">눌러서 설명 보기</span>
+          </summary>
+          <div className="noise-body">
+            <p>
+              <strong>실제 시장도 뉴스가 없어도 가격은 항상 조금씩 움직입니다.</strong>
+              수많은 투자자가 각자의 판단으로 매수·매도를 하기 때문이죠. 이 작은 움직임을
+              <em> 시장의 불확실성</em>이라고 부릅니다.
+            </p>
+            <ul className="noise-multipliers">
+              <li><strong>우량주</strong> 0.7배 — 거래량이 많아 잘 흔들리지 않음</li>
+              <li><strong>일반 종목</strong> 1.0배 — 기본 변동성</li>
+              <li><strong>중소형주</strong> 1.6배 — 거래량이 적어 크게 흔들림</li>
+              <li><strong>채권</strong> 0.3배 — 안전자산은 변동이 작음</li>
+              <li><strong>외환</strong> 0.4배 — 매크로 시장은 비교적 안정</li>
+            </ul>
+            <p className="noise-tip">
+              <strong>학습 포인트</strong> 매 라운드 ±5% 범위에서 자동으로 발생합니다.
+              단기 변동에 흔들리지 말고 <em>이슈와 함께 움직이는 큰 흐름</em>을 보세요.
+            </p>
+          </div>
+        </details>
 
         <section className="mobile-stock-list" aria-label="투자 상품 목록">
           {assets.map((asset) => {
@@ -4711,9 +5065,44 @@ function StudentView({
             <div>
               <h2 id="trade-heading">{selectedAsset.name}</h2>
               <span>{selectedAsset.country} · {assetTypeLabels[selectedAsset.type]} · {selectedAsset.sector} · 보유 {selectedShares.toLocaleString('ko-KR')}주</span>
+              {selectedAsset.type === 'bond' && selectedAsset.couponRate ? (
+                <span className="bond-coupon-note">
+                  라운드당 단리 이자 {(selectedAsset.couponRate * 100).toFixed(1)}% · 액면가 {formatWon(selectedAsset.faceValue)} 기준
+                  (1주 보유 시 매 라운드 +{formatWon(Math.round(selectedAsset.faceValue * selectedAsset.couponRate))})
+                </span>
+              ) : null}
+              {selectedAsset.type === 'stock' && selectedAsset.dividendTier ? (
+                <span className={`dividend-tier-badge tier-${selectedAsset.dividendTier}`} title="4·8·12라운드 종료 시점에 보유 중이면 배당 지급 (가격 변동 후 기준, 배당락 = 배당의 절반)">
+                  배당: {DIVIDEND_TIER_LABELS[selectedAsset.dividendTier]}
+                </span>
+              ) : null}
             </div>
             <Sparkline history={selectedAsset.history} color={selectedAsset.color} />
           </div>
+
+          {/* Week 2 E — 다음 배당 라운드 안내 배너 */}
+          {(() => {
+            const nextDividendRound = DIVIDEND_ROUNDS.find((r) => r >= round);
+            if (!nextDividendRound || gameFinished) return null;
+            const isToday = nextDividendRound === round;
+            const distance = nextDividendRound - round;
+            return (
+              <div className={`dividend-banner${isToday ? ' is-today' : ''}`} role="note">
+                <span className="dividend-banner-icon" aria-hidden="true">{isToday ? '!' : '＄'}</span>
+                <span className="dividend-banner-text">
+                  {isToday ? (
+                    <>
+                      <strong>이번 라운드가 배당 지급일</strong>입니다. 장 마감 시점에 보유 중인 주식의 티어대로 배당이 입금되며, 배당락(배당금의 ½)도 함께 적용됩니다.
+                    </>
+                  ) : (
+                    <>
+                      다음 배당까지 <strong>{distance}라운드</strong> 남았습니다. {nextDividendRound}라운드 마감 시점에 보유 중인 주식만 배당 자격.
+                    </>
+                  )}
+                </span>
+              </div>
+            );
+          })()}
 
           <label>
             주문 금액
@@ -4771,6 +5160,12 @@ export function App() {
   const [totalRounds, setTotalRounds] = useState(DEFAULT_TOTAL_ROUNDS);
   const [phase, setPhase] = useState('setup');
   const [roomMode, setRoomMode] = useState('individual');
+  // Week 1 M — 패시브 노이즈 모드: 'standard'(±5%) | 'volatility'(±8%)
+  const [volatilityMode, setVolatilityMode] = useState('standard');
+  // Week 2 K — 방 생성 시 부여되는 3가지 난수 시드 (게임마다 약간씩 다른 경제 조건)
+  const [economicSeed, setEconomicSeed] = useState(null);
+  // Week 2 E — 가장 최근 배당 정산 결과 (라운드 결과 카드 학습 메시지용)
+  const [latestDividendSummary, setLatestDividendSummary] = useState(null);
   const [gameStarted, setGameStarted] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [baseRate, setBaseRate] = useState(INITIAL_BASE_RATE);
@@ -4809,6 +5204,8 @@ export function App() {
   const [roundLogs, setRoundLogs] = useState([]);
   const [salaryPaidRounds, setSalaryPaidRounds] = useState([]);
   const [reflection, setReflection] = useState({ good: '', improve: '', next: '' });
+  // Week 3 G — 라운드별 한 줄 메모 (UTF-8 100바이트 제한, 한글 약 33자)
+  const [roundNotes, setRoundNotes] = useState({});
   const [submissions, setSubmissions] = useState([]);
   const [studentStates, setStudentStates] = useState([]);
   const [finalReportsDownloaded, setFinalReportsDownloaded] = useState(false);
@@ -5028,6 +5425,7 @@ export function App() {
       tradeLogs,
       roundLogs,
       reflection,
+      roundNotes, // Week 3 G — 라운드별 메모 영속화
       salaryPaidRounds,
       initialCapitalGranted: teamMode ? gameStarted : initialCapitalGranted,
       updatedAt: Date.now(),
@@ -5043,7 +5441,7 @@ export function App() {
     }, 600);
 
     return () => window.clearTimeout(studentStateSaveTimer.current);
-  }, [depositPrincipal, effectiveCash, effectiveDeposit, effectiveDepositInterestEarned, effectivePortfolio, gameStarted, initialCapitalGranted, joined, nickname, reflection, remoteRoomId, roundLogs, salaryPaidRounds, selectedTeamKey, studentNumber, studentPasscodeHash, teamMode, tradeLogs]);
+  }, [depositPrincipal, effectiveCash, effectiveDeposit, effectiveDepositInterestEarned, effectivePortfolio, gameStarted, initialCapitalGranted, joined, nickname, reflection, remoteRoomId, roundLogs, roundNotes, salaryPaidRounds, selectedTeamKey, studentNumber, studentPasscodeHash, teamMode, tradeLogs]);
 
   useEffect(() => {
     if (!gameStarted || !joined || teamMode || phase !== 'open' || salaryPaidRounds.includes(round)) return;
@@ -5135,6 +5533,8 @@ export function App() {
     setRoundLogs(savedState.roundLogs ?? []);
     setSalaryPaidRounds(savedState.salaryPaidRounds ?? []);
     setReflection({ good: '', improve: '', next: '', ...(savedState.reflection ?? {}) });
+    // Week 3 G — 라운드별 메모 복원
+    setRoundNotes(savedState.roundNotes ?? {});
     setInitialCapitalGranted(Boolean(savedState.initialCapitalGranted));
     if (teamMode && savedState.teamKey) setSelectedTeamKey(savedState.teamKey);
     rememberStudentState(savedState);
@@ -5210,6 +5610,12 @@ export function App() {
 
   function handleReflectionChange(key, value) {
     setReflection((current) => ({ ...current, [key]: value }));
+  }
+
+  // Week 3 G — 라운드별 메모 변경 (100바이트 제한)
+  function handleRoundNoteChange(roundNumber, value) {
+    const clamped = clampToByteLength(value, 100);
+    setRoundNotes((current) => ({ ...current, [roundNumber]: clamped }));
   }
 
   async function handleStudentJoin() {
@@ -5368,13 +5774,16 @@ export function App() {
     const now = Date.now();
     const selectedTotalRounds = totalRounds;
     const selectedRoomMode = roomMode;
+    // Week 2 K — 방 생성 시점에 3가지 난수 시드 생성 (모든 방에 적용)
+    const nextEconomicSeed = createEconomicSeed();
     const nextAssets = createRandomizedAssets();
     const nextPropertyIndex = getInitialPropertyIndexFromAssets(nextAssets);
     const nextTeams = createDefaultTeamAccounts();
     const nextRoom = buildNewRoomState({
       pin: nextPin,
       now,
-      initialBaseRate: INITIAL_BASE_RATE,
+      // Week 2 K — 시드값으로 초기 기준금리 조정 (3.0~4.5)
+      initialBaseRate: nextEconomicSeed.economicConstitution.baseRate,
       initialPropertyIndex: nextPropertyIndex,
       assets: nextAssets,
       players: [],
@@ -5393,8 +5802,12 @@ export function App() {
     setIsPaused(nextRoom.isPaused);
     setBaseRate(nextRoom.baseRate);
     setPropertyIndex(nextRoom.propertyIndex);
-    setExchangeRate(INITIAL_EXCHANGE_RATE);
-    setUnemploymentRate(INITIAL_UNEMPLOYMENT_RATE);
+    // Week 2 K — 시드 기반 초기 환율/실업률 적용
+    setExchangeRate(nextEconomicSeed.economicConstitution.exchangeRate);
+    setUnemploymentRate(nextEconomicSeed.economicConstitution.unemploymentRate);
+    setEconomicSeed(nextEconomicSeed);
+    // Week 2 E — 신규 방 시작 시 배당 요약 초기화
+    setLatestDividendSummary(null);
     setAssets(nextRoom.assets);
     setOpenMacroContext(null);
     setTriggeredEventsByRound(nextRoom.triggeredEventsByRound);
@@ -5423,6 +5836,8 @@ export function App() {
     setRoundLogs(nextRoom.roundLogs);
     setSalaryPaidRounds([]);
     setReflection(nextRoom.reflection);
+    // Week 3 G — 라운드별 메모 초기화
+    setRoundNotes({});
     setSubmissions([]);
     setStudentStates([]);
     setFinalReportsDownloaded(false);
@@ -5675,8 +6090,16 @@ export function App() {
       };
     });
 
-    const eventImpact = applySizeFactor(combineResolvedImpacts(resolvedEvents), assets);
-    const eventMacroImpact = combineEventMacroImpacts(resolvedEvents);
+    // Week 2 K — 방 생성 시 부여된 이슈 강도 시드 적용 (모든 이슈 impact에 곱연산)
+    const issueIntensity = economicSeed?.issueIntensity ?? 1;
+    const rawEventImpact = applySizeFactor(combineResolvedImpacts(resolvedEvents), assets);
+    const eventImpact = Object.fromEntries(
+      Object.entries(rawEventImpact).map(([assetId, value]) => [assetId, value * issueIntensity]),
+    );
+    const rawEventMacroImpact = combineEventMacroImpacts(resolvedEvents);
+    const eventMacroImpact = Object.fromEntries(
+      Object.entries(rawEventMacroImpact).map(([key, value]) => [key, value * issueIntensity]),
+    );
     const macroBaseline = openMacroContext?.round === round
       ? openMacroContext
       : {
@@ -5722,13 +6145,18 @@ export function App() {
     setOpenMacroContext(null);
 
     // ── 거시지표 트리거 감지: 임계점 돌파 시 다음 라운드 이슈로 자동 발동 ──
+    // Week 2 K — 시드 기반 트리거 민감도 적용 (1보다 크면 더 빨리 발동)
+    const triggerSensitivity = economicSeed?.triggerSensitivity ?? 1;
     const triggerResult = detectMacroTriggers(
-      {
-        baseRate: nextBaseRate,
-        propertyIndex: macroMove.nextPropertyIndex,
-        exchangeRate: macroMove.nextExchangeRate,
-        unemploymentRate: macroMove.nextUnemploymentRate,
-      },
+      applyTriggerSensitivity(
+        {
+          baseRate: nextBaseRate,
+          propertyIndex: macroMove.nextPropertyIndex,
+          exchangeRate: macroMove.nextExchangeRate,
+          unemploymentRate: macroMove.nextUnemploymentRate,
+        },
+        triggerSensitivity,
+      ),
       triggerCooldowns,
     );
     setTriggerCooldowns(triggerResult.nextCooldowns);
@@ -5760,21 +6188,30 @@ export function App() {
           .map((asset) => ({ id: asset.id, name: asset.name }))
       : [];
 
-    const nextAssets = moveAssetsLocally(assets, combinedImpact, delistedAssets.map((asset) => asset.id), round, macroMove, negativeStreakByAsset);
+    const nextAssets = moveAssetsLocally(assets, combinedImpact, delistedAssets.map((asset) => asset.id), round, macroMove, negativeStreakByAsset, volatilityMode);
     const depositInterest = Math.round(deposit * (getDepositRate(nextBaseRate) / 100 / 4));
     const nextDeposit = deposit + depositInterest;
+    // 팀 모드: 팀별 채권 이자 로그를 수집하기 위한 컨테이너
+    const teamBondInterestLogs = [];
     const nextTeamAccounts = teamAccounts.map((team) => {
       const cleanTeam = cleanTeamTradeLock(team);
       if (cleanTeam.bankrupt) return cleanTeam;
       const teamDepositInterest = Math.round(cleanTeam.deposit * (getDepositRate(nextBaseRate) / 100 / 4));
       const nextTeamDeposit = cleanTeam.deposit + teamDepositInterest;
+      // 채권 라운드별 단리 이자 (팀 모드) - 가격 변동 후 자산 정의 기준
+      const teamBondResult = computeBondInterest(cleanTeam.portfolio, nextAssets);
+      const teamBondInterest = teamBondResult.totalInterest;
+      const nextTeamCash = cleanTeam.cash + teamBondInterest;
+      if (teamBondInterest > 0) {
+        teamBondInterestLogs.push({ teamKey: cleanTeam.key, teamName: cleanTeam.name, breakdown: teamBondResult.breakdown });
+      }
       const nextTeamHoldingsValue = getPortfolioValue(cleanTeam.portfolio, nextAssets);
-      const nextTeamTotalAsset = cleanTeam.cash + nextTeamDeposit + nextTeamHoldingsValue;
-      const nextNegativeRounds = cleanTeam.cash < 0 || cleanTeam.cash + nextTeamDeposit < 0 || nextTeamTotalAsset < 0 ? (cleanTeam.negativeRounds ?? 0) + 1 : 0;
+      const nextTeamTotalAsset = nextTeamCash + nextTeamDeposit + nextTeamHoldingsValue;
+      const nextNegativeRounds = nextTeamCash < 0 || nextTeamCash + nextTeamDeposit < 0 || nextTeamTotalAsset < 0 ? (cleanTeam.negativeRounds ?? 0) + 1 : 0;
       const bankrupt = nextNegativeRounds >= 2;
       return {
         ...cleanTeam,
-        cash: bankrupt ? 0 : cleanTeam.cash,
+        cash: bankrupt ? 0 : nextTeamCash,
         deposit: bankrupt ? 0 : nextTeamDeposit,
         depositInterestEarned: bankrupt ? cleanTeam.depositInterestEarned : cleanTeam.depositInterestEarned + teamDepositInterest,
         portfolio: bankrupt ? {} : cleanTeam.portfolio,
@@ -5795,18 +6232,105 @@ export function App() {
       setDepositInterestEarned((current) => current + depositInterest);
       addTradeLog('예금 이자', `${round}라운드 분기 복리 이자 +${formatWon(depositInterest)}`);
     }
+    // 채권 라운드별 단리 이자 (솔로 모드)
+    if (!teamMode) {
+      const soloBondResult = computeBondInterest(portfolio, nextAssets);
+      if (soloBondResult.totalInterest > 0) {
+        setCash((current) => current + soloBondResult.totalInterest);
+        for (const entry of soloBondResult.breakdown) {
+          addTradeLog(
+            '채권 이자',
+            `${round}라운드 ${entry.name} ${entry.shares}주 액면가 기준 단리 +${formatWon(entry.interest)} (쿠폰 ${(entry.rate * 100).toFixed(1)}%)`,
+          );
+        }
+      }
+    } else {
+      // 팀 모드: 본인이 속한 팀의 채권 이자 로그만 표시
+      const myTeamLog = teamBondInterestLogs.find((entry) => entry.teamKey === selectedTeamKey);
+      if (myTeamLog) {
+        for (const entry of myTeamLog.breakdown) {
+          addTradeLog(
+            '채권 이자',
+            `${round}라운드 ${entry.name} ${entry.shares}주 액면가 기준 단리 +${formatWon(entry.interest)} (쿠폰 ${(entry.rate * 100).toFixed(1)}%)`,
+          );
+        }
+      }
+    }
+
+    // ── Week 2 E — 배당 정산 (4·8·12라운드, 종료 시점 보유, 가격 변동 후 기준, 배당락 ½) ──
+    let nextAssetsAfterDividend = nextAssets;
+    const dividendBreakdown = [];
+    let dividendApplied = false;
+    if (DIVIDEND_ROUNDS.includes(round)) {
+      dividendApplied = true;
+      if (!teamMode) {
+        // 솔로 모드: 라운드 종료 시점 본인 보유 기준으로 정산
+        const payout = computeDividendPayout(portfolio, nextAssets, round);
+        if (payout.totalDividend > 0) {
+          setCash((current) => current + payout.totalDividend);
+          nextAssetsAfterDividend = applyExDividendDrop(nextAssets, payout.exDividendByAsset);
+          for (const entry of payout.breakdown) {
+            addTradeLog(
+              '배당 지급',
+              `${round}라운드 ${entry.name} ${entry.shares}주 · ${DIVIDEND_TIER_LABELS[entry.tier]} · 배당 +${formatWon(entry.totalDividend)} · 배당락 -${formatWon(entry.exDividendDrop)}/주`,
+            );
+            dividendBreakdown.push(entry);
+          }
+        }
+      } else {
+        // 팀 모드: 팀별 배당 정산
+        const teamDividendUpdates = nextTeamAccounts.map((team) => {
+          if (team.bankrupt) return { team, breakdown: [], exDividend: {} };
+          const payout = computeDividendPayout(team.portfolio, nextAssets, round);
+          return {
+            team: payout.totalDividend > 0 ? { ...team, cash: team.cash + payout.totalDividend } : team,
+            breakdown: payout.breakdown,
+            exDividend: payout.exDividendByAsset,
+          };
+        });
+        // 배당락은 자산 한 벌에 모두 누적 (팀별 배당이 같은 자산에 대해 발생하면 가장 큰 배당락 1회만 적용)
+        const mergedExDividend = {};
+        for (const update of teamDividendUpdates) {
+          for (const [assetId, drop] of Object.entries(update.exDividend)) {
+            mergedExDividend[assetId] = Math.max(mergedExDividend[assetId] ?? 0, drop);
+          }
+        }
+        nextAssetsAfterDividend = applyExDividendDrop(nextAssets, mergedExDividend);
+        const dividendUpdatedTeams = teamDividendUpdates.map((u) => u.team);
+        setTeamAccounts(dividendUpdatedTeams);
+        // 본인 팀 배당 로그
+        const myUpdate = teamDividendUpdates.find((u) => u.team.key === selectedTeamKey);
+        if (myUpdate) {
+          for (const entry of myUpdate.breakdown) {
+            addTradeLog(
+              '배당 지급',
+              `${round}라운드 ${entry.name} ${entry.shares}주 · ${DIVIDEND_TIER_LABELS[entry.tier]} · 배당 +${formatWon(entry.totalDividend)} · 배당락 -${formatWon(entry.exDividendDrop)}/주`,
+            );
+            dividendBreakdown.push(entry);
+          }
+        }
+      }
+      // 배당락이 실제 적용된 자산 상태로 동기화
+      if (nextAssetsAfterDividend !== nextAssets) {
+        setAssets(nextAssetsAfterDividend);
+      }
+    }
+    setLatestDividendSummary({ round, applied: dividendApplied, breakdown: dividendBreakdown });
+
     setLatestRoundSummary({ round, events: resolvedEvents, delistedAssets, macroMove });
     setPhase('closed');
     const selectedTeamAfterRound = nextTeamAccounts.find((team) => team.key === selectedTeamKey) ?? activeTeam;
     const logCash = teamMode ? selectedTeamAfterRound.cash : cash;
     const logDeposit = teamMode ? selectedTeamAfterRound.deposit : nextDeposit;
     const logPortfolio = teamMode ? selectedTeamAfterRound.portfolio : portfolio;
+    // Week 2 E — 라운드 로그는 배당락 적용 후 자산 가격 기준으로 산정
+    const assetsForLog = nextAssetsAfterDividend ?? nextAssets;
     setRoundLogs((current) => [
       buildRoundLog({
         round,
         now: Date.now(),
-        totalAsset: getTotalAsset({ cash: logCash, deposit: logDeposit, portfolio: logPortfolio, assets: nextAssets }),
-        holdings: getHoldingSummary(logPortfolio, nextAssets),
+        totalAsset: getTotalAsset({ cash: logCash, deposit: logDeposit, portfolio: logPortfolio, assets: assetsForLog }),
+        holdings: getHoldingSummary(logPortfolio, assetsForLog),
         events: resolvedEvents.map((event) => `${event.title}: ${getResultLabel(event, false)}`).join(' / '),
         eventAnalysis: resolvedEvents,
         macroMove,
@@ -6038,9 +6562,13 @@ export function App() {
     if (!canUseTeamAccount()) return;
     const sourceCash = teamMode ? activeTeam.cash : cash;
     const amount = Math.min(parseAmount(tradeAmount), sourceCash);
-    const shares = Math.floor(amount / selectedAsset.price);
+    // Week 1 B — 수수료를 포함한 최대 주식수 계산: shares × price × (1 + fee) ≤ amount
+    const maxShares = Math.floor(amount / (selectedAsset.price * (1 + TRADE_FEE_RATE)));
+    const shares = Math.max(0, maxShares);
     if (shares <= 0) return;
-    const cost = shares * selectedAsset.price;
+    const principal = shares * selectedAsset.price;
+    const fee = Math.round(principal * TRADE_FEE_RATE);
+    const cost = principal + fee;
     if (teamMode) {
       updateActiveTeamAccount((team) =>
         releaseTeamTradeLock({
@@ -6053,7 +6581,7 @@ export function App() {
       setCash((current) => current - cost);
       setPortfolio((current) => ({ ...current, [selectedAsset.id]: (current[selectedAsset.id] ?? 0) + shares }));
     }
-    addTradeLog('매수', `${selectedAsset.name} ${shares.toLocaleString('ko-KR')}주 · ${formatWon(cost)}`);
+    addTradeLog('매수', `${selectedAsset.name} ${shares.toLocaleString('ko-KR')}주 · ${formatWon(principal)} (수수료 ${formatWon(fee)})`);
   }
 
   function handleSell() {
@@ -6064,7 +6592,11 @@ export function App() {
     const owned = sourcePortfolio[selectedAsset.id] ?? 0;
     const shares = Math.min(owned, Math.floor(amount / selectedAsset.price));
     if (shares <= 0) return;
-    const revenue = shares * selectedAsset.price;
+    // Week 1 B — 매도: 거래 수수료 + 증권거래세 차감
+    const principal = shares * selectedAsset.price;
+    const fee = Math.round(principal * TRADE_FEE_RATE);
+    const tax = Math.round(principal * TRADE_TAX_RATE);
+    const revenue = principal - fee - tax;
     if (teamMode) {
       updateActiveTeamAccount((team) =>
         releaseTeamTradeLock({
@@ -6077,7 +6609,7 @@ export function App() {
       setCash((current) => current + revenue);
       setPortfolio((current) => ({ ...current, [selectedAsset.id]: owned - shares }));
     }
-    addTradeLog('매도', `${selectedAsset.name} ${shares.toLocaleString('ko-KR')}주 · ${formatWon(revenue)}`);
+    addTradeLog('매도', `${selectedAsset.name} ${shares.toLocaleString('ko-KR')}주 · ${formatWon(revenue)} (수수료 ${formatWon(fee)} · 거래세 ${formatWon(tax)})`);
   }
 
   function handleDeposit() {
@@ -6162,6 +6694,8 @@ export function App() {
           totalRounds={totalRounds}
           phase={phase}
           roomMode={roomMode}
+          volatilityMode={volatilityMode}
+          economicSeed={economicSeed}
           gameStarted={gameStarted}
           isPaused={isPaused}
           assets={assets}
@@ -6195,6 +6729,7 @@ export function App() {
           onGameStart={handleGameStart}
           onRoomModeChange={handleRoomModeChange}
           onTotalRoundsChange={handleTotalRoundsChange}
+          onVolatilityModeChange={setVolatilityMode}
           onIssueDraftChange={setIssueDraft}
           onStartRound={handleStartRound}
           onCloseRound={handleCloseRound}
@@ -6284,6 +6819,8 @@ export function App() {
           onWithdrawDeposit={handleWithdrawDeposit}
           onSubmitReport={handleSubmitReport}
           onReflectionChange={handleReflectionChange}
+          roundNotes={roundNotes}
+          onRoundNoteChange={handleRoundNoteChange}
         />
       ) : null}
     </div>
