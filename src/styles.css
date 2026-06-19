@@ -1859,6 +1859,231 @@ textarea {
   box-shadow: none;
 }
 
+/* Week 4 §2.4 — 거시 경보 배너 (트리거 전용 채널, 이슈와 시각적으로 완전 분리) */
+.macro-alert-banner {
+  margin: 12px 0;
+  padding: 12px 16px;
+  border: 1px solid #f59e0b;
+  border-left: 4px solid #f59e0b;
+  border-radius: 8px;
+  background: #fffbeb;
+}
+.macro-alert-banner.compact {
+  padding: 10px 12px;
+  margin: 8px 0;
+}
+.macro-alert-banner__head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.macro-alert-banner__head strong {
+  color: #92400e;
+  font-size: 14px;
+  letter-spacing: -0.01em;
+}
+.macro-alert-banner__head span {
+  font-size: 12px;
+  color: #6b7280;
+  line-height: 1.5;
+}
+.macro-alert-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.macro-alert-item {
+  padding: 8px 12px;
+  background: rgba(245, 158, 11, 0.08);
+  border-radius: 6px;
+  border: 1px solid rgba(245, 158, 11, 0.18);
+}
+.macro-alert-item strong {
+  display: block;
+  font-size: 13px;
+  color: #78350f;
+  margin-bottom: 2px;
+}
+.macro-alert-item p {
+  margin: 0;
+  font-size: 12px;
+  color: #374151;
+  line-height: 1.5;
+}
+
+/* Week 4 §2.2 Phase B — 인플레이션 체크포인트 카드 (R4·R8·R12 종료 시) */
+.inflation-checkpoint-card {
+  margin: 12px 0;
+  padding: 14px 16px;
+  border: 1px solid #c7d2fe;
+  border-left: 4px solid #4f46e5;
+  border-radius: 8px;
+  background: #f5f3ff;
+}
+.inflation-checkpoint-card.compact {
+  padding: 12px 14px;
+  margin: 8px 0;
+}
+.inflation-checkpoint-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+.inflation-checkpoint-head strong {
+  color: #3730a3;
+  font-size: 14px;
+  letter-spacing: -0.01em;
+}
+.inflation-checkpoint-head span {
+  font-size: 12px;
+  color: #6b7280;
+}
+.inflation-checkpoint-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  background: #ffffff;
+  border: 1px solid #e0e7ff;
+  border-radius: 6px;
+}
+.inflation-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+}
+.inflation-row span {
+  color: #4b5563;
+}
+.inflation-row strong {
+  color: #111827;
+  font-weight: 600;
+  text-align: right;
+}
+.inflation-row strong em {
+  font-style: normal;
+  font-size: 12px;
+  margin-left: 4px;
+  font-weight: 500;
+}
+.inflation-row strong em.pos { color: #047857; }
+.inflation-row strong em.neg { color: #b91c1c; }
+.inflation-row strong em.neutral { color: #6b7280; }
+.inflation-row.real {
+  padding-top: 6px;
+  border-top: 1px dashed #c7d2fe;
+}
+.inflation-row.real strong {
+  color: #4338ca;
+}
+.inflation-row.loss strong.neg {
+  color: #b91c1c;
+}
+.inflation-checkpoint-note {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  background: rgba(79, 70, 229, 0.06);
+  border-radius: 6px;
+  font-size: 12px;
+  color: #374151;
+  line-height: 1.55;
+}
+.inflation-checkpoint-note strong {
+  color: #3730a3;
+}
+.inflation-checkpoint-demand-pull {
+  margin: 6px 0 0;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: #92400e;
+  background: rgba(245, 158, 11, 0.10);
+  border-left: 3px solid #f59e0b;
+  border-radius: 4px;
+  line-height: 1.5;
+}
+
+/* Week 4 §2.2 Phase C — 최종 보고서 명목 vs 실질 비교 섹션 */
+.final-inflation-section {
+  border-left: 4px solid #4f46e5;
+  background: #f5f3ff;
+  padding: 14px 16px;
+  border-radius: 8px;
+}
+.final-inflation-lead {
+  font-size: 13px;
+  color: #4b5563;
+  margin: 0 0 12px;
+  line-height: 1.55;
+}
+.final-inflation-lead strong { color: #3730a3; }
+.final-inflation-grid {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 720px) {
+  .final-inflation-grid { grid-template-columns: 1fr; }
+}
+.final-inflation-bar { display: flex; flex-direction: column; gap: 4px; }
+.final-inflation-bar .bar-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 12px;
+}
+.final-inflation-bar .bar-label span { color: #4b5563; }
+.final-inflation-bar .bar-label strong { font-size: 13px; font-weight: 600; }
+.final-inflation-bar .bar-label strong.up { color: #047857; }
+.final-inflation-bar .bar-label strong.down { color: #b91c1c; }
+.final-inflation-bar .bar-label strong.neutral { color: #6b7280; }
+.bar-track {
+  width: 100%;
+  height: 10px;
+  background: #e5e7eb;
+  border-radius: 5px;
+  overflow: hidden;
+}
+.bar-fill { height: 100%; border-radius: 5px; transition: width 0.4s ease; }
+.bar-fill.pos { background: #047857; }
+.bar-fill.neg { background: #b91c1c; }
+.bar-fill.inflation { background: #f59e0b; }
+.final-inflation-kpis {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  background: #ffffff;
+  border: 1px solid #e0e7ff;
+  border-radius: 6px;
+}
+.final-inflation-kpis > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+}
+.final-inflation-kpis span { color: #6b7280; }
+.final-inflation-kpis strong { color: #111827; font-weight: 600; font-size: 13px; }
+.final-inflation-kpis strong.neg { color: #b91c1c; }
+.final-inflation-note {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  background: rgba(79, 70, 229, 0.06);
+  border-radius: 6px;
+  font-size: 12px;
+  color: #374151;
+  line-height: 1.55;
+}
+
 .issue-list {
   display: grid;
   gap: 0.55rem;
@@ -3234,6 +3459,93 @@ input {
   .seed-grid > div { background: #1f2937; border-color: #374151; }
   .seed-grid span { color: #9ca3af; }
   .seed-grid strong { color: #f3f4f6; }
+
+  /* Week 4 §2.1 — 배당 티어 뱃지 다크 모드 토큰 */
+  .dividend-tier-badge.tier-growth {
+    background: #0b1e3f;
+    color: #93c5fd;
+    border-color: #1e3a8a;
+  }
+  .dividend-tier-badge.tier-stable {
+    background: #052e2b;
+    color: #6ee7b7;
+    border-color: #065f46;
+  }
+  .dividend-tier-badge.tier-highYield {
+    background: #2a1a05;
+    color: #fcd34d;
+    border-color: #92400e;
+  }
+
+  /* Week 4 §2.4 — 거시 경보 배너 다크 모드 토큰 */
+  .macro-alert-banner {
+    background: #2a1a05;
+    border-color: #92400e;
+  }
+  .macro-alert-banner__head strong { color: #fcd34d; }
+  .macro-alert-banner__head span { color: #9ca3af; }
+  .macro-alert-item {
+    background: rgba(245, 158, 11, 0.12);
+    border-color: rgba(245, 158, 11, 0.25);
+  }
+  .macro-alert-item strong { color: #fde68a; }
+  .macro-alert-item p { color: #d1d5db; }
+
+  /* Week 4 §2.2 Phase B — 인플레이션 체크포인트 카드 다크 토큰 */
+  .inflation-checkpoint-card {
+    background: #1e1b4b;
+    border-color: #4338ca;
+  }
+  .inflation-checkpoint-head strong { color: #c7d2fe; }
+  .inflation-checkpoint-head span { color: #9ca3af; }
+  .inflation-checkpoint-grid {
+    background: #0f1023;
+    border-color: #312e81;
+  }
+  .inflation-row span { color: #9ca3af; }
+  .inflation-row strong { color: #e5e7eb; }
+  .inflation-row strong em.pos { color: #6ee7b7; }
+  .inflation-row strong em.neg { color: #fca5a5; }
+  .inflation-row strong em.neutral { color: #9ca3af; }
+  .inflation-row.real { border-top-color: #4338ca; }
+  .inflation-row.real strong { color: #a5b4fc; }
+  .inflation-checkpoint-note {
+    background: rgba(99, 102, 241, 0.12);
+    color: #d1d5db;
+  }
+  .inflation-checkpoint-note strong { color: #c7d2fe; }
+  .inflation-checkpoint-demand-pull {
+    background: rgba(245, 158, 11, 0.15);
+    color: #fde68a;
+    border-left-color: #f59e0b;
+  }
+
+  /* Week 4 §2.2 Phase C — 최종 보고서 인플레이션 섹션 다크 토큰 */
+  .final-inflation-section {
+    background: #1e1b4b;
+    border-left-color: #6366f1;
+  }
+  .final-inflation-lead { color: #d1d5db; }
+  .final-inflation-lead strong { color: #c7d2fe; }
+  .bar-track { background: #312e81; }
+  .bar-fill.pos { background: #6ee7b7; }
+  .bar-fill.neg { background: #fca5a5; }
+  .bar-fill.inflation { background: #fbbf24; }
+  .final-inflation-bar .bar-label span { color: #9ca3af; }
+  .final-inflation-bar .bar-label strong.up { color: #6ee7b7; }
+  .final-inflation-bar .bar-label strong.down { color: #fca5a5; }
+  .final-inflation-bar .bar-label strong.neutral { color: #9ca3af; }
+  .final-inflation-kpis {
+    background: #0f1023;
+    border-color: #312e81;
+  }
+  .final-inflation-kpis span { color: #9ca3af; }
+  .final-inflation-kpis strong { color: #e5e7eb; }
+  .final-inflation-kpis strong.neg { color: #fca5a5; }
+  .final-inflation-note {
+    background: rgba(99, 102, 241, 0.12);
+    color: #d1d5db;
+  }
 }
 
 /* ========================================================================
@@ -3484,4 +3796,604 @@ input {
 }
 .reverse-note span {
   color: #1e40af;
+}
+
+
+/* ========================================================================
+   Week 4 §3.5 사전 작업 — 학생 대시보드 정보보드/거래보드 탭 분리
+   ======================================================================== */
+
+/* ---- 탭 네비게이션 (헤더 아래 sticky) ---- */
+.student-tabbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  gap: 0;
+  background: var(--surface, #ffffff);
+  border-bottom: 1px solid var(--border, #e5e7eb);
+  margin: 0 -16px 12px;
+  padding: 0 16px;
+}
+.student-tab {
+  flex: 1;
+  padding: 12px 8px;
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-muted, #6b7280);
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+.student-tab:hover {
+  color: var(--text, #111827);
+}
+.student-tab.active {
+  color: var(--accent, #2563eb);
+  border-bottom-color: var(--accent, #2563eb);
+}
+.student-tab:focus-visible {
+  outline: 2px solid var(--accent, #2563eb);
+  outline-offset: -2px;
+}
+
+/* ---- 라운드 메모 히스토리 (정보보드 탭) ---- */
+.round-note-history {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  background: var(--surface-subtle, #f8fafc);
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 12px;
+  margin-bottom: 12px;
+}
+.round-note-history-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+.round-note-history-head strong {
+  font-size: 14px;
+  color: var(--text, #111827);
+}
+.round-note-history-head span {
+  font-size: 11px;
+  color: var(--text-muted, #6b7280);
+}
+.round-note-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+.note-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+}
+.note-item.current {
+  border-color: var(--accent, #2563eb);
+}
+.note-item.past {
+  opacity: 0.92;
+}
+.note-item-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+.note-item-head strong {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text, #111827);
+  letter-spacing: 0.02em;
+}
+.note-body {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text, #111827);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.note-body.empty {
+  color: var(--text-muted, #9ca3af);
+  font-style: italic;
+  font-size: 12px;
+}
+/* 메모 입력 textarea는 기존 .round-note-input 스타일을 그대로 재사용 */
+
+/* ---- 다크 테마 보정 ---- */
+@media (prefers-color-scheme: dark) {
+  .student-tabbar {
+    background: var(--surface, #0f172a);
+    border-bottom-color: var(--border, #1f2937);
+  }
+  .round-note-history {
+    background: var(--surface-subtle, #0b1220);
+    border-color: var(--border, #1f2937);
+  }
+  .note-item {
+    background: var(--surface, #111827);
+    border-color: var(--border, #1f2937);
+  }
+}
+
+/* ============================================================
+   Week 4 §3.6 — 체크포인트 학습 질문 (ReflectionPrompt)
+   ============================================================ */
+
+.reflection-prompt {
+  margin-top: 12px;
+  padding: 12px;
+  background: var(--surface-subtle, #f8fafc);
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.reflection-prompt-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.reflection-prompt-head strong {
+  font-size: 13px;
+  color: var(--text, #111827);
+}
+
+.reflection-prompt-head span {
+  font-size: 11px;
+  color: var(--text-muted, #6b7280);
+}
+
+.reflection-question {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text, #111827);
+  line-height: 1.45;
+}
+
+.reflection-options {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.reflection-option {
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 6px;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.reflection-option:hover {
+  border-color: var(--accent, #2563eb);
+}
+
+.reflection-option.selected {
+  border-color: var(--accent, #2563eb);
+  background: rgba(37, 99, 235, 0.06);
+}
+
+.reflection-option.correct {
+  border-color: #16a34a;
+  background: rgba(22, 163, 74, 0.08);
+}
+
+.reflection-option.wrong {
+  border-color: #dc2626;
+  background: rgba(220, 38, 38, 0.08);
+}
+
+.reflection-option label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text, #111827);
+}
+
+.reflection-option input[type="radio"] {
+  margin-top: 3px;
+  cursor: pointer;
+}
+
+.reflection-feedback {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.reflection-feedback.correct {
+  background: rgba(22, 163, 74, 0.08);
+  color: #166534;
+  border: 1px solid rgba(22, 163, 74, 0.3);
+}
+
+.reflection-feedback.wrong {
+  background: rgba(245, 158, 11, 0.08);
+  color: #92400e;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.reflection-open {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.reflection-open-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text, #111827);
+}
+
+.reflection-open-meter {
+  font-size: 11px;
+  color: var(--text-muted, #6b7280);
+  font-weight: 400;
+}
+
+.reflection-open-input {
+  width: 100%;
+  resize: vertical;
+  padding: 8px 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text, #111827);
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 6px;
+  font-family: inherit;
+}
+
+.reflection-open-input:focus-visible {
+  outline: 2px solid var(--accent, #2563eb);
+  outline-offset: -1px;
+  border-color: var(--accent, #2563eb);
+}
+
+.reflection-open-readonly {
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text, #111827);
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.reflection-open-readonly.empty {
+  color: var(--text-muted, #9ca3af);
+  font-style: italic;
+  font-size: 12px;
+}
+
+.reflection-status {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-muted, #6b7280);
+}
+
+.reflection-status.done {
+  color: #16a34a;
+}
+
+.reflection-status.pending {
+  color: var(--text-muted, #9ca3af);
+}
+
+/* ---- FinalReport 회고 타임라인 ---- */
+.reflection-timeline {
+  margin-top: 12px;
+  padding: 12px;
+  background: var(--surface-subtle, #f8fafc);
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+}
+
+.reflection-timeline > summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text, #111827);
+  list-style: none;
+}
+
+.reflection-timeline > summary::-webkit-details-marker { display: none; }
+
+.reflection-timeline-count {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted, #6b7280);
+  padding: 2px 8px;
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 4px;
+}
+
+.reflection-timeline-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.reflection-timeline-item .reflection-prompt {
+  margin-top: 0;
+}
+
+.reflection-timeline-help {
+  margin: 10px 0 0;
+  font-size: 11px;
+  color: var(--text-muted, #6b7280);
+  line-height: 1.5;
+}
+
+/* ---- 다크 테마 보정 ---- */
+@media (prefers-color-scheme: dark) {
+  .reflection-prompt,
+  .reflection-timeline {
+    background: var(--surface-subtle, #0b1220);
+    border-color: var(--border, #1f2937);
+  }
+  .reflection-option,
+  .reflection-open-input,
+  .reflection-open-readonly,
+  .reflection-timeline-count {
+    background: var(--surface, #111827);
+    border-color: var(--border, #1f2937);
+    color: var(--text, #f3f4f6);
+  }
+  .reflection-option.selected {
+    background: rgba(37, 99, 235, 0.14);
+  }
+  .reflection-option.correct {
+    background: rgba(22, 163, 74, 0.16);
+  }
+  .reflection-option.wrong {
+    background: rgba(220, 38, 38, 0.16);
+  }
+  .reflection-feedback.correct {
+    background: rgba(22, 163, 74, 0.14);
+    color: #86efac;
+  }
+  .reflection-feedback.wrong {
+    background: rgba(245, 158, 11, 0.14);
+    color: #fcd34d;
+  }
+}
+
+/* ============================================================
+   Week 4 §4.8 — 거시 시계열 라이트 차트 (MacroTimelineSparklines)
+   ============================================================ */
+
+.macro-timeline {
+  margin: 0 0 12px;
+  padding: 14px;
+  background: var(--surface-subtle, #f8fafc);
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.macro-timeline.compact { padding: 10px; margin: 8px 0 0; }
+.macro-timeline-head {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
+}
+.macro-timeline-head strong { font-size: 13px; color: var(--text, #111827); }
+.macro-timeline-head span { font-size: 11px; color: var(--text-muted, #6b7280); }
+.macro-timeline-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+}
+@media (max-width: 960px) {
+  .macro-timeline-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 520px) {
+  .macro-timeline-grid { grid-template-columns: 1fr; }
+}
+.macro-timeline.compact .macro-timeline-grid {
+  grid-template-columns: 1fr;
+  gap: 6px;
+}
+.macro-timeline-cell {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 8px;
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 6px;
+  min-width: 0;
+}
+.macro-timeline-cell-head {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 6px;
+}
+.macro-timeline-label { font-size: 11px; color: var(--text-muted, #6b7280); font-weight: 500; }
+.macro-timeline-value { font-size: 13px; color: var(--text, #111827); font-variant-numeric: tabular-nums; }
+.macro-timeline-svg { width: 100%; height: 44px; display: block; }
+.macro-timeline-delta { font-size: 10px; color: var(--text-muted, #6b7280); font-variant-numeric: tabular-nums; line-height: 1.3; }
+.macro-timeline-delta.up { color: #dc2626; }
+.macro-timeline-delta.down { color: #2563eb; }
+.macro-timeline-delta.flat { color: var(--text-muted, #6b7280); }
+.macro-timeline-dp-note { color: var(--text-muted, #6b7280); font-weight: 400; }
+@media (prefers-color-scheme: dark) {
+  .macro-timeline { background: var(--surface-subtle, #0b1220); border-color: var(--border, #1f2937); }
+  .macro-timeline-cell { background: var(--surface, #111827); border-color: var(--border, #1f2937); }
+  .macro-timeline-delta.up { color: #fca5a5; }
+  .macro-timeline-delta.down { color: #93c5fd; }
+}
+.macro-timeline .sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+
+/* ============================================================
+   Week 4 §4.9 — 회귀 자동 점검 DEV 패널 (DevPanel)
+   ============================================================ */
+
+.dev-panel {
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
+  z-index: 9000;
+  font-family: var(--font-mono, ui-monospace, Menlo, Consolas, monospace);
+  font-size: 12px;
+}
+
+.dev-panel-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: #111827;
+  color: #f9fafb;
+  border: 1px solid #1f2937;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.dev-panel-toggle.ok { border-color: #166534; }
+.dev-panel-toggle.warn { border-color: #b45309; background: #422006; }
+.dev-panel-toggle.fail { border-color: #b91c1c; background: #450a0a; }
+
+.dev-panel-toggle:hover { filter: brightness(1.1); }
+
+.dev-panel-dot {
+  width: 8px; height: 8px; border-radius: 50%; display: inline-block;
+  background: #22c55e;
+}
+.dev-panel-toggle.warn .dev-panel-dot { background: #f59e0b; }
+.dev-panel-toggle.fail .dev-panel-dot { background: #ef4444; }
+
+.dev-panel-toggle-label { letter-spacing: 0.02em; }
+
+.dev-panel-body {
+  position: absolute;
+  right: 0;
+  bottom: 100%;
+  margin-bottom: 6px;
+  width: 320px;
+  max-width: 90vw;
+  max-height: 60vh;
+  overflow-y: auto;
+  background: #0b1220;
+  color: #e5e7eb;
+  border: 1px solid #1f2937;
+  border-radius: 8px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dev-panel-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  gap: 8px;
+}
+.dev-panel-head strong { font-size: 13px; color: #f9fafb; }
+
+.dev-panel-recheck {
+  padding: 4px 8px;
+  background: #1f2937;
+  color: #e5e7eb;
+  border: 1px solid #374151;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 11px;
+}
+.dev-panel-recheck:hover { background: #374151; }
+
+.dev-panel-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dev-panel-item {
+  padding: 6px 8px;
+  background: #111827;
+  border: 1px solid #1f2937;
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dev-panel-item.ok { border-left: 3px solid #22c55e; }
+.dev-panel-item.warn { border-left: 3px solid #f59e0b; }
+.dev-panel-item.fail { border-left: 3px solid #ef4444; }
+
+.dev-panel-item-head {
+  display: flex; align-items: baseline; gap: 6px;
+}
+.dev-panel-item-head strong { font-size: 12px; color: #f9fafb; font-weight: 600; }
+
+.dev-panel-status {
+  padding: 1px 5px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+.dev-panel-status.ok { background: #14532d; color: #bbf7d0; }
+.dev-panel-status.warn { background: #78350f; color: #fcd34d; }
+.dev-panel-status.fail { background: #7f1d1d; color: #fecaca; }
+
+.dev-panel-item-detail {
+  margin: 0;
+  font-size: 11px;
+  color: #9ca3af;
+  line-height: 1.4;
+}
+
+.dev-panel-help {
+  margin: 4px 0 0;
+  font-size: 10px;
+  color: #6b7280;
+  line-height: 1.4;
 }

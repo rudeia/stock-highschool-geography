@@ -20,6 +20,7 @@ import {
   School,
   Shuffle,
   Smartphone,
+  TrendingUp,
   Trophy,
   Users,
   Wallet,
@@ -82,6 +83,54 @@ const MAX_INDIRECT_REPEATED_EVENT_IMPACT = 0.12;
 const PASSIVE_MARKET_MOVE = 0.05;
 // Week 2 E — 배당 시스템 상수
 const DIVIDEND_ROUNDS = [4, 8, 12]; // 배당 지급 라운드 (지정 라운드에서만 작동)
+
+// Week 4 §3.6 — 체크포인트 라운드 학습 질문 (객관식 + 자유 서술)
+const REFLECTION_PROMPTS = {
+  4: {
+    title: 'R4 — 1년 차 점검 (명목 vs 실질)',
+    objective: {
+      question: '왜 명목 수익률보다 실질 수익률이 낮을까요?',
+      options: [
+        '물가가 함께 올랐기 때문 (구매력 감소)',
+        '예금 금리가 너무 낮아서',
+        '환율이 변동했기 때문',
+        '거래 수수료가 누적됐기 때문',
+      ],
+      answerIndex: 0,
+      explanation: '물가가 오르면 같은 금액으로 살 수 있는 양이 줄어들어, 명목 수익률에서 인플레이션을 빼야 실제 구매력 증가분(실질 수익률)이 나옵니다.',
+    },
+    open: {
+      label: '한 줄 정리',
+      placeholder: '명목/실질 차이를 자기 말로 한 줄 설명해 보세요',
+    },
+  },
+  8: {
+    title: 'R8 — 2년 차 점검 (수요견인 인플레이션)',
+    objective: {
+      question: '이 방의 평균 수익률이 높을 때 물가가 더 빨리 오른 이유로 가장 적절한 것은?',
+      options: [
+        '사람들 손에 돈이 많아져 물가 압력이 커졌기 때문 (수요견인)',
+        '환율이 급락해서 수입품 가격이 올랐기 때문',
+        '예금 금리가 올라 저축이 늘었기 때문',
+      ],
+      answerIndex: 0,
+      explanation: '시장 전체 수익률이 높을수록 가처분 자금이 늘어, 같은 상품에 더 많은 돈이 몰려 물가가 가속됩니다. 이를 수요견인 인플레이션이라고 합니다.',
+    },
+    open: {
+      label: '내가 관찰한 점',
+      placeholder: '내 수익률과 방 평균, 물가의 관계를 한 줄로 적어 보세요',
+    },
+  },
+  12: {
+    title: 'R12 — 3년 차 점검 (장기 자산 배분 회고)',
+    objective: null,
+    open: {
+      label: '다시 시작한다면',
+      placeholder: '다시 시작한다면 어떤 자산을 늘리고, 어떤 자산을 줄이겠습니까? 이유도 함께 적어 보세요',
+    },
+  },
+};
+const REFLECTION_OPEN_MAX_BYTES = 200; // 자유 서술 200바이트 (한글 약 66자)
 const EX_DIVIDEND_RATIO = 0.5; // 배당락 비율 (배당금의 절반만큼 주가 하락)
 const DIVIDEND_TIER_RATES = { growth: 0, stable: 0.05, highYield: 0.10 };
 const DIVIDEND_TIER_LABELS = { growth: '성장주(배당 없음)', stable: '안정주(5%)', highYield: '고배당주(10%)' };
@@ -96,6 +145,17 @@ const SEED_UNEMPLOYMENT_RANGE = [3.0, 4.5];
 const SEED_EXCHANGE_RATE_RANGE = [1280, 1430];
 const SEED_ISSUE_INTENSITY_RANGE = [0.85, 1.15];
 const SEED_TRIGGER_SENSITIVITY_RANGE = [0.90, 1.10];
+// Week 4 §2.2 — 시드 D · 인플레이션 민감도 (방마다 같은 충격에 물가가 얼마나 더 민감하게 반응하는지)
+const SEED_INFLATION_SENSITIVITY_RANGE = [0.80, 1.20];
+
+// Week 4 §2.2 — 물가(인플레이션) 상수
+//   매 라운드 종료 시점에 priceIndex 갱신. 분기당 기본 1% + α (수요견인 / 이슈 / 거시) × 시드 D.
+//   학습 목표: 명목수익률과 실질수익률의 차이, "다 같이 벌면 물가가 따라온다"는 수요견인 직관 체험.
+// Week 4 §2.2 — A안 (연 ~4% 수준): 한국 고물가기와 비슷한 일반 인플레이션 강도
+const BASE_INFLATION_RATE = 0.01;      // 분기(1라운드)당 1% 기본 = 연 ~4%
+const MIN_INFLATION_FLOOR = 0.003;     // 손실 라운드에도 최소 0.3%/round → 우상향 보장
+const DEMAND_PULL_COEF = 0.08;         // 집계수익률 증가분 → 인플레 변환 계수 (직전 대비 +5% 수익이면 +0.4%p 가속)
+const INITIAL_PRICE_INDEX = 1.000;
 // Week 1 B — 거래 수수료(매수·매도 양쪽) + 매도 시 거래세
 const TRADE_FEE_RATE = 0.0025;
 const TRADE_TAX_RATE = 0.0018;
@@ -305,13 +365,18 @@ function createEconomicSeed() {
   const exchangeRate = Math.round(SEED_EXCHANGE_RATE_RANGE[0] + Math.random() * (SEED_EXCHANGE_RATE_RANGE[1] - SEED_EXCHANGE_RATE_RANGE[0]));
   const issueIntensity = Number((SEED_ISSUE_INTENSITY_RANGE[0] + Math.random() * (SEED_ISSUE_INTENSITY_RANGE[1] - SEED_ISSUE_INTENSITY_RANGE[0])).toFixed(3));
   const triggerSensitivity = Number((SEED_TRIGGER_SENSITIVITY_RANGE[0] + Math.random() * (SEED_TRIGGER_SENSITIVITY_RANGE[1] - SEED_TRIGGER_SENSITIVITY_RANGE[0])).toFixed(3));
-  // 4자리 16진수 코드 생성 (호스트 화면 표시용)
-  const code = Math.floor(Math.random() * 0xFFFF).toString(16).toUpperCase().padStart(4, '0');
+  // Week 4 §2.2 — 시드 D · 인플레이션 민감도 (0.8 ~ 1.2)
+  const inflationSensitivity = Number((SEED_INFLATION_SENSITIVITY_RANGE[0] + Math.random() * (SEED_INFLATION_SENSITIVITY_RANGE[1] - SEED_INFLATION_SENSITIVITY_RANGE[0])).toFixed(3));
+  // 4자리 16진수 + 하이픈 + 1자리 (시드 D 식별) — 호스트 화면 표시용
+  const baseHex = Math.floor(Math.random() * 0xFFFF).toString(16).toUpperCase().padStart(4, '0');
+  const inflationHex = Math.floor(Math.random() * 0xF).toString(16).toUpperCase();
+  const code = `${baseHex}-${inflationHex}`;
   return {
     code,
     economicConstitution: { baseRate, unemploymentRate, exchangeRate },
     issueIntensity,
     triggerSensitivity,
+    inflationSensitivity,
   };
 }
 
@@ -2374,6 +2439,335 @@ function getAssetProfile(asset) {
   };
 }
 
+// Week 4 §4.9 — ?debug=1 쿼리스트링 감지 훅
+function useDebugMode() {
+  const [enabled, setEnabled] = useState(() => {
+    try {
+      if (typeof window === 'undefined') return false;
+      const params = new URLSearchParams(window.location.search || '');
+      return params.get('debug') === '1';
+    } catch (err) {
+      return false;
+    }
+  });
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const onPopState = () => {
+      try {
+        const params = new URLSearchParams(window.location.search || '');
+        setEnabled(params.get('debug') === '1');
+      } catch (err) {
+        /* ignore */
+      }
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+  return enabled;
+}
+
+// Week 4 §4.9 — 회귀 자동 점검: 5종 검사를 순수 함수로 수행
+// returns: [{ id, label, status: 'ok'|'fail'|'warn', detail }]
+function runRegressionChecks({ round, phase, gameStarted, salaryPaidRounds, tradeLogs, portfolio, teamAccounts, roomMode, assets, macroTimeline, pendingMacroAlerts, activeMacroAlerts, macroAlertsByRound, economicSeed, initialSeedSensitivity }) {
+  const checks = [];
+
+  // (1) 생활소득 누락 검사 — R5~R11 각 1회 입금
+  {
+    const expectedRounds = [];
+    for (let r = 5; r <= Math.min(11, round); r += 1) expectedRounds.push(r);
+    if (!gameStarted || expectedRounds.length === 0) {
+      checks.push({ id: 'salary', label: '생활소득 입금 (R5~R11)', status: 'ok', detail: '아직 생활소득 라운드 진입 전' });
+    } else {
+      const missing = expectedRounds.filter((r) => !(salaryPaidRounds || []).includes(r));
+      if (missing.length === 0) {
+        checks.push({ id: 'salary', label: '생활소득 입금 (R5~R11)', status: 'ok', detail: `${expectedRounds.length}회 모두 입금` });
+      } else {
+        checks.push({ id: 'salary', label: '생활소득 입금 (R5~R11)', status: 'fail', detail: `누락 라운드: ${missing.join(', ')}` });
+      }
+    }
+  }
+
+  // (2) 배당 지급 검사 — R4/R8/R12 종료 후, 보유 자산에 배당 가능 종목이 있으면 tradeLogs에 배당 로그 존재
+  {
+    const checkpoints = [4, 8, 12].filter((r) => r < round || (r === round && phase === 'closed'));
+    if (!gameStarted || checkpoints.length === 0) {
+      checks.push({ id: 'dividend', label: '배당 지급 (R4·R8·R12)', status: 'ok', detail: '아직 배당 체크포인트 미도달' });
+    } else {
+      // 배당 가능 자산 = stock + dividendTier !== 'growth'
+      const dividendAssets = (assets || []).filter((a) => a.type === 'stock' && a.dividendTier && a.dividendTier !== 'growth');
+      const dividendAssetIds = new Set(dividendAssets.map((a) => a.id));
+      // 호스트 화면에서는 portfolio가 비어 있을 수 있으므로 학생 모드에서만 정밀 검사
+      const logsAll = (tradeLogs || []).filter((l) => typeof l === 'string' || typeof l === 'object');
+      const dividendLogs = logsAll.filter((l) => {
+        const msg = typeof l === 'string' ? l : (l?.message || '');
+        return msg.includes('배당 지급');
+      });
+      if (dividendLogs.length === 0 && dividendAssetIds.size > 0) {
+        checks.push({ id: 'dividend', label: '배당 지급 (R4·R8·R12)', status: 'warn', detail: `체크포인트 ${checkpoints.length}회 통과했으나 배당 로그 없음 (보유분 없음 가능)` });
+      } else {
+        checks.push({ id: 'dividend', label: '배당 지급 (R4·R8·R12)', status: 'ok', detail: `배당 로그 ${dividendLogs.length}건 확인` });
+      }
+    }
+  }
+
+  // (3) 트리거 발동 검사 — 거시 임계치 돌파 라운드에서 pending/active/byRound 중 어디에든 기록되어 있어야 함
+  {
+    const tl = Array.isArray(macroTimeline) ? macroTimeline : [];
+    if (tl.length === 0) {
+      checks.push({ id: 'trigger', label: '거시 트리거 발동', status: 'ok', detail: '아직 라운드 진행 없음' });
+    } else {
+      // 임계치 위반 라운드 카운트
+      let violationRounds = 0;
+      let recordedRounds = 0;
+      tl.forEach((p) => {
+        const violatesRate = p.baseRate >= 7.0 || p.baseRate <= 1.0;
+        const violatesFx = p.exchangeRate >= 1600 || p.exchangeRate <= 1100;
+        const violatesUnemp = p.unemploymentRate >= 6.0 || p.unemploymentRate <= 2.0;
+        if (violatesRate || violatesFx || violatesUnemp) {
+          violationRounds += 1;
+          if (p.hasMacroAlert || (macroAlertsByRound && macroAlertsByRound[p.round + 1])) {
+            recordedRounds += 1;
+          }
+        }
+      });
+      if (violationRounds === 0) {
+        checks.push({ id: 'trigger', label: '거시 트리거 발동', status: 'ok', detail: '임계치 위반 라운드 없음' });
+      } else if (recordedRounds >= violationRounds) {
+        checks.push({ id: 'trigger', label: '거시 트리거 발동', status: 'ok', detail: `위반 ${violationRounds}회, 모두 기록됨` });
+      } else {
+        checks.push({ id: 'trigger', label: '거시 트리거 발동', status: 'warn', detail: `위반 ${violationRounds}회 중 ${recordedRounds}회만 기록 (쿨다운 가능)` });
+      }
+    }
+  }
+
+  // (4) 물가 단조 증가 검사 — priceIndex가 항상 직전 라운드 이상
+  {
+    const tl = Array.isArray(macroTimeline) ? macroTimeline : [];
+    if (tl.length < 2) {
+      checks.push({ id: 'inflation-mono', label: '물가 단조 증가', status: 'ok', detail: tl.length === 0 ? '아직 데이터 없음' : '1라운드만 진행됨' });
+    } else {
+      const violations = [];
+      for (let i = 1; i < tl.length; i += 1) {
+        if (tl[i].priceIndex < tl[i - 1].priceIndex) {
+          violations.push(tl[i].round);
+        }
+      }
+      if (violations.length === 0) {
+        checks.push({ id: 'inflation-mono', label: '물가 단조 증가', status: 'ok', detail: `${tl.length}라운드 모두 ≥ 이전` });
+      } else {
+        checks.push({ id: 'inflation-mono', label: '물가 단조 증가', status: 'fail', detail: `위반 라운드: ${violations.join(', ')}` });
+      }
+    }
+  }
+
+  // (5) 시드 D 일관성 — economicSeed.inflationSensitivity가 초기값과 동일
+  {
+    if (!economicSeed) {
+      checks.push({ id: 'seed-d', label: '시드 D 일관성', status: 'ok', detail: '게임 시작 전' });
+    } else {
+      const current = economicSeed.inflationSensitivity;
+      if (initialSeedSensitivity === null || initialSeedSensitivity === undefined) {
+        checks.push({ id: 'seed-d', label: '시드 D 일관성', status: 'ok', detail: `현재 시드 D = ${current?.toFixed?.(3) ?? current}` });
+      } else if (Math.abs(current - initialSeedSensitivity) < 1e-9) {
+        checks.push({ id: 'seed-d', label: '시드 D 일관성', status: 'ok', detail: `시드 D = ${current.toFixed(3)} (변동 없음)` });
+      } else {
+        checks.push({ id: 'seed-d', label: '시드 D 일관성', status: 'fail', detail: `초기 ${initialSeedSensitivity.toFixed(3)} → 현재 ${current.toFixed(3)} 불일치` });
+      }
+    }
+  }
+
+  return checks;
+}
+
+// Week 4 §4.9 — 회귀 자동 점검 DEV 패널 (?debug=1 시에만 노출, 호스트 전용 우하단 floating)
+function DevPanel({ checks, onRecheck, round }) {
+  const [expanded, setExpanded] = useState(false);
+  const failCount = checks.filter((c) => c.status === 'fail').length;
+  const warnCount = checks.filter((c) => c.status === 'warn').length;
+  const totalBad = failCount + warnCount;
+
+  // 실패 발생 시 자동 펼침
+  useEffect(() => {
+    if (failCount > 0) setExpanded(true);
+  }, [failCount]);
+
+  // console.warn 출력
+  useEffect(() => {
+    if (typeof console === 'undefined') return;
+    checks.forEach((c) => {
+      if (c.status === 'fail') {
+        // eslint-disable-next-line no-console
+        console.warn(`[DevPanel·FAIL] R${round} ${c.label}: ${c.detail}`);
+      }
+    });
+  }, [checks, round]);
+
+  let statusClass = 'ok';
+  if (failCount > 0) statusClass = 'fail';
+  else if (warnCount > 0) statusClass = 'warn';
+
+  return (
+    <aside className={`dev-panel ${expanded ? 'expanded' : 'collapsed'}`} aria-label="회귀 자동 점검 DEV 패널">
+      <button
+        type="button"
+        className={`dev-panel-toggle ${statusClass}`}
+        onClick={() => setExpanded(!expanded)}
+        aria-expanded={expanded}
+      >
+        <span className="dev-panel-dot" />
+        <span className="dev-panel-toggle-label">DEV · {failCount + warnCount === 0 ? 'OK' : `${totalBad}건`}</span>
+      </button>
+      {expanded ? (
+        <div className="dev-panel-body">
+          <header className="dev-panel-head">
+            <strong>회귀 자동 점검</strong>
+            <button type="button" className="dev-panel-recheck" onClick={onRecheck} aria-label="재검사">재검사</button>
+          </header>
+          <ul className="dev-panel-list">
+            {checks.map((c) => (
+              <li key={c.id} className={`dev-panel-item ${c.status}`}>
+                <div className="dev-panel-item-head">
+                  <span className={`dev-panel-status ${c.status}`}>{c.status === 'ok' ? 'OK' : c.status === 'warn' ? 'WARN' : 'FAIL'}</span>
+                  <strong>{c.label}</strong>
+                </div>
+                <p className="dev-panel-item-detail">{c.detail}</p>
+              </li>
+            ))}
+          </ul>
+          <p className="dev-panel-help">?debug=1 쿼리스트링이 붙은 호스트 화면에만 노출. 매 라운드 종료 후 자동 재실행.</p>
+        </div>
+      ) : null}
+    </aside>
+  );
+}
+
+// Week 4 §4.8 — 거시 시계열 라이트 차트 (5개 SmallMultiples + demandPull 누적 영역 + 트리거 점선 마커)
+function MacroTimelineSparklines({ timeline, compact = false, title = '거시 시계열' }) {
+  if (!Array.isArray(timeline) || timeline.length === 0) return null;
+  const formatters = {
+    baseRate: (v) => `${(Number(v) || 0).toFixed(2)}%`,
+    priceIndex: (v) => (Number(v) || 0).toFixed(3),
+    exchangeRate: (v) => `${Math.round(Number(v) || 0)}원`,
+    unemploymentRate: (v) => `${(Number(v) || 0).toFixed(1)}%`,
+    aggregateReturn: (v) => `${((Number(v) || 0) * 100).toFixed(1)}%`,
+  };
+  const series = [
+    { key: 'baseRate', label: '기준금리', color: '#60a5fa' },
+    { key: 'priceIndex', label: '물가지수', color: '#f59e0b', withDemandPull: true },
+    { key: 'exchangeRate', label: '환율', color: '#a78bfa' },
+    { key: 'unemploymentRate', label: '실업률', color: '#fb923c' },
+    { key: 'aggregateReturn', label: '집계 수익률', color: '#34d399' },
+  ];
+  function buildPathPoints(values) {
+    if (values.length === 0) return { line: '', points: [] };
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const range = max - min || 1;
+    const W = 100;
+    const H = 28;
+    const pad = 2;
+    const xs = values.map((_, i) => values.length === 1 ? W / 2 : (i / (values.length - 1)) * (W - pad * 2) + pad);
+    const ys = values.map((v) => H - pad - ((v - min) / range) * (H - pad * 2));
+    const line = xs.map((x, i) => `${i === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${ys[i].toFixed(2)}`).join(' ');
+    return { line, points: xs.map((x, i) => ({ x, y: ys[i] })), W, H };
+  }
+  function buildDemandPullArea(timelineData) {
+    const pi = timelineData.map((p) => Number(p.priceIndex) || 1.0);
+    const dp = timelineData.map((p) => Number(p.demandPullDelta) || 0);
+    let acc = 0;
+    const ratios = dp.map((d) => { acc += d; return acc; });
+    if (Math.max(...ratios) <= 0) return null;
+    const min = Math.min(...pi);
+    const max = Math.max(...pi);
+    const range = max - min || 1;
+    const W = 100;
+    const H = 28;
+    const pad = 2;
+    const xs = pi.map((_, i) => pi.length === 1 ? W / 2 : (i / (pi.length - 1)) * (W - pad * 2) + pad);
+    const ysTop = pi.map((v) => H - pad - ((v - min) / range) * (H - pad * 2));
+    const piRise = pi[pi.length - 1] - pi[0];
+    const dpRise = ratios[ratios.length - 1];
+    if (piRise <= 0) return null;
+    const dpRatio = Math.min(1, Math.max(0, dpRise / piRise));
+    if (dpRatio <= 0) return null;
+    const baselineY = H - pad;
+    const fillHeight = (H - pad * 2) * dpRatio;
+    const ysFillTop = ysTop.map((y) => Math.max(y, baselineY - fillHeight));
+    const path = [
+      `M ${xs[0].toFixed(2)} ${baselineY.toFixed(2)}`,
+      ...xs.map((x, i) => `L ${x.toFixed(2)} ${ysFillTop[i].toFixed(2)}`),
+      `L ${xs[xs.length - 1].toFixed(2)} ${baselineY.toFixed(2)}`,
+      'Z',
+    ].join(' ');
+    return { path, ratio: dpRatio };
+  }
+  return (
+    <section className={compact ? 'macro-timeline compact' : 'macro-timeline'} aria-label={title}>
+      <header className="macro-timeline-head">
+        <strong>{title}</strong>
+        <span>{timeline.length}라운드 · 점선은 거시 경보 발동 라운드</span>
+      </header>
+      <div className="macro-timeline-grid">
+        {series.map(({ key, label, color, withDemandPull }) => {
+          const values = timeline.map((p) => Number(p[key]) || 0);
+          const { line, points, W = 100, H = 28 } = buildPathPoints(values);
+          const last = values[values.length - 1];
+          const first = values[0];
+          const delta = values.length > 1 ? last - first : 0;
+          const deltaTone = delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat';
+          const dpArea = withDemandPull ? buildDemandPullArea(timeline) : null;
+          return (
+            <div className="macro-timeline-cell" key={key}>
+              <div className="macro-timeline-cell-head">
+                <span className="macro-timeline-label">{label}</span>
+                <strong className="macro-timeline-value">{formatters[key](last)}</strong>
+              </div>
+              <svg className="macro-timeline-svg" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden="true">
+                {dpArea ? (<path d={dpArea.path} fill={color} opacity="0.18" />) : null}
+                <path d={line} fill="none" stroke={color} strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+                {points && points.map((pt, i) => {
+                  const point = timeline[i];
+                  if (!point?.hasMacroAlert) return null;
+                  return (
+                    <line key={`marker-${key}-${i}`} x1={pt.x} y1={0} x2={pt.x} y2={H} stroke="#f97316" strokeWidth="0.6" strokeDasharray="1.2 1.2" opacity="0.7" />
+                  );
+                })}
+                {points && points.length > 0 ? (
+                  <circle cx={points[points.length - 1].x} cy={points[points.length - 1].y} r="1.4" fill={color} />
+                ) : null}
+              </svg>
+              <div className={`macro-timeline-delta ${deltaTone}`}>
+                {delta === 0 ? '변동 없음' : `${delta >= 0 ? '+' : ''}${formatters[key](Math.abs(delta)).replace('-', '')}`}
+                {withDemandPull && dpArea ? (
+                  <span className="macro-timeline-dp-note"> · 수요견인 비중 {(dpArea.ratio * 100).toFixed(0)}%</span>
+                ) : null}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="sr-only">
+        <table aria-label={`${title} 라운드별 값`}>
+          <thead>
+            <tr>
+              <th>라운드</th>
+              {series.map((s) => <th key={s.key}>{s.label}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {timeline.map((p) => (
+              <tr key={`sr-${p.round}`}>
+                <td>R{p.round}</td>
+                {series.map((s) => <td key={`sr-${p.round}-${s.key}`}>{formatters[s.key](p[s.key])}</td>)}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 function Sparkline({ history, color }) {
   const width = 150;
   const height = 48;
@@ -2560,6 +2954,172 @@ function formatAssetPrice(asset) {
   return asset.delisted ? '상장폐지' : formatWon(asset.price);
 }
 
+// Week 4 §2.2 Phase B — 인플레이션 체크포인트 카드
+//   R4·R8·R12 종료 시점에 학생/교사 화면 모두에 노출.
+//   학습 목표: "명목수익률 ≠ 실질수익률"을 숫자로 직접 체험.
+//   수요견인 인식: 방 평균 수익이 높을수록 물가가 더 빨리 올랐다는 점을 안내.
+// Week 4 §3.6 — 체크포인트 학습 질문 패널 (객관식 1 + 자유 서술 1)
+function ReflectionPrompt({ round, reflection, onReflectionChange, readOnly = false }) {
+  const prompt = REFLECTION_PROMPTS[round];
+  if (!prompt) return null;
+  const current = reflection || {};
+  const selectedIndex = Number.isInteger(current.selected) ? current.selected : null;
+  const openText = current.open ?? '';
+  const isAnswered = prompt.objective ? selectedIndex !== null : openText.trim().length > 0;
+  const isCorrect = prompt.objective && selectedIndex === prompt.objective.answerIndex;
+
+  return (
+    <div className="reflection-prompt" aria-label={`${prompt.title} 학습 질문`}>
+      <header className="reflection-prompt-head">
+        <strong>학습 질문</strong>
+        <span>{prompt.title}</span>
+      </header>
+
+      {prompt.objective ? (
+        <div className="reflection-objective">
+          <p className="reflection-question">{prompt.objective.question}</p>
+          <ul className="reflection-options" role="radiogroup" aria-label={prompt.objective.question}>
+            {prompt.objective.options.map((option, idx) => {
+              const isSelected = selectedIndex === idx;
+              const isAnswerKey = prompt.objective.answerIndex === idx;
+              let optionClass = 'reflection-option';
+              if (isSelected) optionClass += ' selected';
+              if (selectedIndex !== null && isAnswerKey) optionClass += ' correct';
+              if (isSelected && !isAnswerKey && selectedIndex !== null) optionClass += ' wrong';
+              return (
+                <li key={idx} className={optionClass}>
+                  <label>
+                    <input
+                      type="radio"
+                      name={`reflection-r${round}`}
+                      value={idx}
+                      checked={isSelected}
+                      onChange={() => !readOnly && onReflectionChange(round, { ...current, selected: idx })}
+                      disabled={readOnly}
+                    />
+                    <span>{option}</span>
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
+          {selectedIndex !== null ? (
+            <p className={isCorrect ? 'reflection-feedback correct' : 'reflection-feedback wrong'}>
+              {isCorrect ? '정답입니다. ' : '한 번 더 생각해 보세요. '}
+              {prompt.objective.explanation}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
+      <div className="reflection-open">
+        <label className="reflection-open-label">
+          {prompt.open.label}
+          {!readOnly ? (
+            <span className="reflection-open-meter">{getByteLength(openText)}/{REFLECTION_OPEN_MAX_BYTES}바이트</span>
+          ) : null}
+        </label>
+        {readOnly ? (
+          openText.trim() ? (
+            <p className="reflection-open-readonly">{openText}</p>
+          ) : (
+            <p className="reflection-open-readonly empty">작성 전</p>
+          )
+        ) : (
+          <textarea
+            className="reflection-open-input"
+            value={openText}
+            onChange={(event) => {
+              const clamped = clampToByteLength(event.target.value, REFLECTION_OPEN_MAX_BYTES);
+              onReflectionChange(round, { ...current, open: clamped });
+            }}
+            placeholder={prompt.open.placeholder}
+            rows={2}
+            aria-label={prompt.open.label}
+          />
+        )}
+      </div>
+
+      {isAnswered ? (
+        <p className="reflection-status done">기록됨 · 회고 화면에서 다시 볼 수 있습니다.</p>
+      ) : (
+        <p className="reflection-status pending">{prompt.objective ? '보기를 고르고 ' : ''}한 줄 정리를 적어 보세요.</p>
+      )}
+    </div>
+  );
+}
+
+function InflationCheckpointCard({ round, totalAsset, investedPrincipal, priceIndex, aggregateReturn, compact = false, roundReflection = null, onRoundReflectionChange = null, macroTimeline = null }) {
+  if (!DIVIDEND_ROUNDS.includes(round)) return null;
+  if (priceIndex == null || priceIndex <= 0) return null;
+  if (investedPrincipal == null || investedPrincipal <= 0) return null;
+
+  const cumulativeInflationPct = (priceIndex - 1) * 100;
+  const nominalReturnPct = ((totalAsset - investedPrincipal) / investedPrincipal) * 100;
+  const realNetWorth = totalAsset / priceIndex;
+  const realReturnPct = ((realNetWorth - investedPrincipal) / investedPrincipal) * 100;
+  const inflationLoss = realNetWorth - totalAsset; // 음수: 물가로 인해 줄어든 구매력
+  const gapPct = nominalReturnPct - realReturnPct;
+  const yearLabel = round === 4 ? '1년' : round === 8 ? '2년' : '3년';
+
+  // 수요견인 코멘트: 방 평균 수익률이 높으면 물가 가속 인식 강화
+  const aggregatePct = aggregateReturn != null ? aggregateReturn * 100 : null;
+  let demandPullComment = null;
+  if (aggregatePct != null && aggregatePct >= 10) {
+    demandPullComment = `이 방 평균 수익률이 +${aggregatePct.toFixed(1)}%로 높아, 물가 상승이 가속됐어요. (수요견인 인플레이션)`;
+  } else if (aggregatePct != null && aggregatePct >= 5) {
+    demandPullComment = `이 방 평균 수익률이 +${aggregatePct.toFixed(1)}%로 양호한 편이라, 물가에도 영향이 있었어요.`;
+  }
+
+  return (
+    <section className={compact ? 'inflation-checkpoint-card compact' : 'inflation-checkpoint-card'} aria-label={`R${round} 인플레이션 체크포인트`}>
+      <header className="inflation-checkpoint-head">
+        <strong>체크포인트 R{round} — {yearLabel} 점검</strong>
+        <span>명목수익률과 실질수익률을 비교해 보세요.</span>
+      </header>
+      <div className="inflation-checkpoint-grid">
+        <div className="inflation-row">
+          <span>원금 누적</span>
+          <strong>{formatWon(investedPrincipal)}</strong>
+        </div>
+        <div className="inflation-row">
+          <span>현재 순자산 (명목)</span>
+          <strong>{formatWon(totalAsset)} <em className={nominalReturnPct >= 0 ? 'pos' : 'neg'}>({nominalReturnPct >= 0 ? '+' : ''}{nominalReturnPct.toFixed(1)}%)</em></strong>
+        </div>
+        <div className="inflation-row">
+          <span>물가지수</span>
+          <strong>{priceIndex.toFixed(3)} <em className="neutral">(+{cumulativeInflationPct.toFixed(1)}%)</em></strong>
+        </div>
+        <div className="inflation-row real">
+          <span>실질 순자산</span>
+          <strong>{formatWon(Math.round(realNetWorth))} <em className={realReturnPct >= 0 ? 'pos' : 'neg'}>({realReturnPct >= 0 ? '+' : ''}{realReturnPct.toFixed(1)}%)</em></strong>
+        </div>
+        <div className="inflation-row loss">
+          <span>인플레이션 손실</span>
+          <strong className="neg">{formatWon(Math.round(inflationLoss))}</strong>
+        </div>
+      </div>
+      <p className="inflation-checkpoint-note">
+        명목으로는 {nominalReturnPct >= 0 ? '+' : ''}{nominalReturnPct.toFixed(1)}% 였지만, 물가를 빼면 실질은 {realReturnPct >= 0 ? '+' : ''}{realReturnPct.toFixed(1)}% 였습니다.
+        구매력 기준으로는 <strong>{Math.abs(gapPct).toFixed(1)}%p</strong> 만큼 줄어든 셈입니다. 물가를 이기려면 꾸준히 벌어야합니다. 남은 라운드에서 따 잡을 수 있어요.
+      </p>
+      {demandPullComment ? <p className="inflation-checkpoint-demand-pull">{demandPullComment}</p> : null}
+      {/* Week 4 §4.8 — 체크포인트에서 거시 시계열 라이트 차트 노출 */}
+      {Array.isArray(macroTimeline) && macroTimeline.length > 0 ? (
+        <MacroTimelineSparklines timeline={macroTimeline} compact title="거시 흐름 점검" />
+      ) : null}
+      {/* Week 4 §3.6 — 체크포인트 학습 질문 */}
+      {onRoundReflectionChange ? (
+        <ReflectionPrompt
+          round={round}
+          reflection={roundReflection}
+          onReflectionChange={onRoundReflectionChange}
+        />
+      ) : null}
+    </section>
+  );
+}
+
 function RoundExplanation({ summary, assets, compact = false }) {
   if (!summary?.events?.length) {
     return (
@@ -2725,6 +3285,32 @@ function IssueTicker({ events, phase, compact = false }) {
           </article>
         ))}
       </div>
+    </section>
+  );
+}
+
+// Week 4 §2.4 — 거시 경보 배너 (트리거 전용 UI, 이슈와 채널 완전 분리)
+//   거시 지표가 임계치를 돌파하면 교사 선택과 무관하게 라운드 시작과 동시에 자동 발동.
+//   학생/교사 모두 IssueTicker 위쪽에 별도 색·아이콘으로 표시되어 이슈와 시각적으로 구별된다.
+function MacroAlertBanner({ alerts, compact = false }) {
+  if (!alerts || alerts.length === 0) return null;
+  return (
+    <section
+      className={compact ? 'macro-alert-banner compact' : 'macro-alert-banner'}
+      aria-label="거시 경보"
+    >
+      <div className="macro-alert-banner__head">
+        <strong>거시 경보 — 임계치 돌파에 따른 자동 발동</strong>
+        <span>교사가 선택한 이슈와 별개로, 거시 지표가 기준을 넘어 라운드 시작과 동시에 적용된 변수입니다.</span>
+      </div>
+      <ul className="macro-alert-list">
+        {alerts.map((alert) => (
+          <li key={alert.uniqueId ?? alert.id} className="macro-alert-item">
+            <strong>{alert.title}</strong>
+            <p>{alert.detail}</p>
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }
@@ -2989,7 +3575,7 @@ function getInvestorType({ cashLikeAsset, holdingsValue, portfolioRows, totalAss
   return '균형 분산형 투자자';
 }
 
-function buildFinalSubmissionReport({ nickname, mode = 'individual', teamKey = '', teamName = '', submissionMethod = 'student', cash, deposit, depositInterestEarned = 0, investedPrincipal = INITIAL_CASH, portfolio, assets, tradeLogs, roundLogs, reflection }) {
+function buildFinalSubmissionReport({ nickname, mode = 'individual', teamKey = '', teamName = '', submissionMethod = 'student', cash, deposit, depositInterestEarned = 0, investedPrincipal = INITIAL_CASH, portfolio, assets, tradeLogs, roundLogs, reflection, priceIndex = INITIAL_PRICE_INDEX, demandPullCumulative = 0 }) {
   const portfolioRows = getHoldingRows(portfolio, assets);
   const investmentAsset = portfolioRows.reduce((sum, row) => sum + row.value, 0);
   const cashLikeAsset = cash + deposit;
@@ -3005,6 +3591,21 @@ function buildFinalSubmissionReport({ nickname, mode = 'individual', teamKey = '
     value,
     ratio: totalAsset > 0 ? value / totalAsset : 0,
   }));
+
+  // Week 4 §2.2 Phase C — 명목 vs 실질 KPI
+  //   누적 인플레이션으로 화폐가치가 깎인 만큼을 실질로 환산.
+  const safePriceIndex = priceIndex > 0 ? priceIndex : 1;
+  const cumulativeInflation = safePriceIndex - 1;
+  const realNetWorth = totalAsset / safePriceIndex;
+  const realPrincipal = investedPrincipal;
+  const realReturnRate = realPrincipal > 0 ? (realNetWorth / realPrincipal) - 1 : 0;
+  const nominalGain = totalAsset - investedPrincipal;
+  const realGain = realNetWorth - investedPrincipal;
+  const inflationLoss = realNetWorth - totalAsset; // 음수 → 물가로 인한 구매력 손실
+  // 수요견인 비중: 전체 인플레이션 중 demand-pull 누적분이 차지하는 비율
+  const demandPullShare = cumulativeInflation > 0
+    ? Math.min(1, Math.max(0, demandPullCumulative / cumulativeInflation))
+    : 0;
 
   return {
     nickname,
@@ -3025,6 +3626,16 @@ function buildFinalSubmissionReport({ nickname, mode = 'individual', teamKey = '
     tradeLogs,
     roundLogs,
     reflection,
+    // Week 4 §2.2 Phase C — 인플레이션 KPI
+    priceIndex: safePriceIndex,
+    cumulativeInflation,
+    realNetWorth,
+    realReturnRate,
+    nominalGain,
+    realGain,
+    inflationLoss,
+    demandPullCumulative,
+    demandPullShare,
     submittedAt: Date.now(),
   };
 }
@@ -3579,12 +4190,28 @@ function FinalReport({
   onSubmitReport,
   onReflectionChange,
   roundNotes, // Week 3 G — 라운드별 메모
+  roundReflections, // Week 4 §3.6 — 체크포인트 학습 질문 응답
+  // Week 4 §2.2 Phase C — 인플레이션 KPI
+  priceIndex = INITIAL_PRICE_INDEX,
+  demandPullCumulative = 0,
 }) {
   const holdingsValue = getPortfolioValue(portfolio, assets);
   const totalAsset = cash + deposit + holdingsValue;
   const returnRate = getInvestmentReturnRate(totalAsset, investedPrincipal);
   const reportRoundLogs = submission?.roundLogs?.length ? submission.roundLogs : roundLogs;
-  const investorType = submission?.investorType ?? buildFinalSubmissionReport({ nickname, mode, teamName, cash, deposit, depositInterestEarned, investedPrincipal, portfolio, assets, tradeLogs, roundLogs: reportRoundLogs, reflection }).investorType;
+  const investorType = submission?.investorType ?? buildFinalSubmissionReport({ nickname, mode, teamName, cash, deposit, depositInterestEarned, investedPrincipal, portfolio, assets, tradeLogs, roundLogs: reportRoundLogs, reflection, priceIndex, demandPullCumulative }).investorType;
+  // Week 4 §2.2 Phase C — 명목 vs 실질 KPI (submission이 있으면 거기서 가져오고, 없으면 즉시 계산)
+  const finalPriceIndex = submission?.priceIndex ?? priceIndex;
+  const finalDemandPullCumulative = submission?.demandPullCumulative ?? demandPullCumulative;
+  const safePriceIndex = finalPriceIndex > 0 ? finalPriceIndex : 1;
+  const cumulativeInflationPct = (safePriceIndex - 1) * 100;
+  const nominalReturnPct = returnRate * 100;
+  const realNetWorth = totalAsset / safePriceIndex;
+  const realReturnPct = investedPrincipal > 0 ? ((realNetWorth - investedPrincipal) / investedPrincipal) * 100 : 0;
+  const inflationLossWon = Math.round(realNetWorth - totalAsset);
+  const demandPullSharePct = (safePriceIndex - 1) > 0
+    ? Math.min(100, Math.max(0, (finalDemandPullCumulative / (safePriceIndex - 1)) * 100))
+    : 0;
   const sortedRoundLogs = useMemo(
     () => [...reportRoundLogs].sort((a, b) => a.round - b.round),
     [reportRoundLogs],
@@ -3640,6 +4267,54 @@ function FinalReport({
         <button className="command primary print-hide" type="button" onClick={onSubmitReport} disabled={Boolean(submission)}>
           {submission ? '제출 완료' : '최종 제출하기'}
         </button>
+      </div>
+
+      {/* Week 4 §2.2 Phase C — 명목 vs 실질 수익률 비교 (인플레이션 영향 시각화) */}
+      <div className="report-section final-inflation-section" aria-label="명목 실질 비교">
+        <h3>명목수익률 vs 실질수익률</h3>
+        <p className="final-inflation-lead">
+          게임 기간 동안 누적된 물가지수는 <strong>{safePriceIndex.toFixed(3)}</strong> (+{cumulativeInflationPct.toFixed(1)}%)
+          {demandPullSharePct > 0 ? <> 이며, 이 중 약 <strong>{demandPullSharePct.toFixed(0)}%</strong> 가 학생들 수익 증가에 따른 <strong>수요견인</strong>에서 발생했습니다.</> : '입니다.'}
+        </p>
+        <div className="final-inflation-grid">
+          <div className="final-inflation-bar">
+            <div className="bar-label">
+              <span>명목 수익률</span>
+              <strong className={nominalReturnPct >= 0 ? 'up' : 'down'}>{nominalReturnPct >= 0 ? '+' : ''}{nominalReturnPct.toFixed(1)}%</strong>
+            </div>
+            {(() => {
+              const maxAbs = Math.max(Math.abs(nominalReturnPct), Math.abs(realReturnPct), Math.abs(cumulativeInflationPct), 1);
+              const w = (val) => `${Math.min(100, Math.abs(val) / maxAbs * 100)}%`;
+              return (
+                <>
+                  <div className="bar-track"><div className={`bar-fill ${nominalReturnPct >= 0 ? 'pos' : 'neg'}`} style={{ width: w(nominalReturnPct) }}></div></div>
+                  <div className="bar-label" style={{ marginTop: 8 }}>
+                    <span>실질 수익률</span>
+                    <strong className={realReturnPct >= 0 ? 'up' : 'down'}>{realReturnPct >= 0 ? '+' : ''}{realReturnPct.toFixed(1)}%</strong>
+                  </div>
+                  <div className="bar-track"><div className={`bar-fill ${realReturnPct >= 0 ? 'pos' : 'neg'}`} style={{ width: w(realReturnPct) }}></div></div>
+                  <div className="bar-label" style={{ marginTop: 8 }}>
+                    <span>누적 인플레이션</span>
+                    <strong className="neutral">+{cumulativeInflationPct.toFixed(1)}%</strong>
+                  </div>
+                  <div className="bar-track"><div className="bar-fill inflation" style={{ width: w(cumulativeInflationPct) }}></div></div>
+                </>
+              );
+            })()}
+          </div>
+          <div className="final-inflation-kpis">
+            <div><span>최종 순자산 (명목)</span><strong>{formatWon(totalAsset)}</strong></div>
+            <div><span>실질 순자산 (구매력)</span><strong>{formatWon(Math.round(realNetWorth))}</strong></div>
+            <div><span>인플레이션 손실</span><strong className="neg">{formatWon(inflationLossWon)}</strong></div>
+            <div title="전체 인플레이션 중 학생들 수익 증가가 만들어낸 비중. 클수록 다 같이 잘 벌어 물가가 가속됐다는 뜻.">
+              <span>수요견인 기여분</span><strong>{demandPullSharePct.toFixed(0)}%</strong>
+            </div>
+          </div>
+        </div>
+        <p className="final-inflation-note">
+          명목 수익은 통장에 찍힌 숫자, 실질 수익은 실제로 살 수 있는 양의 변화입니다.
+          물가가 오르면 같은 금액으로 살 수 있는 양이 줄어들기 때문에, 실제 부의 변화는 실질수익률로 봐야 합니다.
+        </p>
       </div>
 
       <div className="report-section">
@@ -3798,6 +4473,43 @@ function FinalReport({
         </details>
       ) : null}
 
+      {/* Week 4 §3.6 — 체크포인트 학습 질문 회고 (R4·R8·R12) */}
+      {roundReflections && DIVIDEND_ROUNDS.some((r) => {
+        const ref = roundReflections[r];
+        return ref && (Number.isInteger(ref.selected) || (ref.open ?? '').trim().length > 0);
+      }) ? (
+        <details className="reflection-timeline" open>
+          <summary>
+            <strong>체크포인트 학습 질문 회고</strong>
+            <span className="reflection-timeline-count">
+              {DIVIDEND_ROUNDS.filter((r) => {
+                const ref = roundReflections[r];
+                return ref && (Number.isInteger(ref.selected) || (ref.open ?? '').trim().length > 0);
+              }).length}건
+            </span>
+          </summary>
+          <div className="reflection-timeline-list">
+            {DIVIDEND_ROUNDS.map((r) => {
+              const ref = roundReflections[r];
+              if (!ref || (!Number.isInteger(ref.selected) && !(ref.open ?? '').trim())) return null;
+              return (
+                <div key={`reflection-${r}`} className="reflection-timeline-item">
+                  <ReflectionPrompt
+                    round={r}
+                    reflection={ref}
+                    onReflectionChange={() => {}}
+                    readOnly
+                  />
+                </div>
+              );
+            })}
+          </div>
+          <p className="reflection-timeline-help">
+            체크포인트 라운드(R4·R8·R12)에서 답한 학습 질문을 다시 봅니다. 명목/실질, 수요견인 인플레이션, 장기 자산 배분 회고 순서로 정리되어 있어요.
+          </p>
+        </details>
+      ) : null}
+
       <div className="reflection-grid print-hide">
         <label>
           잘한 점
@@ -3873,17 +4585,28 @@ const macroGuideItems = {
     down: '내리면 소비와 고용이 좋아졌다는 신호로 해석되어 경기민감 업종과 주식시장 심리가 개선될 수 있습니다.',
     examples: ['항공', '콘텐츠', '건설', '미국 국채'],
   },
+  // Week 4 §2.2 — 물가지수 (인플레이션) 가이드
+  priceIndex: {
+    title: '물가지수',
+    summary: '게임 시작 시점(1.000)을 기준으로 한 누적 인플레이션입니다. 매 분기(라운드) 종료 시점에 기본 1% + α 만큼 누적되며, 연 환산 약 4%로 한국의 고물가기와 비슷한 수준입니다.',
+    up: '오르면 화폐가치가 떨어져 명목수익률보다 실질수익률이 작아집니다. 다 같이 돈을 많이 벌수록 물가가 더 빨리 오를 수 있습니다(수요견인).',
+    down: '내리면 화폐가치가 회복되지만, 게임에서는 최소 0.3%/분기까지만 떨어지고 디플레이션은 일어나지 않습니다.',
+    examples: ['실질수익률', '명목수익률', '수요견인', '구매력'],
+  },
 };
 
-function MacroGuide({ baseRate, depositRate, propertyIndex, exchangeRate, unemploymentRate }) {
+function MacroGuide({ baseRate, depositRate, propertyIndex, exchangeRate, unemploymentRate, priceIndex }) {
   const [selectedGuide, setSelectedGuide] = useState('baseRate');
   const item = macroGuideItems[selectedGuide];
+  const cumulativeInflationPct = priceIndex != null ? ((priceIndex - 1) * 100).toFixed(1) : '0.0';
   const currentValue = {
     baseRate: `${baseRate.toFixed(1)}%`,
     depositRate: `${depositRate.toFixed(1)}%`,
     propertyIndex: propertyIndex ? formatWon(propertyIndex) : '-',
     exchangeRate: `${exchangeRate.toLocaleString('ko-KR')}원`,
     unemploymentRate: `${unemploymentRate.toFixed(1)}%`,
+    // Week 4 §2.2 — 물가지수 표시: 1.025 (+2.5%) 형태
+    priceIndex: priceIndex != null ? `${priceIndex.toFixed(3)} (+${cumulativeInflationPct}%)` : '1.000 (+0.0%)',
   }[selectedGuide];
 
   return (
@@ -3981,6 +4704,16 @@ function AssetLearningPanel({ asset }) {
               style={{ marginTop: 4 }}
             >
               쿠폰: 라운드당 {(asset.couponRate * 100).toFixed(1)}%
+            </span>
+          ) : null}
+          {/* Week 4 §2.1 — 배당/이자 없는 자산(외환·ETF·선물·부동산ETF) 침묵 방지 */}
+          {asset.type !== 'stock' && asset.type !== 'bond' ? (
+            <span
+              className="dividend-tier-badge tier-growth"
+              title="이 자산은 배당·이자가 없습니다. 수익은 가격 변동(자본이득)만으로 발생합니다."
+              style={{ marginTop: 4 }}
+            >
+              배당 없음 · 가격 변동만
             </span>
           ) : null}
         </div>
@@ -4354,7 +5087,7 @@ function HostSetupView({
               <article className="economic-seed-card">
                 <div>
                   <strong>이 방의 경제 체질 시드 <code>#{economicSeed.code}</code></strong>
-                  <span>방을 만들 때마다 자동으로 정해지는 3가지 난수입니다. 같은 이슈도 방마다 조금씩 다르게 작동합니다.</span>
+                  <span>방을 만들 때마다 자동으로 정해지는 4가지 난수입니다. 코드 뒤 1자리는 인플레이션 민감도(시드 D)입니다. 같은 이슈도 방마다 조금씩 다르게 작동합니다.</span>
                 </div>
                 <div className="seed-grid">
                   <div>
@@ -4376,6 +5109,11 @@ function HostSetupView({
                   <div>
                     <span>트리거 민감도</span>
                     <strong>×{economicSeed.triggerSensitivity.toFixed(2)}</strong>
+                  </div>
+                  {/* Week 4 §2.2 — 시드 D · 인플레이션 민감도 */}
+                  <div title="이 방의 물가는 같은 충격(수요견인·이슈·거시)에 ×N배 더 민감하게 반응합니다.">
+                    <span>인플레이션 민감도</span>
+                    <strong>×{(economicSeed.inflationSensitivity ?? 1.0).toFixed(2)}</strong>
                   </div>
                 </div>
               </article>
@@ -4475,12 +5213,18 @@ function HostView({
   propertyIndex,
   exchangeRate,
   unemploymentRate,
+  priceIndex,
   activeStudent,
   expiresAt,
   roomExpired,
   issueDraft,
   currentRoundEvents,
   triggeredEventsByRound,
+  activeMacroAlerts,
+  macroTimeline,
+  macroAlertsByRound,
+  pendingMacroAlerts,
+  initialSeedSensitivity,
   latestRoundSummary,
   submissions,
   syncStatus,
@@ -4521,6 +5265,32 @@ function HostView({
 }) {
   const eventLimitReached = currentRoundEvents.length >= MAX_EVENTS_PER_ROUND;
   const canRegisterIssue = gameStarted && phase === 'setup' && !eventLimitReached && !roomExpired;
+
+  // Week 4 §4.9 — 디버그 모드 + 회귀 자동 점검 (호스트 전용)
+  const debugMode = useDebugMode();
+  const [devRecheckTick, setDevRecheckTick] = useState(0);
+  const devChecks = useMemo(() => {
+    if (!debugMode) return [];
+    return runRegressionChecks({
+      round,
+      phase,
+      gameStarted,
+      salaryPaidRounds,
+      tradeLogs,
+      portfolio: null,
+      teamAccounts,
+      roomMode,
+      assets,
+      macroTimeline,
+      pendingMacroAlerts,
+      activeMacroAlerts,
+      macroAlertsByRound,
+      economicSeed,
+      initialSeedSensitivity,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debugMode, devRecheckTick, round, phase, gameStarted, salaryPaidRounds, tradeLogs, macroTimeline, activeMacroAlerts, macroAlertsByRound, economicSeed, initialSeedSensitivity]);
+  function handleDevRecheck() { setDevRecheckTick((v) => v + 1); }
   const [eventCategory, setEventCategory] = useState('all');
   const filteredScenarioEvents = eventCategory === 'all'
     ? scenarioEvents
@@ -4673,6 +5443,12 @@ function HostView({
             <span>기준금리</span>
             <strong>{baseRate.toFixed(1)}%</strong>
           </div>
+          {/* Week 4 §2.2 — 물가지수 카드 (기준금리 다음 위치) */}
+          <div title="게임 시작 시점을 1.000으로 한 누적 인플레이션. 분기당 2% + α 누적, 우상향.">
+            <TrendingUp size={20} aria-hidden="true" />
+            <span>물가지수</span>
+            <strong>{priceIndex.toFixed(3)} <em style={{ fontStyle: 'normal', fontSize: '0.85em', color: '#92400e' }}>(+{((priceIndex - 1) * 100).toFixed(1)}%)</em></strong>
+          </div>
           <div>
             <PiggyBank size={20} aria-hidden="true" />
             <span>예금금리</span>
@@ -4780,6 +5556,8 @@ function HostView({
           </div>
         </section>
 
+        {/* Week 4 §2.4 — 거시 경보(트리거)는 이슈와 분리된 별도 배너로 노출 */}
+        <MacroAlertBanner alerts={activeMacroAlerts} />
         <IssueTicker events={currentRoundEvents} phase={phase} />
         {/* Week 3 H — 교사 대시보드: 라운드별 이슈 분석 탭 */}
         <TeacherRoundIssuesPanel
@@ -4787,6 +5565,22 @@ function HostView({
           totalRounds={totalRounds}
           currentRound={round}
         />
+        {/* Week 4 §2.2 Phase B — 호스트에도 체크포인트 카드 (학생 평균 기준) */}
+        {phase === 'closed' && DIVIDEND_ROUNDS.includes(round) && players?.length > 0 ? (
+          (() => {
+            const avgTotalAsset = players.reduce((sum, p) => sum + (p.totalAsset ?? INITIAL_CASH), 0) / players.length;
+            const investedPerHead = getInvestedPrincipal({ gameStarted: true, round, phase: 'closed', memberCount: 1 });
+            return (
+              <InflationCheckpointCard
+                round={round}
+                totalAsset={avgTotalAsset}
+                investedPrincipal={investedPerHead}
+                priceIndex={priceIndex}
+                aggregateReturn={latestRoundSummary?.aggregateReturn}
+              />
+            );
+          })()
+        ) : null}
         <RoundExplanation summary={latestRoundSummary} assets={assets} />
         <CloseDashboard phase={phase} players={rankingPlayers} />
         <TeacherStudentMonitor
@@ -4813,6 +5607,16 @@ function HostView({
           onCloseSubmissions={onCloseSubmissions}
           onDownloadSubmissions={onDownloadSubmissions}
         />
+
+        {/* Week 4 §4.8 — 거시 시계열 라이트 차트 (호스트 전용) */}
+        {macroTimeline && macroTimeline.length > 0 ? (
+          <MacroTimelineSparklines timeline={macroTimeline} title="거시 시계열" />
+        ) : null}
+
+        {/* Week 4 §4.9 — 회귀 자동 점검 DEV 패널 (?debug=1 시에만 노출) */}
+        {debugMode ? (
+          <DevPanel checks={devChecks} onRecheck={handleDevRecheck} round={round} />
+        ) : null}
 
         <section className="market-board" aria-labelledby="market-heading">
           <div className="panel-heading">
@@ -4866,6 +5670,54 @@ function HostView({
   );
 }
 
+// Week 4 §3.5 사전 작업 — 라운드별 메모 히스토리 (정보보드 탭에서 라운드 무관 항상 열람)
+function RoundNoteHistory({ round, phase, gameFinished, gameStarted, roundNotes, onRoundNoteChange }) {
+  if (!gameStarted) return null;
+  const canEditCurrent = phase === 'closed' && !gameFinished;
+  const rounds = [];
+  for (let r = 1; r <= round; r += 1) rounds.push(r);
+  if (rounds.length === 0) return null;
+  return (
+    <section className="round-note-history" aria-label="라운드별 한 줄 메모">
+      <header className="round-note-history-head">
+        <strong>라운드 메모</strong>
+        <span>장 마감 후 작성 · 라운드 상관없이 다시 보기</span>
+      </header>
+      <ol className="round-note-list">
+        {rounds.slice().reverse().map((r) => {
+          const note = roundNotes?.[r] ?? '';
+          const isCurrent = r === round;
+          const isEditableNow = isCurrent && canEditCurrent;
+          return (
+            <li key={r} className={isCurrent ? 'note-item current' : 'note-item past'}>
+              <div className="note-item-head">
+                <strong>R{r}</strong>
+                {isEditableNow ? (
+                  <span className="round-note-meter">{getByteLength(note)}/100바이트</span>
+                ) : null}
+              </div>
+              {isEditableNow ? (
+                <textarea
+                  className="round-note-input"
+                  value={note}
+                  onChange={(event) => onRoundNoteChange(r, event.target.value)}
+                  placeholder="이번 라운드 결정 이유, 학습 포인트 (한글 약 33자)"
+                  rows={2}
+                  aria-label={`${r}라운드 메모 입력`}
+                />
+              ) : note ? (
+                <p className="note-body">{note}</p>
+              ) : (
+                <p className="note-body empty">{isCurrent ? '장 마감 후 입력 가능' : '메모 없음'}</p>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
+}
+
 function StudentView({
   roomPin,
   round,
@@ -4882,12 +5734,15 @@ function StudentView({
   propertyIndex,
   exchangeRate,
   unemploymentRate,
+  priceIndex,
+  demandPullCumulative,
   tradeLogs,
   roundLogs,
   reflection,
   playerCount,
   roomFull,
   currentRoundEvents,
+  activeMacroAlerts,
   latestRoundSummary,
   gameFinished,
   gameStarted,
@@ -4922,7 +5777,30 @@ function StudentView({
   onReflectionChange,
   roundNotes,
   onRoundNoteChange,
+  roundReflections,
+  onRoundReflectionChange,
+  macroTimeline,
 }) {
+  // Week 4 §3.5 사전 작업 — 정보보드/거래보드 탭 분리 (localStorage에 마지막 선택 탭 저장)
+  const [activeTab, setActiveTab] = useState(() => {
+    try {
+      if (typeof window === 'undefined') return 'info';
+      const saved = window.localStorage.getItem('studentDashboardTab');
+      return saved === 'trade' ? 'trade' : 'info';
+    } catch (err) {
+      return 'info';
+    }
+  });
+  useEffect(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem('studentDashboardTab', activeTab);
+      }
+    } catch (err) {
+      /* localStorage 비활성 환경 무시 */
+    }
+  }, [activeTab]);
+
   const selectedAsset = assets.find((asset) => asset.id === selectedAssetId) ?? assets[0];
   const holdingsValue = assets.reduce((sum, asset) => sum + (portfolio[asset.id] ?? 0) * asset.price, 0);
   const totalAsset = cash + deposit + holdingsValue;
@@ -5051,28 +5929,30 @@ function StudentView({
           </section>
         ) : null}
 
-        <IssueTicker events={currentRoundEvents} phase={phase} compact />
-        {phase === 'closed' ? <RoundExplanation summary={latestRoundSummary} assets={assets} compact /> : null}
-        {/* Week 3 G — 라운드별 한 줄 메모 (장 마감 후 입력) */}
-        {phase === 'closed' && !gameFinished && joined ? (
-          <section className="round-note-card" aria-label={`${round}라운드 메모`}>
-            <div className="round-note-head">
-              <strong>{round}라운드 한 줄 메모</strong>
-              <span className="round-note-meter">
-                {getByteLength(roundNotes?.[round] ?? '')}/100바이트
-              </span>
-            </div>
-            <textarea
-              className="round-note-input"
-              value={roundNotes?.[round] ?? ''}
-              onChange={(event) => onRoundNoteChange(round, event.target.value)}
-              placeholder="이번 라운드 결정 이유, 학습 포인트 (한글 약 33자)"
-              rows={2}
-              aria-label={`${round}라운드 메모 입력`}
-            />
-            <p className="round-note-hint">결정 이유나 다음 라운드 전략을 짧게 남기면 회고 화면에서 라운드별로 다시 볼 수 있습니다.</p>
-          </section>
+        {/* Week 4 §3.5 사전 작업 — 정보보드/거래보드 탭 네비게이션 */}
+        {!gameFinished ? (
+          <nav className="student-tabbar" role="tablist" aria-label="학생 대시보드 탭">
+            <button
+              role="tab"
+              type="button"
+              aria-selected={activeTab === 'info'}
+              className={activeTab === 'info' ? 'student-tab active' : 'student-tab'}
+              onClick={() => setActiveTab('info')}
+            >
+              정보보드
+            </button>
+            <button
+              role="tab"
+              type="button"
+              aria-selected={activeTab === 'trade'}
+              className={activeTab === 'trade' ? 'student-tab active' : 'student-tab'}
+              onClick={() => setActiveTab('trade')}
+            >
+              거래보드
+            </button>
+          </nav>
         ) : null}
+
         {gameFinished ? (
           <FinalReport
             nickname={getStudentDisplayName(studentNumber, nickname)}
@@ -5091,52 +5971,46 @@ function StudentView({
             onSubmitReport={onSubmitReport}
             onReflectionChange={onReflectionChange}
             roundNotes={roundNotes}
+            roundReflections={roundReflections}
+            priceIndex={priceIndex}
+            demandPullCumulative={demandPullCumulative}
           />
         ) : null}
 
-        <section className="asset-panel">
-          <div>
-            <span>총 보유 자산</span>
-            <strong>{formatWon(totalAsset)}</strong>
-          </div>
-          <em className={returnRate >= 0 ? 'up' : 'down'}>{formatPercent(returnRate)}</em>
-        </section>
+        {!gameFinished && activeTab === 'info' ? (
+          <>
+        {/* Week 4 §2.4 — 거시 경보 배너 */}
+        <MacroAlertBanner alerts={activeMacroAlerts} compact />
+        <IssueTicker events={currentRoundEvents} phase={phase} compact />
+        {/* Week 4 §2.2 Phase B — 인플레이션 체크포인트 카드 (R4·R8·R12 종료 시) */}
+        {phase === 'closed' && DIVIDEND_ROUNDS.includes(round) ? (
+          <InflationCheckpointCard
+            round={round}
+            totalAsset={totalAsset}
+            investedPrincipal={getInvestedPrincipal({ gameStarted, round, phase: 'closed', memberCount: 1 })}
+            priceIndex={priceIndex}
+            aggregateReturn={latestRoundSummary?.aggregateReturn}
+            compact
+            roundReflection={roundReflections?.[round]}
+            onRoundReflectionChange={onRoundReflectionChange}
+            macroTimeline={macroTimeline}
+          />
+        ) : null}
+        {phase === 'closed' ? <RoundExplanation summary={latestRoundSummary} assets={assets} compact /> : null}
+        {/* Week 4 §3.5 사전 작업 — 라운드별 메모 (라운드 무관 항상 열람) */}
+        {joined ? (
+          <RoundNoteHistory
+            round={round}
+            phase={phase}
+            gameFinished={gameFinished}
+            gameStarted={gameStarted}
+            roundNotes={roundNotes}
+            onRoundNoteChange={onRoundNoteChange}
+          />
+        ) : null}
+        <MacroGuide baseRate={baseRate} depositRate={depositRate} propertyIndex={propertyIndex} exchangeRate={exchangeRate} unemploymentRate={unemploymentRate} priceIndex={priceIndex} />
 
-        <div className="wallet-grid">
-          <div>
-            <Wallet size={18} aria-hidden="true" />
-            <span>현금</span>
-            <strong>{formatWon(cash)}</strong>
-          </div>
-          <div>
-            <BadgePercent size={18} aria-hidden="true" />
-            <span>투자 평가금</span>
-            <strong>{formatWon(holdingsValue)}</strong>
-          </div>
-          <div>
-            <PiggyBank size={18} aria-hidden="true" />
-            <span>예금</span>
-            <strong>{formatWon(deposit)}</strong>
-          </div>
-          <div>
-            <Landmark size={18} aria-hidden="true" />
-            <span>예금금리</span>
-            <strong>{depositRate.toFixed(1)}%</strong>
-          </div>
-        </div>
-
-        <HoldingsDashboard
-          portfolio={portfolio}
-          assets={assets}
-          onSelectAsset={setSelectedAssetId}
-          onSetTradeAmount={setTradeAmount}
-        />
-
-        <PortfolioDonut cash={cash} deposit={deposit} portfolio={portfolio} assets={assets} />
-
-        <MacroGuide baseRate={baseRate} depositRate={depositRate} propertyIndex={propertyIndex} exchangeRate={exchangeRate} unemploymentRate={unemploymentRate} />
-
-        <section className="deposit-ticket" aria-labelledby="deposit-heading">
+                <section className="deposit-ticket" aria-labelledby="deposit-heading">
           <div>
             <h2 id="deposit-heading">보통예금 (자유입출금)</h2>
             <span>분기 복리 적용 · 다음 라운드 예상 이자 {formatWon(nextInterest)}</span>
@@ -5169,7 +6043,7 @@ function StudentView({
           </div>
         </section>
 
-        <details className="savings-learning-card collapsible-card" aria-labelledby="savings-learning-heading">
+                <details className="savings-learning-card collapsible-card" aria-labelledby="savings-learning-heading">
           <summary className="savings-learning-summary">
             <span className="card-toggle-icon" aria-hidden="true">▶</span>
             <span className="card-toggle-label">정기예금 vs 정기적금 — 같은 돈, 다른 이자</span>
@@ -5227,7 +6101,7 @@ function StudentView({
           })()}
         </details>
 
-        <details className="passive-move-notice collapsible-card" aria-label="시장 불확실성 안내">
+                <details className="passive-move-notice collapsible-card" aria-label="시장 불확실성 안내">
           <summary className="noise-summary">
             <span className="noise-icon" aria-hidden="true">?</span>
             <span className="noise-label">이슈가 없는데 왜 가격이 움직일까?</span>
@@ -5253,7 +6127,53 @@ function StudentView({
           </div>
         </details>
 
-        <section className="mobile-stock-list" aria-label="투자 상품 목록">
+        
+          </>
+        ) : null}
+
+        {!gameFinished && activeTab === 'trade' ? (
+          <>
+        <section className="asset-panel">
+          <div>
+            <span>총 보유 자산</span>
+            <strong>{formatWon(totalAsset)}</strong>
+          </div>
+          <em className={returnRate >= 0 ? 'up' : 'down'}>{formatPercent(returnRate)}</em>
+        </section>
+
+                <div className="wallet-grid">
+          <div>
+            <Wallet size={18} aria-hidden="true" />
+            <span>현금</span>
+            <strong>{formatWon(cash)}</strong>
+          </div>
+          <div>
+            <BadgePercent size={18} aria-hidden="true" />
+            <span>투자 평가금</span>
+            <strong>{formatWon(holdingsValue)}</strong>
+          </div>
+          <div>
+            <PiggyBank size={18} aria-hidden="true" />
+            <span>예금</span>
+            <strong>{formatWon(deposit)}</strong>
+          </div>
+          <div>
+            <Landmark size={18} aria-hidden="true" />
+            <span>예금금리</span>
+            <strong>{depositRate.toFixed(1)}%</strong>
+          </div>
+        </div>
+
+                <HoldingsDashboard
+          portfolio={portfolio}
+          assets={assets}
+          onSelectAsset={setSelectedAssetId}
+          onSetTradeAmount={setTradeAmount}
+        />
+
+                <PortfolioDonut cash={cash} deposit={deposit} portfolio={portfolio} assets={assets} />
+
+                <section className="mobile-stock-list" aria-label="투자 상품 목록">
           {assets.map((asset) => {
             const change = getChange(asset);
             return (
@@ -5268,9 +6188,9 @@ function StudentView({
           })}
         </section>
 
-        <AssetLearningPanel asset={selectedAsset} />
+                <AssetLearningPanel asset={selectedAsset} />
 
-        <section className="trade-ticket" aria-labelledby="trade-heading">
+                <section className="trade-ticket" aria-labelledby="trade-heading">
           <div className="ticket-head">
             <div>
               <h2 id="trade-heading">{selectedAsset.name}</h2>
@@ -5284,6 +6204,15 @@ function StudentView({
               {selectedAsset.type === 'stock' && selectedAsset.dividendTier ? (
                 <span className={`dividend-tier-badge tier-${selectedAsset.dividendTier}`} title="4·8·12라운드 종료 시점에 보유 중이면 배당 지급 (가격 변동 후 기준, 배당락 = 배당의 절반)">
                   배당: {DIVIDEND_TIER_LABELS[selectedAsset.dividendTier]}
+                </span>
+              ) : null}
+              {/* Week 4 §2.1 — 배당/이자 없는 자산 침묵 방지 */}
+              {selectedAsset.type !== 'stock' && selectedAsset.type !== 'bond' ? (
+                <span
+                  className="dividend-tier-badge tier-growth"
+                  title="이 자산은 배당·이자가 없습니다. 수익은 가격 변동(자본이득)만으로 발생합니다."
+                >
+                  배당 없음 · 가격 변동만
                 </span>
               ) : null}
             </div>
@@ -5348,6 +6277,8 @@ function StudentView({
             </button>
           </div>
         </section>
+          </>
+        ) : null}
       </section>
     </main>
   );
@@ -5356,7 +6287,10 @@ function StudentView({
 export function App() {
   const [initialAssetBundle] = useState(createInitialAssetBundle);
   const [triggerCooldowns, setTriggerCooldowns] = useState({});
-  const [forcedNextRoundIssues, setForcedNextRoundIssues] = useState([]);
+  // Week 4 §2.4 — 트리거 채널을 이슈와 분리. pendingMacroAlerts(다음 라운드 대기) / activeMacroAlerts(이번 라운드 활성)
+  const [pendingMacroAlerts, setPendingMacroAlerts] = useState([]);
+  const [activeMacroAlerts, setActiveMacroAlerts] = useState([]);
+  const [macroAlertsByRound, setMacroAlertsByRound] = useState({});
   const [view, setView] = useState(getInitialView);
   const [studentEntryAllowed] = useState(getInitialStudentEntryAllowed);
   const [hostAuthenticated, setHostAuthenticated] = useState(false);
@@ -5382,6 +6316,20 @@ export function App() {
   const [propertyIndex, setPropertyIndex] = useState(initialAssetBundle.propertyIndex);
   const [exchangeRate, setExchangeRate] = useState(INITIAL_EXCHANGE_RATE);
   const [unemploymentRate, setUnemploymentRate] = useState(INITIAL_UNEMPLOYMENT_RATE);
+  // Week 4 §2.2 — 물가지수 시스템 (분기당 2% 기본 + 수요견인/이슈/거시 α × 시드 D)
+  const [priceIndex, setPriceIndex] = useState(INITIAL_PRICE_INDEX);
+  const [priceIndexByRound, setPriceIndexByRound] = useState({ 1: INITIAL_PRICE_INDEX });
+  // Week 4 §4.8 — 거시 시계열 차트용 라운드별 스냅샷
+  const [macroTimeline, setMacroTimeline] = useState([]);
+  // Week 4 §4.9 — 시드 D 일관성 검사용 초기값 보관
+  const [initialSeedSensitivity, setInitialSeedSensitivity] = useState(null);
+  // Week 4 §4.9 — 회귀 자동 점검 재검사 트리거
+  const [devCheckTick, setDevCheckTick] = useState(0);
+  const [previousAggregateReturn, setPreviousAggregateReturn] = useState(0);
+  const [principalBasisByPlayer, setPrincipalBasisByPlayer] = useState({}); // {nickname: 누적 원금}
+  // Week 4 §2.2 Phase C — 누적 수요견인 인플레이션 (최종 보고서 KPI용)
+  //   라운드별 demandPullInflation을 누적해 "전체 인플레이션 중 학생들 수익 때문에 발생한 비중" 계산.
+  const [demandPullCumulative, setDemandPullCumulative] = useState(0);
   const [assets, setAssets] = useState(initialAssetBundle.assets);
   const [openMacroContext, setOpenMacroContext] = useState(null);
   const [triggeredEventsByRound, setTriggeredEventsByRound] = useState({});
@@ -5416,6 +6364,8 @@ export function App() {
   const [reflection, setReflection] = useState({ good: '', improve: '', next: '' });
   // Week 3 G — 라운드별 한 줄 메모 (UTF-8 100바이트 제한, 한글 약 33자)
   const [roundNotes, setRoundNotes] = useState({});
+  // Week 4 §3.6 — 체크포인트 라운드별 학습 질문 응답 ({ 4:{selected,open}, 8:{...}, 12:{...} })
+  const [roundReflections, setRoundReflections] = useState({});
   const [submissions, setSubmissions] = useState([]);
   const [studentStates, setStudentStates] = useState([]);
   const [finalReportsDownloaded, setFinalReportsDownloaded] = useState(false);
@@ -5636,6 +6586,7 @@ export function App() {
       roundLogs,
       reflection,
       roundNotes, // Week 3 G — 라운드별 메모 영속화
+      roundReflections, // Week 4 §3.6 — 체크포인트 학습 질문 응답 영속화
       salaryPaidRounds,
       initialCapitalGranted: teamMode ? gameStarted : initialCapitalGranted,
       updatedAt: Date.now(),
@@ -5651,7 +6602,7 @@ export function App() {
     }, 600);
 
     return () => window.clearTimeout(studentStateSaveTimer.current);
-  }, [depositPrincipal, effectiveCash, effectiveDeposit, effectiveDepositInterestEarned, effectivePortfolio, gameStarted, initialCapitalGranted, joined, nickname, reflection, remoteRoomId, roundLogs, roundNotes, salaryPaidRounds, selectedTeamKey, studentNumber, studentPasscodeHash, teamMode, tradeLogs]);
+  }, [depositPrincipal, effectiveCash, effectiveDeposit, effectiveDepositInterestEarned, effectivePortfolio, gameStarted, initialCapitalGranted, joined, nickname, reflection, remoteRoomId, roundLogs, roundNotes, roundReflections, salaryPaidRounds, selectedTeamKey, studentNumber, studentPasscodeHash, teamMode, tradeLogs]);
 
   useEffect(() => {
     // Week 3 H — 생활소득 신뢰성 패치
@@ -5747,6 +6698,7 @@ export function App() {
     setReflection({ good: '', improve: '', next: '', ...(savedState.reflection ?? {}) });
     // Week 3 G — 라운드별 메모 복원
     setRoundNotes(savedState.roundNotes ?? {});
+    setRoundReflections(savedState.roundReflections ?? {});
     setInitialCapitalGranted(Boolean(savedState.initialCapitalGranted));
     if (teamMode && savedState.teamKey) setSelectedTeamKey(savedState.teamKey);
     rememberStudentState(savedState);
@@ -5828,6 +6780,11 @@ export function App() {
   function handleRoundNoteChange(roundNumber, value) {
     const clamped = clampToByteLength(value, 100);
     setRoundNotes((current) => ({ ...current, [roundNumber]: clamped }));
+  }
+
+  // Week 4 §3.6 — 체크포인트 학습 질문 응답 변경
+  function handleRoundReflectionChange(roundNumber, payload) {
+    setRoundReflections((current) => ({ ...current, [roundNumber]: { ...(current[roundNumber] || {}), ...payload } }));
   }
 
   async function handleStudentJoin() {
@@ -5922,6 +6879,13 @@ export function App() {
     setDepositPrincipal(0);
     setDepositInterestEarned(0);
     setPortfolio({});
+    // Week 4 §2.2 — 게임 시작 시 물가 시스템 리셋
+    setPriceIndex(INITIAL_PRICE_INDEX);
+    setPriceIndexByRound({ 1: INITIAL_PRICE_INDEX });
+    setPreviousAggregateReturn(0);
+    setPrincipalBasisByPlayer({});
+    setDemandPullCumulative(0);
+    setMacroTimeline([]); // Week 4 §4.8
     setTeamAccounts(fundedTeams);
     setPlayers((current) =>
       current.map((player) => ({
@@ -6018,11 +6982,23 @@ export function App() {
     setExchangeRate(nextEconomicSeed.economicConstitution.exchangeRate);
     setUnemploymentRate(nextEconomicSeed.economicConstitution.unemploymentRate);
     setEconomicSeed(nextEconomicSeed);
+    setInitialSeedSensitivity(nextEconomicSeed?.inflationSensitivity ?? null); // Week 4 §4.9
     // Week 2 E — 신규 방 시작 시 배당 요약 초기화
     setLatestDividendSummary(null);
     setAssets(nextRoom.assets);
     setOpenMacroContext(null);
     setTriggeredEventsByRound(nextRoom.triggeredEventsByRound);
+    // Week 4 §2.4 — 거시 경보 채널 초기화
+    setPendingMacroAlerts([]);
+    setActiveMacroAlerts([]);
+    setMacroAlertsByRound({});
+    // Week 4 §2.2 — 물가 시스템 초기화 (방 새로 시작/재초기화 시)
+    setPriceIndex(INITIAL_PRICE_INDEX);
+    setPriceIndexByRound({ 1: INITIAL_PRICE_INDEX });
+    setPreviousAggregateReturn(0);
+    setPrincipalBasisByPlayer({});
+    setDemandPullCumulative(0);
+    setMacroTimeline([]); // Week 4 §4.8
     setLatestRoundSummary(nextRoom.latestRoundSummary);
     setIssueDraft(nextRoom.issueDraft);
     setStartIssueChoiceOpen(false);
@@ -6050,6 +7026,8 @@ export function App() {
     setReflection(nextRoom.reflection);
     // Week 3 G — 라운드별 메모 초기화
     setRoundNotes({});
+    // Week 4 §3.6 — 체크포인트 학습 질문 응답 초기화
+    setRoundReflections({});
     setSubmissions([]);
     setStudentStates([]);
     setFinalReportsDownloaded(false);
@@ -6168,24 +7146,22 @@ export function App() {
       setStartIssueChoiceOpen(true);
       return;
     }
-    let publishedEvents = currentRoundEvents.map((event) => ({ ...event, published: true }));
-    // Week 3 H — 거시 트리거 자동 발동 패치 (모든 모드에서 forced 이슈 자동 적용)
-    const forced = forcedNextRoundIssues ?? [];
-    const forcedPublished = forced.map((e) => ({ ...e, published: true, triggered: true }));
-    if (startMode === 'random') {
-      const remaining = Math.max(0, 3 - forcedPublished.length);
-      const randomIssues = remaining > 0 ? pickRandomRoundIssues({ round, now: Date.now(), count: remaining }) : [];
-      publishedEvents = [...forcedPublished, ...randomIssues];
-    } else if (startMode === 'none') {
-      publishedEvents = forcedPublished;
-    } else {
-      const forcedIds = new Set(forcedPublished.map((e) => e.id));
-      publishedEvents = [
-        ...forcedPublished,
-        ...publishedEvents.filter((e) => !forcedIds.has(e.id)),
-      ];
+    // Week 4 §2.4 — 트리거 먼저 활성화 (이슈와 시점·채널 분리)
+    //   라운드 시작 시점에 pendingMacroAlerts → activeMacroAlerts 로 이동.
+    //   이슈 슬롯(IssueTicker)에 트리거가 섞이지 않도록 publishedEvents 와 완전히 별도 채널로 관리.
+    const activatedAlerts = pendingMacroAlerts ?? [];
+    setActiveMacroAlerts(activatedAlerts);
+    if (activatedAlerts.length > 0) {
+      setMacroAlertsByRound((current) => ({ ...current, [round]: activatedAlerts }));
     }
-    if (forced.length > 0) setForcedNextRoundIssues([]);
+    if ((pendingMacroAlerts ?? []).length > 0) setPendingMacroAlerts([]);
+
+    let publishedEvents = currentRoundEvents.map((event) => ({ ...event, published: true }));
+    if (startMode === 'random') {
+      publishedEvents = pickRandomRoundIssues({ round, now: Date.now(), count: 3 });
+    } else if (startMode === 'none') {
+      publishedEvents = [];
+    }
     const nextPrincipal = getInvestedPrincipal({ gameStarted: true, round, phase: 'open' });
     const salariedPlayers = players.map((player) => ({
       ...player,
@@ -6196,9 +7172,13 @@ export function App() {
     const salariedTeams = payTeamRoundSalary(teamAccounts, players);
     const previewConflictOutcomeMap = getConflictOutcomeMap(publishedEvents);
     const previewMacroImpact = combineEventMacroImpacts(
-      publishedEvents
-        .filter((event) => !previewConflictOutcomeMap[event.id]?.blocked)
-        .map((event) => ({ ...event, didApply: true })),
+      [
+        ...publishedEvents
+          .filter((event) => !previewConflictOutcomeMap[event.id]?.blocked)
+          .map((event) => ({ ...event, didApply: true })),
+        // Week 4 §2.4 — 활성 거시 경보(트리거)의 매크로 임팩트도 동시에 반영
+        ...activatedAlerts.map((alert) => ({ ...alert, didApply: true })),
+      ],
     );
     const previewMacroMove = createMacroMove({
       baseRate,
@@ -6406,8 +7386,9 @@ export function App() {
       triggerCooldowns,
     );
     setTriggerCooldowns(triggerResult.nextCooldowns);
+    // Week 4 §2.4 — 트리거 결과는 이슈 슬롯이 아닌 거시 경보 채널로 보낸다 (다음 라운드 시작 시 활성화)
     if (triggerResult.fired.length > 0) {
-      const triggeredIssues = triggerResult.fired
+      const triggeredAlerts = triggerResult.fired
         .map((id) => scenarioEvents.find((event) => event.id === id))
         .filter(Boolean)
         .map((event) => {
@@ -6415,15 +7396,14 @@ export function App() {
           return {
             ...event,
             ...issueOption,
-            uniqueId: `${event.id}-trigger-${Date.now()}`,
-            published: false,
-            resolved: false,
+            uniqueId: `${event.id}-macroAlert-${Date.now()}`,
             triggered: true,
+            outcomeType: 'macroAlert',
           };
         });
-      setForcedNextRoundIssues(triggeredIssues);
+      setPendingMacroAlerts(triggeredAlerts);
     } else {
-      setForcedNextRoundIssues([]);
+      setPendingMacroAlerts([]);
     }
 
 
@@ -6563,7 +7543,90 @@ export function App() {
     }
     setLatestDividendSummary({ round, applied: dividendApplied, breakdown: dividendBreakdown });
 
-    setLatestRoundSummary({ round, events: resolvedEvents, delistedAssets, macroMove });
+    // ── Week 4 §2.2: 물가지수(인플레이션) 갱신 — 라운드 N 종료 시점 ──
+    //   분기당 기본 1% + α (수요견인 / 이슈 / 거시) × 시드 D
+    //   "다 같이 돈을 많이 벌면 물가가 더 빨리 오른다"는 수요견인 메커니즘.
+    let nextPriceIndexValue = priceIndex;
+    let aggregateReturnForRound = previousAggregateReturn;
+    {
+      const memberCount = teamMode
+        ? Math.max(1, players.length)
+        : Math.max(1, (players ?? []).length);
+      // 누적 원금: INITIAL_CASH + ROUND_SALARY × (생활소득 지급 횟수)
+      const investedPerHead = getInvestedPrincipal({ gameStarted: true, round, phase: 'closed' });
+      const aggregatePrincipal = investedPerHead * memberCount;
+      // 총 자산: 라운드 종료 시점 가격(nextAssets) 기준 — 솔로는 players.totalAsset, 팀은 cash+deposit+포트폴리오
+      const aggregateNetWorth = teamMode
+        ? nextTeamAccounts.reduce((sum, team) => sum + getTotalAsset({
+            cash: team.cash ?? 0,
+            deposit: team.deposit ?? 0,
+            portfolio: team.portfolio ?? {},
+            assets: nextAssets,
+          }), 0)
+        : (players ?? []).reduce((sum, p) => sum + (p.totalAsset ?? INITIAL_CASH), 0);
+      aggregateReturnForRound = aggregatePrincipal > 0
+        ? (aggregateNetWorth / aggregatePrincipal) - 1
+        : 0;
+      const aggregateReturnDelta = aggregateReturnForRound - (previousAggregateReturn ?? 0);
+      // 수요견인: 직전 대비 +5% 수익 → +0.5%p 추가 인플레, 손실 라운드에서는 0으로 클램프
+      const demandPullInflation = Math.max(0, aggregateReturnDelta) * DEMAND_PULL_COEF;
+
+      // 이슈 영향 (실제 발생한 inflation-cool / inflation-rebound 만)
+      const issueInflationDelta = resolvedEvents.reduce((sum, ev) => {
+        if (!ev.didApply) return sum;
+        if (ev.id === 'inflation-cool')    return sum - 0.003;
+        if (ev.id === 'inflation-rebound') return sum + 0.008;
+        return sum;
+      }, 0);
+
+      // 거시 영향: 저금리(돈 풀림) / 고환율(수입물가) / 저실업률(임금상승)
+      const macroInflationDelta =
+          (nextBaseRate < 1.0 ? 0.002 : 0)
+        + (nextBaseRate > 7.0 ? -0.001 : 0)
+        + (macroMove.nextExchangeRate > 1500 ? 0.002 : 0)
+        + (macroMove.nextUnemploymentRate < 2.5 ? 0.003 : 0);
+
+      const seedD = economicSeed?.inflationSensitivity ?? 1.0;
+      const rawInflation = BASE_INFLATION_RATE + demandPullInflation + issueInflationDelta + macroInflationDelta;
+      const totalRoundInflation = Math.max(MIN_INFLATION_FLOOR, rawInflation * seedD);
+      nextPriceIndexValue = priceIndex * (1 + totalRoundInflation);
+      setPriceIndex(nextPriceIndexValue);
+      setPriceIndexByRound((current) => ({
+        ...current,
+        [round]: priceIndex,                  // 라운드 N 시작 시점 값
+        [round + 1]: nextPriceIndexValue,     // 라운드 N+1 시작 시점 값 (마지막 라운드의 경우 종료 후 값 = 최종)
+      }));
+      setPreviousAggregateReturn(aggregateReturnForRound);
+      // Phase C — 라운드별 수요견인 인플레이션 누적 (시드 D 적용 후 실제 기여분)
+      //   기본 인플레가 floor에 의해 끌어올려진 경우, 수요견인분도 그 비율만큼 잘려나가게 정확히 산정.
+      const demandPullEffective = totalRoundInflation > 0 && rawInflation > 0
+        ? totalRoundInflation * (demandPullInflation * seedD / (rawInflation * seedD))
+        : 0;
+      setDemandPullCumulative((current) => current + demandPullEffective);
+    }
+
+    setLatestRoundSummary({ round, events: resolvedEvents, delistedAssets, macroMove, priceIndex: nextPriceIndexValue, aggregateReturn: aggregateReturnForRound });
+    // Week 4 §4.8 — 거시 시계열에 이번 라운드 스냅샷 추가
+    {
+      const seedD = economicSeed?.inflationSensitivity ?? 1.0;
+      const dpRaw = Math.max(0, aggregateReturnForRound - (previousAggregateReturn ?? 0)) * DEMAND_PULL_COEF;
+      const demandPullDeltaSnap = dpRaw * seedD;
+      const hasMacroAlertSnap = Array.isArray(activeMacroAlerts) && activeMacroAlerts.length > 0;
+      setMacroTimeline((current) => [
+        ...current.filter((point) => point.round !== round),
+        {
+          round,
+          baseRate: nextBaseRate,
+          propertyIndex: macroMove.nextPropertyIndex,
+          exchangeRate: macroMove.nextExchangeRate,
+          unemploymentRate: macroMove.nextUnemploymentRate,
+          priceIndex: nextPriceIndexValue,
+          aggregateReturn: aggregateReturnForRound,
+          demandPullDelta: demandPullDeltaSnap,
+          hasMacroAlert: hasMacroAlertSnap,
+        },
+      ].sort((a, b) => a.round - b.round));
+    }
     setPhase('closed');
     const selectedTeamAfterRound = nextTeamAccounts.find((team) => team.key === selectedTeamKey) ?? activeTeam;
     const logCash = teamMode ? selectedTeamAfterRound.cash : cash;
@@ -6680,6 +7743,9 @@ export function App() {
         improve: '',
         next: '교사 제출 마감으로 현재 저장 상태가 자동 제출되었습니다.',
       },
+      // Week 4 §2.2 Phase C — 인플레이션 KPI 전달
+      priceIndex,
+      demandPullCumulative,
     });
 
     if (!savedState && !team && player.totalAsset && player.totalAsset > report.totalAsset) {
@@ -6720,6 +7786,9 @@ export function App() {
       tradeLogs,
       roundLogs,
       reflection,
+      // Week 4 §2.2 Phase C — 인플레이션 KPI 전달
+      priceIndex,
+      demandPullCumulative,
     });
 
     setSubmissions((current) => [report, ...current.filter((item) => item.nickname !== report.nickname)]);
@@ -6953,12 +8022,18 @@ export function App() {
           propertyIndex={propertyIndex}
           exchangeRate={exchangeRate}
           unemploymentRate={unemploymentRate}
+          priceIndex={priceIndex}
           activeStudent={activeStudent}
           expiresAt={expiresAt}
           roomExpired={roomExpired}
           issueDraft={issueDraft}
           currentRoundEvents={currentRoundEvents}
           triggeredEventsByRound={triggeredEventsByRound}
+          activeMacroAlerts={activeMacroAlerts}
+          macroTimeline={macroTimeline}
+          macroAlertsByRound={macroAlertsByRound}
+          pendingMacroAlerts={pendingMacroAlerts}
+          initialSeedSensitivity={initialSeedSensitivity}
           latestRoundSummary={latestRoundSummary}
           submissions={submissions}
           syncStatus={syncStatus}
@@ -7028,12 +8103,16 @@ export function App() {
           propertyIndex={propertyIndex}
           exchangeRate={exchangeRate}
           unemploymentRate={unemploymentRate}
+          priceIndex={priceIndex}
+          demandPullCumulative={demandPullCumulative}
           tradeLogs={tradeLogs}
           roundLogs={roundLogs}
           reflection={reflection}
           playerCount={playerCount}
           roomFull={roomFull}
           currentRoundEvents={publicCurrentRoundEvents}
+          activeMacroAlerts={activeMacroAlerts}
+          macroTimeline={macroTimeline}
           latestRoundSummary={latestRoundSummary}
           gameFinished={gameFinished}
           gameStarted={gameStarted}
@@ -7068,6 +8147,8 @@ export function App() {
           onReflectionChange={handleReflectionChange}
           roundNotes={roundNotes}
           onRoundNoteChange={handleRoundNoteChange}
+          roundReflections={roundReflections}
+          onRoundReflectionChange={handleRoundReflectionChange}
         />
       ) : null}
     </div>
