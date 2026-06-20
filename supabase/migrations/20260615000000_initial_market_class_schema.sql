@@ -84,6 +84,8 @@ create table if not exists public.student_states (
   last_dividend_round integer not null default 0,
   trade_logs jsonb not null default '[]'::jsonb,
   round_logs jsonb not null default '[]'::jsonb,
+  round_notes jsonb not null default '{}'::jsonb,
+  round_reflections jsonb not null default '{}'::jsonb,
   reflection jsonb not null default '{}'::jsonb,
   salary_paid_rounds integer[] not null default '{}',
   initial_capital_granted boolean not null default false,
@@ -98,6 +100,8 @@ alter table public.student_states add column if not exists portfolio jsonb not n
 alter table public.student_states add column if not exists last_dividend_round integer not null default 0;
 alter table public.student_states add column if not exists trade_logs jsonb not null default '[]'::jsonb;
 alter table public.student_states add column if not exists round_logs jsonb not null default '[]'::jsonb;
+alter table public.student_states add column if not exists round_notes jsonb not null default '{}'::jsonb;
+alter table public.student_states add column if not exists round_reflections jsonb not null default '{}'::jsonb;
 alter table public.student_states add column if not exists reflection jsonb not null default '{}'::jsonb;
 alter table public.student_states add column if not exists salary_paid_rounds integer[] not null default '{}';
 alter table public.student_states add column if not exists initial_capital_granted boolean not null default false;

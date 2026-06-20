@@ -229,6 +229,29 @@ function storeStudentSessionToken(roomPin, studentNumber, token) {
   }
 }
 
+function getStudentStateCacheKey(roomScope, studentNumber) {
+  return `market-class-state:${roomScope}:${studentNumber}`;
+}
+
+function loadCachedStudentState(roomScope, studentNumber) {
+  if (!roomScope) return null;
+  try {
+    const raw = window.localStorage.getItem(getStudentStateCacheKey(roomScope, studentNumber));
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function cacheStudentState(roomScope, studentNumber, state) {
+  if (!roomScope || !state) return;
+  try {
+    window.localStorage.setItem(getStudentStateCacheKey(roomScope, studentNumber), JSON.stringify(state));
+  } catch {
+    // Server persistence remains the source of truth when browser storage is unavailable.
+  }
+}
+
 function hasActiveDifferentSession(player, sessionToken) {
   if (!player?.sessionToken || player.sessionToken === sessionToken) return false;
   const lastSeenAt = Number(player.lastSeenAt ?? 0);
@@ -6772,17 +6795,33 @@ export function App() {
       updatedAt: Date.now(),
     };
 
+    const cachedPendingState = {
+      ...nextState,
+      _roomRound: round,
+      _roomPhase: phase,
+      _pendingRemoteSave: true,
+    };
+    cacheStudentState(remoteRoomId || roomPin, studentNumber, cachedPendingState);
+
     window.clearTimeout(studentStateSaveTimer.current);
     studentStateSaveTimer.current = window.setTimeout(() => {
       upsertRemoteStudentState(remoteRoomId, nextState)
         .then((savedState) => {
-          if (savedState) rememberStudentState(savedState);
+          if (savedState) {
+            rememberStudentState(savedState);
+            cacheStudentState(remoteRoomId || roomPin, studentNumber, {
+              ...savedState,
+              _roomRound: round,
+              _roomPhase: phase,
+              _pendingRemoteSave: false,
+            });
+          }
         })
         .catch((error) => setSyncStatus(`학생 계좌 저장 실패: ${error.message}`));
-    }, 600);
+    }, 100);
 
     return () => window.clearTimeout(studentStateSaveTimer.current);
-  }, [activeTeam.lastDividendRound, depositPrincipal, effectiveCash, effectiveDeposit, effectiveDepositInterestEarned, effectivePortfolio, gameStarted, initialCapitalGranted, joined, lastDividendRound, nickname, reflection, remoteRoomId, roundLogs, roundNotes, roundReflections, salaryPaidRounds, selectedTeamKey, studentNumber, studentPasscodeHash, teamMode, tradeLogs]);
+  }, [activeTeam.lastDividendRound, depositPrincipal, effectiveCash, effectiveDeposit, effectiveDepositInterestEarned, effectivePortfolio, gameStarted, initialCapitalGranted, joined, lastDividendRound, nickname, phase, reflection, remoteRoomId, roomPin, round, roundLogs, roundNotes, roundReflections, salaryPaidRounds, selectedTeamKey, studentNumber, studentPasscodeHash, teamMode, tradeLogs]);
 
   useEffect(() => {
     if (!joined || teamMode || phase !== 'closed') return;
@@ -7001,48 +7040,86 @@ export function App() {
       return;
     }
 
-    const passcodeHash = hashStudentPasscode(roomPin, parsedNumber, normalizedPasscode);
-    const storedSessionToken = getStoredStudentSessionToken(roomPin, parsedNumber);
-    const nextSessionToken = storedSessionToken || createStudentSessionToken();
-    const existingPlayer = players.find((player) => Number(player.studentNumber) === parsedNumber);
-    if (existingPlayer && existingPlayer.passcodeHash !== passcodeHash) {
-      setStudentJoinError('이미 사용 중인 학번입니다. 이름과 개인 비밀번호를 확인하세요.');
-      return;
-    }
-    if (existingPlayer && hasActiveDifferentSession(existingPlayer, nextSessionToken)) {
-      setStudentJoinError('해당 학번은 다른 기기에서 접속 중입니다. 기존 화면을 닫고 잠시 후 다시 시도하세요.');
-      return;
-    }
-    if (!existingPlayer && players.length >= MAX_PLAYERS_PER_ROOM) {
-      setStudentJoinError('정원이 찼습니다.');
-      return;
-    }
-
-    const resolvedName = existingPlayer?.name || trimmedName;
-    const resolvedTeamKey = teamMode ? (existingPlayer?.teamKey || selectedTeamKey) : '';
-    const nextPlayer = {
-      id: existingPlayer?.id ?? `local-${parsedNumber}`,
-      name: resolvedName,
-      studentNumber: parsedNumber,
-      passcodeHash,
-      sessionToken: nextSessionToken,
-      lastSeenAt: Date.now(),
-      teamKey: resolvedTeamKey,
-      cash: gameStarted && !teamMode ? INITIAL_CASH : effectiveCash,
-      deposit: gameStarted ? effectiveDeposit : 0,
-      totalAsset: gameStarted && !teamMode ? INITIAL_CASH : studentTotalAsset,
-      returnRate: 0,
-      holdings: [],
-    };
-
     try {
-      const savedPlayer = remoteRoomId
-        ? await registerRemotePlayer(remoteRoomId, nextPlayer)
+      let joinRoomId = remoteRoomId;
+      let joinPlayers = players;
+      let joinRoomMode = teamMode;
+      let joinGameStarted = gameStarted;
+      let joinRound = round;
+      let joinPhase = phase;
+
+      if (supabaseConfigured) {
+        const latestBundle = await fetchRemoteRoomByPin(roomPin);
+        if (!latestBundle?.room) {
+          setStudentJoinError('해당 PIN의 수업 방을 찾을 수 없습니다. 교사에게 PIN을 확인하세요.');
+          return;
+        }
+        applyRemoteRoomBundle(latestBundle);
+        joinRoomId = latestBundle.room.id;
+        joinPlayers = latestBundle.players ?? [];
+        joinRoomMode = (latestBundle.room.mode ?? 'individual') === 'team';
+        joinGameStarted = Boolean(latestBundle.room.game_started);
+        joinRound = Number(latestBundle.room.current_round ?? round);
+        joinPhase = latestBundle.room.phase ?? phase;
+      }
+
+      const passcodeHash = hashStudentPasscode(roomPin, parsedNumber, normalizedPasscode);
+      const storedSessionToken = getStoredStudentSessionToken(roomPin, parsedNumber);
+      const nextSessionToken = storedSessionToken || createStudentSessionToken();
+      const existingPlayer = joinPlayers.find((player) => Number(player.studentNumber) === parsedNumber);
+      if (existingPlayer && existingPlayer.passcodeHash !== passcodeHash) {
+        setStudentJoinError('이미 사용 중인 학번입니다. 이름과 개인 비밀번호를 확인하세요.');
+        return;
+      }
+      if (existingPlayer && hasActiveDifferentSession(existingPlayer, nextSessionToken)) {
+        setStudentJoinError('해당 학번은 다른 기기에서 접속 중입니다. 기존 화면을 닫고 잠시 후 다시 시도하세요.');
+        return;
+      }
+      if (!existingPlayer && joinPlayers.length >= MAX_PLAYERS_PER_ROOM) {
+        setStudentJoinError('정원이 찼습니다.');
+        return;
+      }
+
+      const resolvedName = existingPlayer?.name || trimmedName;
+      const resolvedTeamKey = joinRoomMode ? (existingPlayer?.teamKey || selectedTeamKey) : '';
+      const nextPlayer = {
+        id: existingPlayer?.id ?? `local-${parsedNumber}`,
+        name: resolvedName,
+        studentNumber: parsedNumber,
+        passcodeHash,
+        sessionToken: nextSessionToken,
+        lastSeenAt: Date.now(),
+        teamKey: resolvedTeamKey,
+        cash: joinGameStarted && !joinRoomMode ? INITIAL_CASH : effectiveCash,
+        deposit: joinGameStarted ? effectiveDeposit : 0,
+        totalAsset: joinGameStarted && !joinRoomMode ? INITIAL_CASH : studentTotalAsset,
+        returnRate: 0,
+        holdings: [],
+      };
+
+      const savedPlayer = joinRoomId
+        ? await registerRemotePlayer(joinRoomId, nextPlayer)
         : null;
       const playerToStore = savedPlayer ?? nextPlayer;
-      const savedState = remoteRoomId
-        ? await fetchRemoteStudentState(remoteRoomId, parsedNumber)
+      const remoteSavedState = joinRoomId
+        ? await fetchRemoteStudentState(joinRoomId, parsedNumber)
         : studentStates.find((state) => Number(state.studentNumber) === parsedNumber);
+      const cachedState = loadCachedStudentState(joinRoomId || roomPin, parsedNumber);
+      if (remoteSavedState?.passcodeHash && remoteSavedState.passcodeHash !== passcodeHash) {
+        setStudentJoinError('저장된 계좌의 개인 비밀번호가 일치하지 않습니다.');
+        return;
+      }
+      const validCachedState = cachedState && (!cachedState.passcodeHash || cachedState.passcodeHash === passcodeHash)
+        ? cachedState
+        : null;
+      const canRestorePendingCache = Boolean(
+        validCachedState?._pendingRemoteSave
+          && Number(validCachedState._roomRound) === joinRound
+          && joinPhase === 'open',
+      );
+      const savedState = canRestorePendingCache
+        ? validCachedState
+        : remoteSavedState ?? validCachedState;
       setPlayers((current) => [
         ...current.filter((player) => Number(player.studentNumber) !== parsedNumber),
         playerToStore,
@@ -7052,9 +7129,9 @@ export function App() {
       storeStudentSessionToken(roomPin, parsedNumber, playerToStore.sessionToken ?? nextSessionToken);
       setStudentNumber(String(parsedNumber));
       setNickname(playerToStore.name ?? resolvedName);
-      const restored = savedState?.passcodeHash === passcodeHash ? restoreStudentState(savedState) : false;
-      if (teamMode && playerToStore.teamKey) setSelectedTeamKey(playerToStore.teamKey);
-      if (!restored && gameStarted && !teamMode) {
+      const restored = savedState ? restoreStudentState({ ...savedState, passcodeHash }) : false;
+      if (joinRoomMode && playerToStore.teamKey) setSelectedTeamKey(playerToStore.teamKey);
+      if (!restored && joinGameStarted && !joinRoomMode) {
         setCash((current) => (current > 0 ? current : INITIAL_CASH));
         setInitialCapitalGranted(true);
       }
@@ -7773,6 +7850,8 @@ export function App() {
             lastDividendRound: isDividendRound ? round : lastDividendRound,
             tradeLogs: [...localDividendLogs, ...tradeLogs],
             roundLogs,
+            roundNotes,
+            roundReflections,
             reflection,
             salaryPaidRounds,
             initialCapitalGranted,
