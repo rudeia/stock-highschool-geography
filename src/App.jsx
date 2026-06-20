@@ -4673,8 +4673,7 @@ function AssetLearningPanel({ asset }) {
     '전 재산을 넣었을 때 상장폐지나 급락을 버틸 수 있나?',
   ];
 
-  // Week 4 §2.2 — 상품 설명에 배당/이자 안내를 별도 박스로 노출.
-  // 외부 CSS가 누락된 환경에서도 확실히 보이도록 inline style을 직접 지정.
+  // Week 4 §2.2 — 종목 설명에 배당/이자 안내를 별도 박스로 노출 (CSS 누락 환경에서도 보이도록 inline-style 사용)
   let incomeNote = null;
   if (asset.type === 'stock' && asset.dividendTier) {
     const tierLabel = DIVIDEND_TIER_LABELS[asset.dividendTier];
@@ -4741,12 +4740,12 @@ function AssetLearningPanel({ asset }) {
             className="asset-income-note"
             style={{
               marginTop: 8,
-              padding: '8px 10px',
-              borderLeft: '3px solid #2563eb',
+              padding: '10px 12px',
+              borderLeft: '4px solid #2563eb',
               background: '#eff6ff',
               color: '#1e3a8a',
               fontSize: 13,
-              lineHeight: 1.5,
+              lineHeight: 1.55,
               borderRadius: 4,
               fontWeight: 500,
             }}
@@ -5329,8 +5328,6 @@ function HostView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debugMode, devRecheckTick, round, phase, gameStarted, salaryPaidRounds, tradeLogs, macroTimeline, activeMacroAlerts, macroAlertsByRound, economicSeed, initialSeedSensitivity]);
   function handleDevRecheck() { setDevRecheckTick((v) => v + 1); }
-  // Week 4 §3.6 — 교사 대시보드에서도 자산 행을 클릭해 기업·자산 분석을 펼쳐 보도록 추가
-  const [hostExpandedAssetId, setHostExpandedAssetId] = useState(null);
   const [eventCategory, setEventCategory] = useState('all');
   const filteredScenarioEvents = eventCategory === 'all'
     ? scenarioEvents
@@ -5666,54 +5663,24 @@ function HostView({
           <div className="stock-table">
             {assets.map((asset) => {
               const change = getChange(asset);
-              const expanded = hostExpandedAssetId === asset.id;
               return (
-                <div key={asset.id} style={{ display: 'flex', flexDirection: 'column' }}>
-                  <article
-                    className="stock-row"
-                    onClick={() => setHostExpandedAssetId(expanded ? null : asset.id)}
-                    style={{
-                      cursor: 'pointer',
-                      borderBottom: expanded ? '1px solid #2563eb' : undefined,
-                    }}
-                    aria-expanded={expanded}
-                    aria-controls={`host-asset-detail-${asset.id}`}
-                  >
-                    <div className="stock-name">
-                      <span style={{ background: asset.color }} />
-                      <div>
-                        <strong>{asset.name}</strong>
-                        <small>{asset.country} · {assetTypeLabels[asset.type]} · {asset.sector}</small>
-                      </div>
+                <article className="stock-row" key={asset.id}>
+                  <div className="stock-name">
+                    <span style={{ background: asset.color }} />
+                    <div>
+                      <strong>{asset.name}</strong>
+                      <small>{asset.country} · {assetTypeLabels[asset.type]} · {asset.sector}</small>
                     </div>
-                    <Sparkline history={asset.history} color={asset.color} />
-                    <div className="stock-price">
-                      <strong>{formatAssetPrice(asset)}</strong>
-                      <small className={change >= 0 ? 'up' : 'down'}>{formatPercent(change)}</small>
-                    </div>
-                  </article>
-                  {expanded ? (
-                    <div
-                      id={`host-asset-detail-${asset.id}`}
-                      style={{
-                        padding: '12px',
-                        background: '#f8fafc',
-                        border: '1px solid #cbd5e1',
-                        borderTop: 'none',
-                        borderRadius: '0 0 8px 8px',
-                        marginBottom: 8,
-                      }}
-                    >
-                      <AssetLearningPanel asset={asset} />
-                    </div>
-                  ) : null}
-                </div>
+                  </div>
+                  <Sparkline history={asset.history} color={asset.color} />
+                  <div className="stock-price">
+                    <strong>{formatAssetPrice(asset)}</strong>
+                    <small className={change >= 0 ? 'up' : 'down'}>{formatPercent(change)}</small>
+                  </div>
+                </article>
               );
             })}
           </div>
-          <p style={{ marginTop: 8, fontSize: 12, color: '#64748b' }}>
-            자산 행을 클릭하면 기업·자산 분석(배당·재무 신호·변동 가능성)을 펼쳐 볼 수 있습니다.
-          </p>
         </section>
       </section>
 
@@ -6288,6 +6255,45 @@ function StudentView({
             </div>
             <Sparkline history={selectedAsset.history} color={selectedAsset.color} />
           </div>
+
+          {/* Week 4 §2.3 — 거래 티켓 헤더 직하단에 이 종목의 배당/이자/없음 안내를 큰 박스로 항상 노출 */}
+          {(() => {
+            let line = null;
+            if (selectedAsset.type === 'stock' && selectedAsset.dividendTier) {
+              const tierLabel = DIVIDEND_TIER_LABELS[selectedAsset.dividendTier];
+              const tierRate = DIVIDEND_TIER_RATES[selectedAsset.dividendTier];
+              if (selectedAsset.dividendTier === 'growth') {
+                line = `이 종목은 ${tierLabel} — 4·8·12라운드에도 배당이 없습니다. 수익은 가격 변동(자본이득)만으로 발생.`;
+              } else {
+                const expected = Math.round(selectedAsset.price * tierRate);
+                line = `이 종목은 ${tierLabel} — 4·8·12라운드 종료 시점에 보유 중이면 약 ${(tierRate * 100).toFixed(0)}% 배당 (현재가 기준 1주당 +${formatWon(expected)} 예상), 다음 라운드 시작가는 배당의 ½만큼 배당락 적용.`;
+              }
+            } else if (selectedAsset.type === 'bond' && selectedAsset.couponRate) {
+              const coupon = Math.round(selectedAsset.faceValue * selectedAsset.couponRate);
+              line = `이 종목은 채권 — 매 라운드 액면가 ${formatWon(selectedAsset.faceValue)} 기준 단리 ${(selectedAsset.couponRate * 100).toFixed(1)}% 이자가 자동 입금 (1주당 +${formatWon(coupon)}/라운드).`;
+            } else if (selectedAsset.type !== 'stock' && selectedAsset.type !== 'bond') {
+              line = '이 종목은 배당·이자 없음 — 수익은 오로지 가격 변동(자본이득)만으로 결정됩니다.';
+            }
+            if (!line) return null;
+            return (
+              <div
+                role="note"
+                style={{
+                  margin: '8px 0 4px',
+                  padding: '10px 12px',
+                  borderLeft: '4px solid #2563eb',
+                  background: '#eff6ff',
+                  color: '#1e3a8a',
+                  fontSize: 13,
+                  lineHeight: 1.55,
+                  borderRadius: 4,
+                  fontWeight: 500,
+                }}
+              >
+                {line}
+              </div>
+            );
+          })()}
 
           {/* Week 2 E — 다음 배당 라운드 안내 배너 */}
           {(() => {
