@@ -3640,7 +3640,7 @@ function getInvestorType({ cashLikeAsset, holdingsValue, portfolioRows, totalAss
   return '균형 분산형 투자자';
 }
 
-function buildFinalSubmissionReport({ nickname, studentNumber = null, mode = 'individual', teamKey = '', teamName = '', submissionMethod = 'student', cash, deposit, depositInterestEarned = 0, investedPrincipal = INITIAL_CASH, portfolio, assets, tradeLogs, roundLogs, reflection, priceIndex = INITIAL_PRICE_INDEX, demandPullCumulative = 0 }) {
+function buildFinalSubmissionReport({ nickname, studentNumber = null, mode = 'individual', teamKey = '', teamName = '', submissionMethod = 'student', cash, deposit, depositInterestEarned = 0, investedPrincipal = INITIAL_CASH, portfolio, assets, tradeLogs, roundLogs, roundNotes = {}, roundReflections = {}, reflection, priceIndex = INITIAL_PRICE_INDEX, demandPullCumulative = 0 }) {
   const portfolioRows = getHoldingRows(portfolio, assets);
   const investmentAsset = portfolioRows.reduce((sum, row) => sum + row.value, 0);
   const cashLikeAsset = cash + deposit;
@@ -3691,6 +3691,8 @@ function buildFinalSubmissionReport({ nickname, studentNumber = null, mode = 'in
     portfolio: portfolioReport,
     tradeLogs,
     roundLogs,
+    roundNotes: { ...roundNotes },
+    roundReflections: { ...roundReflections },
     reflection,
     // Week 4 §2.2 Phase C — 인플레이션 KPI
     priceIndex: safePriceIndex,
@@ -3719,6 +3721,31 @@ function buildRoundSummaryFromLog(log) {
 
 function escapeCsv(value) {
   return `"${String(value ?? '').replaceAll('"', '""')}"`;
+}
+
+function formatRoundNotesForExport(roundNotes = {}) {
+  return Object.entries(roundNotes)
+    .filter(([, note]) => String(note ?? '').trim())
+    .sort(([firstRound], [secondRound]) => Number(firstRound) - Number(secondRound))
+    .map(([roundNumber, note]) => `R${roundNumber}: ${String(note).trim()}`)
+    .join(' / ');
+}
+
+function formatCheckpointReflectionsForExport(roundReflections = {}) {
+  return LEARNING_CHECKPOINT_ROUNDS
+    .map((roundNumber) => {
+      const answer = roundReflections[roundNumber];
+      if (!answer) return '';
+      const prompt = REFLECTION_PROMPTS[roundNumber];
+      const selectedText = Number.isInteger(answer.selected)
+        ? prompt?.objective?.options?.[answer.selected] ?? ''
+        : '';
+      const openText = String(answer.open ?? '').trim();
+      const parts = [selectedText ? `선택: ${selectedText}` : '', openText ? `서술: ${openText}` : ''].filter(Boolean);
+      return parts.length ? `R${roundNumber} ${parts.join(' · ')}` : '';
+    })
+    .filter(Boolean)
+    .join(' / ');
 }
 
 function downloadCsv(filename, rows) {
@@ -4283,7 +4310,10 @@ function FinalReport({
   const totalAsset = cash + deposit + holdingsValue;
   const returnRate = getInvestmentReturnRate(totalAsset, investedPrincipal);
   const reportRoundLogs = submission?.roundLogs?.length ? submission.roundLogs : roundLogs;
-  const investorType = submission?.investorType ?? buildFinalSubmissionReport({ nickname, mode, teamName, cash, deposit, depositInterestEarned, investedPrincipal, portfolio, assets, tradeLogs, roundLogs: reportRoundLogs, reflection, priceIndex, demandPullCumulative }).investorType;
+  const reportRoundNotes = submission?.roundNotes ?? roundNotes ?? {};
+  const reportRoundReflections = submission?.roundReflections ?? roundReflections ?? {};
+  const reportReflection = submission?.reflection ?? reflection;
+  const investorType = submission?.investorType ?? buildFinalSubmissionReport({ nickname, mode, teamName, cash, deposit, depositInterestEarned, investedPrincipal, portfolio, assets, tradeLogs, roundLogs: reportRoundLogs, roundNotes: reportRoundNotes, roundReflections: reportRoundReflections, reflection: reportReflection, priceIndex, demandPullCumulative }).investorType;
   // Week 4 §2.2 Phase C — 명목 vs 실질 KPI (submission이 있으면 거기서 가져오고, 없으면 즉시 계산)
   const finalPriceIndex = submission?.priceIndex ?? priceIndex;
   const finalDemandPullCumulative = submission?.demandPullCumulative ?? demandPullCumulative;
@@ -4348,9 +4378,6 @@ function FinalReport({
           <strong>{investorType}</strong>
           <p>최종 자산은 현금과 예금을 현금성 자산으로 합산해 계산합니다.</p>
         </div>
-        <button className="command primary print-hide" type="button" onClick={onSubmitReport} disabled={Boolean(submission)}>
-          {submission ? '제출 완료' : '최종 제출하기'}
-        </button>
       </div>
 
       {/* Week 4 §2.2 Phase C — 명목 vs 실질 수익률 비교 (인플레이션 영향 시각화) */}
@@ -4531,17 +4558,17 @@ function FinalReport({
       ) : null}
 
       {/* Week 3 G — 라운드별 메모 회고 타임라인 */}
-      {roundNotes && Object.keys(roundNotes).filter((k) => (roundNotes[k] ?? '').trim().length > 0).length > 0 ? (
+      {Object.keys(reportRoundNotes).filter((k) => (reportRoundNotes[k] ?? '').trim().length > 0).length > 0 ? (
         <details className="round-notes-timeline" open>
           <summary>
             <strong>라운드별 한 줄 메모 회고</strong>
             <span className="round-notes-count">
-              {Object.keys(roundNotes).filter((k) => (roundNotes[k] ?? '').trim().length > 0).length}건
+              {Object.keys(reportRoundNotes).filter((k) => (reportRoundNotes[k] ?? '').trim().length > 0).length}건
             </span>
           </summary>
           <ol className="round-notes-list">
             {sortedRoundLogs.map((log) => {
-              const note = roundNotes[log.round];
+              const note = reportRoundNotes[log.round];
               if (!note || !note.trim()) return null;
               return (
                 <li key={`note-${log.round}`} className="round-note-item">
@@ -4558,8 +4585,8 @@ function FinalReport({
       ) : null}
 
       {/* Week 4 §3.6 — 체크포인트 학습 질문 회고 (R4·R8·R12) */}
-      {roundReflections && LEARNING_CHECKPOINT_ROUNDS.some((r) => {
-        const ref = roundReflections[r];
+      {LEARNING_CHECKPOINT_ROUNDS.some((r) => {
+        const ref = reportRoundReflections[r];
         return ref && (Number.isInteger(ref.selected) || (ref.open ?? '').trim().length > 0);
       }) ? (
         <details className="reflection-timeline" open>
@@ -4567,14 +4594,14 @@ function FinalReport({
             <strong>체크포인트 학습 질문 회고</strong>
             <span className="reflection-timeline-count">
               {LEARNING_CHECKPOINT_ROUNDS.filter((r) => {
-                const ref = roundReflections[r];
+                const ref = reportRoundReflections[r];
                 return ref && (Number.isInteger(ref.selected) || (ref.open ?? '').trim().length > 0);
               }).length}건
             </span>
           </summary>
           <div className="reflection-timeline-list">
             {LEARNING_CHECKPOINT_ROUNDS.map((r) => {
-              const ref = roundReflections[r];
+              const ref = reportRoundReflections[r];
               if (!ref || (!Number.isInteger(ref.selected) && !(ref.open ?? '').trim())) return null;
               return (
                 <div key={`reflection-${r}`} className="reflection-timeline-item">
@@ -4597,24 +4624,24 @@ function FinalReport({
       <div className="reflection-grid print-hide">
         <label>
           잘한 점
-          <textarea value={reflection.good} onChange={(event) => onReflectionChange('good', event.target.value)} />
+          <textarea value={reportReflection.good} onChange={(event) => onReflectionChange('good', event.target.value)} disabled={Boolean(submission)} />
         </label>
         <label>
           부족한 점
-          <textarea value={reflection.improve} onChange={(event) => onReflectionChange('improve', event.target.value)} />
+          <textarea value={reportReflection.improve} onChange={(event) => onReflectionChange('improve', event.target.value)} disabled={Boolean(submission)} />
         </label>
         <label>
           다음에는 어떻게 할 것인가
-          <textarea value={reflection.next} onChange={(event) => onReflectionChange('next', event.target.value)} />
+          <textarea value={reportReflection.next} onChange={(event) => onReflectionChange('next', event.target.value)} disabled={Boolean(submission)} />
         </label>
       </div>
 
       {/* 출력용 라운드별 메모 (print) */}
-      {roundNotes && Object.keys(roundNotes).filter((k) => (roundNotes[k] ?? '').trim().length > 0).length > 0 ? (
+      {Object.keys(reportRoundNotes).filter((k) => (reportRoundNotes[k] ?? '').trim().length > 0).length > 0 ? (
         <div className="report-section print-only">
           <h3>라운드별 메모</h3>
           {sortedRoundLogs.map((log) => {
-            const note = roundNotes[log.round];
+            const note = reportRoundNotes[log.round];
             if (!note || !note.trim()) return null;
             return (
               <p key={`print-note-${log.round}`}><strong>R{log.round}</strong> {note}</p>
@@ -4625,9 +4652,20 @@ function FinalReport({
 
       <div className="report-section print-only">
         <h3>나의 투자 분석</h3>
-        <p><strong>잘한 점</strong> {reflection.good || '작성 전'}</p>
-        <p><strong>부족한 점</strong> {reflection.improve || '작성 전'}</p>
-        <p><strong>다음에는 어떻게 할 것인가</strong> {reflection.next || '작성 전'}</p>
+        <p><strong>잘한 점</strong> {reportReflection.good || '작성 전'}</p>
+        <p><strong>부족한 점</strong> {reportReflection.improve || '작성 전'}</p>
+        <p><strong>다음에는 어떻게 할 것인가</strong> {reportReflection.next || '작성 전'}</p>
+      </div>
+
+      <div className="submission-box final-submit-box print-hide">
+        <div>
+          <span>최종 보고서 제출</span>
+          <strong>{submission ? '제출이 완료되었습니다.' : '작성한 회고와 투자 기록을 제출합니다.'}</strong>
+          <p>제출 후에는 교사 대시보드의 최종 제출 현황에 반영됩니다.</p>
+        </div>
+        <button className="command primary" type="button" onClick={onSubmitReport} disabled={Boolean(submission)}>
+          {submission ? '제출 완료' : '최종 제출하기'}
+        </button>
       </div>
     </section>
   );
@@ -8100,6 +8138,8 @@ export function App() {
       assets,
       tradeLogs: savedState?.tradeLogs ?? [],
       roundLogs: savedState?.roundLogs ?? [],
+      roundNotes: savedState?.roundNotes ?? {},
+      roundReflections: savedState?.roundReflections ?? {},
       reflection: savedState?.reflection ?? {
         good: '',
         improve: '',
@@ -8148,6 +8188,8 @@ export function App() {
       assets,
       tradeLogs,
       roundLogs,
+      roundNotes,
+      roundReflections,
       reflection,
       // Week 4 §2.2 Phase C — 인플레이션 KPI 전달
       priceIndex,
@@ -8223,7 +8265,7 @@ export function App() {
   function handleDownloadSubmissions() {
     if (!gameFinished || !allSubmissionsComplete) return;
     const rows = [
-      ['순위', '학번', '이름', '제출방식', '투자방식', '모둠', '총자산', '투입원금', '현금성자산', '투자평가금', '예금이자수익', '수익률', '투자성향', '보유자산', '잘한점', '부족한점', '다음계획'],
+      ['순위', '학번', '이름', '제출방식', '투자방식', '모둠', '총자산', '투입원금', '현금성자산', '투자평가금', '예금이자수익', '수익률', '투자성향', '보유자산', '라운드메모', '체크포인트답변', '잘한점', '부족한점', '다음계획'],
       ...[...submissions].sort((a, b) => b.totalAsset - a.totalAsset).map((submission, index) => [
         index + 1,
         submission.studentNumber ?? '',
@@ -8239,6 +8281,8 @@ export function App() {
         `${submission.returnRate.toFixed(1)}%`,
         submission.investorType,
         submission.portfolio?.map((item) => `${item.name} ${item.shares}주 ${Math.round((item.ratio ?? 0) * 100)}%`).join(' / ') ?? '',
+        formatRoundNotesForExport(submission.roundNotes),
+        formatCheckpointReflectionsForExport(submission.roundReflections),
         submission.reflection?.good ?? '',
         submission.reflection?.improve ?? '',
         submission.reflection?.next ?? '',

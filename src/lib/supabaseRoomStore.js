@@ -227,6 +227,8 @@ function fromSubmissionRow(row) {
     portfolio: row.portfolio ?? [],
     tradeLogs: row.trade_logs ?? [],
     roundLogs: row.round_logs ?? [],
+    roundNotes: row.round_notes ?? {},
+    roundReflections: row.round_reflections ?? {},
     reflection: row.reflection ?? {},
     submittedAt: row.submitted_at,
   };
@@ -557,6 +559,8 @@ export async function upsertRemoteSubmission(roomId, report) {
         portfolio: report.portfolio ?? [],
         trade_logs: report.tradeLogs ?? [],
         round_logs: report.roundLogs ?? [],
+        round_notes: report.roundNotes ?? {},
+        round_reflections: report.roundReflections ?? {},
         reflection: report.reflection ?? {},
         submitted_at: toIso(report.submittedAt ?? Date.now()),
       },

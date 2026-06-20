@@ -245,6 +245,8 @@ create table if not exists public.final_submissions (
   portfolio jsonb not null default '[]'::jsonb,
   trade_logs jsonb not null default '[]'::jsonb,
   round_logs jsonb not null default '[]'::jsonb,
+  round_notes jsonb not null default '{}'::jsonb,
+  round_reflections jsonb not null default '{}'::jsonb,
   reflection jsonb not null default '{}'::jsonb,
   submitted_at timestamptz not null default now(),
   unique (room_id, nickname)
@@ -257,6 +259,8 @@ alter table public.final_submissions add column if not exists student_number int
 alter table public.final_submissions add column if not exists team_key text not null default '';
 alter table public.final_submissions add column if not exists team_name text not null default '';
 alter table public.final_submissions add column if not exists submission_method text not null default 'student';
+alter table public.final_submissions add column if not exists round_notes jsonb not null default '{}'::jsonb;
+alter table public.final_submissions add column if not exists round_reflections jsonb not null default '{}'::jsonb;
 
 do $$
 begin
