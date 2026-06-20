@@ -1906,16 +1906,9 @@ function getPaidRoundCount({ gameStarted, round, phase }) {
   return phase === 'setup' ? Math.max(0, round - 1) : round;
 }
 
-function getInvestedPrincipal({ gameStarted, round, phase, memberCount = 1, salaryPaidRounds = null }) {
+function getInvestedPrincipal({ gameStarted, round, phase, memberCount = 1 }) {
   if (!gameStarted) return 0;
-  // 가능하면 실제로 지급된 급여 횟수(salaryPaidRounds)를 기준으로 원금을 계산해
-  //   "phase는 open으로 바뀌었지만 급여 effect가 아직 실행되지 않은 한 박자"에
-  //   원금만 먼저 부풀어 수익률이 잠깐 -%로 표시되는 깜빡임을 막는다.
-  // salaryPaidRounds가 주어지지 않으면(팀 모드/교사 산출) 기존 phase 기반 추정값 사용.
-  const paidCount = Array.isArray(salaryPaidRounds)
-    ? salaryPaidRounds.length
-    : getPaidRoundCount({ gameStarted, round, phase });
-  return INITIAL_CASH + ROUND_SALARY * paidCount * Math.max(1, memberCount);
+  return INITIAL_CASH + ROUND_SALARY * getPaidRoundCount({ gameStarted, round, phase }) * Math.max(1, memberCount);
 }
 
 function getInvestmentReturnRate(totalAsset, investedPrincipal) {
@@ -4680,7 +4673,8 @@ function AssetLearningPanel({ asset }) {
     '전 재산을 넣었을 때 상장폐지나 급락을 버틸 수 있나?',
   ];
 
-  // 상품 설명에 노출할 배당/이자 안내 문구 — 라운드별 배당/쿠폰 구조를 학생이 명시적으로 인지하도록 별도 줄로 표시
+  // Week 4 §2.2 — 상품 설명에 배당/이자 안내를 별도 박스로 노출.
+  // 외부 CSS가 누락된 환경에서도 확실히 보이도록 inline style을 직접 지정.
   let incomeNote = null;
   if (asset.type === 'stock' && asset.dividendTier) {
     const tierLabel = DIVIDEND_TIER_LABELS[asset.dividendTier];
@@ -4746,7 +4740,7 @@ function AssetLearningPanel({ asset }) {
           <p
             className="asset-income-note"
             style={{
-              marginTop: 6,
+              marginTop: 8,
               padding: '8px 10px',
               borderLeft: '3px solid #2563eb',
               background: '#eff6ff',
@@ -4754,6 +4748,7 @@ function AssetLearningPanel({ asset }) {
               fontSize: 13,
               lineHeight: 1.5,
               borderRadius: 4,
+              fontWeight: 500,
             }}
           >
             {incomeNote}
@@ -5334,6 +5329,8 @@ function HostView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debugMode, devRecheckTick, round, phase, gameStarted, salaryPaidRounds, tradeLogs, macroTimeline, activeMacroAlerts, macroAlertsByRound, economicSeed, initialSeedSensitivity]);
   function handleDevRecheck() { setDevRecheckTick((v) => v + 1); }
+  // Week 4 §3.6 — 교사 대시보드에서도 자산 행을 클릭해 기업·자산 분석을 펼쳐 보도록 추가
+  const [hostExpandedAssetId, setHostExpandedAssetId] = useState(null);
   const [eventCategory, setEventCategory] = useState('all');
   const filteredScenarioEvents = eventCategory === 'all'
     ? scenarioEvents
@@ -5669,24 +5666,54 @@ function HostView({
           <div className="stock-table">
             {assets.map((asset) => {
               const change = getChange(asset);
+              const expanded = hostExpandedAssetId === asset.id;
               return (
-                <article className="stock-row" key={asset.id}>
-                  <div className="stock-name">
-                    <span style={{ background: asset.color }} />
-                    <div>
-                      <strong>{asset.name}</strong>
-                      <small>{asset.country} · {assetTypeLabels[asset.type]} · {asset.sector}</small>
+                <div key={asset.id} style={{ display: 'flex', flexDirection: 'column' }}>
+                  <article
+                    className="stock-row"
+                    onClick={() => setHostExpandedAssetId(expanded ? null : asset.id)}
+                    style={{
+                      cursor: 'pointer',
+                      borderBottom: expanded ? '1px solid #2563eb' : undefined,
+                    }}
+                    aria-expanded={expanded}
+                    aria-controls={`host-asset-detail-${asset.id}`}
+                  >
+                    <div className="stock-name">
+                      <span style={{ background: asset.color }} />
+                      <div>
+                        <strong>{asset.name}</strong>
+                        <small>{asset.country} · {assetTypeLabels[asset.type]} · {asset.sector}</small>
+                      </div>
                     </div>
-                  </div>
-                  <Sparkline history={asset.history} color={asset.color} />
-                  <div className="stock-price">
-                    <strong>{formatAssetPrice(asset)}</strong>
-                    <small className={change >= 0 ? 'up' : 'down'}>{formatPercent(change)}</small>
-                  </div>
-                </article>
+                    <Sparkline history={asset.history} color={asset.color} />
+                    <div className="stock-price">
+                      <strong>{formatAssetPrice(asset)}</strong>
+                      <small className={change >= 0 ? 'up' : 'down'}>{formatPercent(change)}</small>
+                    </div>
+                  </article>
+                  {expanded ? (
+                    <div
+                      id={`host-asset-detail-${asset.id}`}
+                      style={{
+                        padding: '12px',
+                        background: '#f8fafc',
+                        border: '1px solid #cbd5e1',
+                        borderTop: 'none',
+                        borderRadius: '0 0 8px 8px',
+                        marginBottom: 8,
+                      }}
+                    >
+                      <AssetLearningPanel asset={asset} />
+                    </div>
+                  ) : null}
+                </div>
               );
             })}
           </div>
+          <p style={{ marginTop: 8, fontSize: 12, color: '#64748b' }}>
+            자산 행을 클릭하면 기업·자산 분석(배당·재무 신호·변동 가능성)을 펼쳐 볼 수 있습니다.
+          </p>
         </section>
       </section>
 
@@ -6448,16 +6475,7 @@ export function App() {
   const studentHoldingsValue = getPortfolioValue(effectivePortfolio, assets);
   const studentTotalAsset = effectiveCash + effectiveDeposit + studentHoldingsValue;
   const activeTeamMemberCount = teamMode ? players.filter((player) => player.teamKey === selectedTeamKey).length : 1;
-  // 개인 모드는 학생 단말이 직접 추적하는 salaryPaidRounds로 원금을 계산해
-  //   급여가 실제로 cash에 들어온 시점과 원금이 늘어나는 시점을 정확히 일치시킨다.
-  // 팀 모드는 교사 측이 라운드 시작 핸들러에서 팀 cash와 phase를 동시에 업데이트하므로 기존 추정값을 그대로 사용.
-  const investedPrincipal = getInvestedPrincipal({
-    gameStarted,
-    round,
-    phase,
-    memberCount: activeTeamMemberCount,
-    salaryPaidRounds: teamMode ? null : salaryPaidRounds,
-  });
+  const investedPrincipal = getInvestedPrincipal({ gameStarted, round, phase, memberCount: activeTeamMemberCount });
   const submittedReport = submissions.find((submission) => submission.nickname === reportNickname);
   const activeStudent = buildStudentSnapshot({
     id: teamMode ? activeTeam.key : 'active-student',
