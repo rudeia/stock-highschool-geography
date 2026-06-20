@@ -5262,6 +5262,8 @@ function HostView({
   onCloseStartIssueChoice,
   onCloseSubmissions,
   onDownloadSubmissions,
+  salaryPaidRounds,
+  tradeLogs,
 }) {
   const eventLimitReached = currentRoundEvents.length >= MAX_EVENTS_PER_ROUND;
   const canRegisterIssue = gameStarted && phase === 'setup' && !eventLimitReached && !roomExpired;
@@ -8081,6 +8083,8 @@ export function App() {
           onCloseStartIssueChoice={() => setStartIssueChoiceOpen(false)}
           onCloseSubmissions={handleCloseSubmissions}
           onDownloadSubmissions={handleDownloadSubmissions}
+          salaryPaidRounds={salaryPaidRounds}
+          tradeLogs={tradeLogs}
         />
       ) : null}
       {view === 'host' && !hostAuthenticated && !joined ? (
