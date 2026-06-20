@@ -350,7 +350,6 @@ function createRandomizedAssets() {
     if (dividendTier === 'stable' || dividendTier === 'highYield') {
       const base = DIVIDEND_TIER_RATES[dividendTier]; // 0.05 또는 0.10
       const jitter = (Math.random() * 2 - 1) * 0.01;  // -0.01 ~ +0.01
-      // 소수점 4자리에서 반올림 (예: 0.0473 → 4.73%) — 너무 깔끔한 5.00% / 10.00%가 안 나오도록 그대로 유지
       dividendRate = Math.max(0, Math.round((base + jitter) * 10000) / 10000);
     }
     return {
@@ -4677,8 +4676,6 @@ function AssetLearningPanel({ asset }) {
     );
   }
   // Week 4 §2.4 — 배당 성향을 주식 티어 라벨(성장주 / 안정주 / 고배당주)로 노출.
-  //   - 게임 시작 시 자산별로 dividendTier가 무작위 배정되어 있음 (성장주 40% / 안정주 40% / 고배당주 20%)
-  //   - 학습자가 퍼센트 수치 없이 '성향'만 보고 분석하도록 단계명만 노출
   //   - 주식: dividendTier → 성장주 / 안정주 / 고배당주
   //   - 채권: 라운드마다 쿠폰 이자가 들어오므로 '이자 지급'으로 별도 라벨
   //   - 그 외(ETF·외환·선물·부동산): '배당 없음'
@@ -4703,8 +4700,7 @@ function AssetLearningPanel({ asset }) {
     '전 재산을 넣었을 때 상장폐지나 급락을 버틸 수 있나?',
   ];
 
-  // Week 4 §2.2 — 종목 설명에 배당/이자 안내를 별도 박스로 노출 (CSS 누락 환경에서도 보이도록 inline-style 사용)
-  //   - dividendRate는 자산 생성 시 ±1% 난수가 더해진 실제 배당율을 그대로 사용
+  // Week 4 §2.2 — 종목 설명에 배당/이자 안내를 별도 박스로 노출 (CSS 누락 환경에서도 보이도록 inline-style)
   let incomeNote = null;
   if (asset.type === 'stock' && asset.dividendTier) {
     const tierLabel = { growth: '성장주', stable: '안정주', highYield: '고배당주' }[asset.dividendTier];
@@ -4873,10 +4869,10 @@ function HomeView({ setView, roomPin, round, totalRounds, gameStarted, playerCou
         <div className="hero-copy">
           <p className="eyebrow">{totalRounds}번의 월급날 · 시작 자본 1억 원 · 매 라운드 월급 {formatWon(ROUND_SALARY)}</p>
           <h1>통장에 1억이 찍혔다.</h1>
-          <p className="hero-subtitle">이제, 한 해 동안 그 돈을 어떻게 굴리시겠어요?</p>
+          <p className="hero-subtitle">화성에 갈까, 땅 밑 지하로 갈까?</p>
           <p className="intro">
             매 라운드 새 뉴스가 도착하고 금리·환율·물가가 움직입니다. 사고팔고 맡긴 선택이 차곡차곡 쌓여
-            12개월 뒤 당신의 한 해를 결말짓습니다. 화성으로 갈지, 지하실로 미끄러질지는 오늘의 결정에 달렸습니다.
+            12개월 뒤 당신의 한 해를 결말짓습니다. 오늘의 결정이 이야기의 결말을 만듭니다.
           </p>
           <div className="hero-actions">
             {!studentJoined ? (
@@ -6327,7 +6323,7 @@ function StudentView({
           </div>
 
           {/* Week 4 §2.3 — 거래 티켓 헤더 직하단에 이 종목의 배당/이자/없음 안내를 큰 박스로 항상 노출
-              퍼센트 수치는 학생에게 노출하지 않고 성향만 표시 (성장주/안정주/고배당주/이자 지급/없음) */}
+              퍼센트 수치는 학생에게 노출하지 않고 성향만 표시 */}
           {(() => {
             let line = null;
             if (selectedAsset.type === 'stock' && selectedAsset.dividendTier) {
@@ -7198,15 +7194,26 @@ export function App() {
         now,
         hostId: hostId || 'geography',
         totalRounds: selectedTotalRounds,
-        baseRate: INITIAL_BASE_RATE,
+        // Week 4 §4.10 — 시드 기반 거시지표(기준금리/환율/실업률)를 supabase에도 저장해
+        //   학생 단말이 join할 때 기본값이 아닌 시드값을 받도록 한다.
+        baseRate: nextEconomicSeed.economicConstitution.baseRate,
         propertyIndex: nextPropertyIndex,
-        exchangeRate: INITIAL_EXCHANGE_RATE,
-        unemploymentRate: INITIAL_UNEMPLOYMENT_RATE,
+        exchangeRate: nextEconomicSeed.economicConstitution.exchangeRate,
+        unemploymentRate: nextEconomicSeed.economicConstitution.unemploymentRate,
         assets: nextAssets,
         mode: selectedRoomMode,
         teams: selectedRoomMode === 'team' ? nextTeams : [],
       });
-      if (bundle) applyRemoteRoomBundle(bundle);
+      if (bundle) {
+        applyRemoteRoomBundle(bundle);
+        // Week 4 §4.10 — bundle 적용 시 supabase에서 누락된 필드(특히 dividendTier)나
+        //   기본값으로 덮어쓰기된 거시지표가 있을 수 있으므로 시드 기반 로컬값으로 다시 복원.
+        setBaseRate(nextEconomicSeed.economicConstitution.baseRate);
+        setExchangeRate(nextEconomicSeed.economicConstitution.exchangeRate);
+        setUnemploymentRate(nextEconomicSeed.economicConstitution.unemploymentRate);
+        setAssets(nextAssets); // dividendTier·dividendRate 포함된 로컬 자산으로 복원
+        setEconomicSeed(nextEconomicSeed);
+      }
     } catch (error) {
       setSyncStatus(`수업 방 생성 실패: ${error.message}`);
     }

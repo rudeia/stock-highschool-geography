@@ -21,7 +21,16 @@ function toAssetRow(roomId, asset) {
     delisted: Boolean(asset.delisted),
     delisted_round: asset.delistedRound ?? null,
     financial_profile: asset.financialProfile ?? asset.financials?.profile ?? null,
-    financials: { ...(asset.financials ?? {}), _size: asset.size ?? null },
+    // Week 4 §4.11 — SQL 스키마 변경 없이 financials(JSONB) 컬럼에
+    //   배당 티어·배당율·쿠폰율을 함께 넣어 두면 fromAssetRow에서 그대로 복원할 수 있다.
+    //   기존 financials 객체와 충돌하지 않도록 prefix '_'를 붙여 메타데이터로 보관.
+    financials: {
+      ...(asset.financials ?? {}),
+      _size: asset.size ?? null,
+      _dividendTier: asset.dividendTier ?? null,
+      _dividendRate: asset.dividendRate ?? null,
+      _couponRate: asset.couponRate ?? null,
+    },
     negative_streak: asset.negativeStreak ?? 0,
   };
 }
@@ -37,6 +46,10 @@ function fromAssetRow(row) {
     price: Number(row.price),
     faceValue: row.face_value != null ? Number(row.face_value) : undefined,
     size: row.financials?._size ?? undefined,
+    // Week 4 §4.11 — financials 메타에 끼워 둔 배당/쿠폰 정보를 자산 필드로 복원
+    dividendTier: row.financials?._dividendTier ?? null,
+    dividendRate: row.financials?._dividendRate != null ? Number(row.financials._dividendRate) : 0,
+    couponRate: row.financials?._couponRate != null ? Number(row.financials._couponRate) : undefined,
     history: row.history?.length ? row.history.map(Number) : [Number(row.price)],
     delisted: row.delisted,
     delistedRound: row.delisted_round ?? undefined,
