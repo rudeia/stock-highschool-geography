@@ -1906,9 +1906,16 @@ function getPaidRoundCount({ gameStarted, round, phase }) {
   return phase === 'setup' ? Math.max(0, round - 1) : round;
 }
 
-function getInvestedPrincipal({ gameStarted, round, phase, memberCount = 1 }) {
+function getInvestedPrincipal({ gameStarted, round, phase, memberCount = 1, salaryPaidRounds = null }) {
   if (!gameStarted) return 0;
-  return INITIAL_CASH + ROUND_SALARY * getPaidRoundCount({ gameStarted, round, phase }) * Math.max(1, memberCount);
+  // 가능하면 실제로 지급된 급여 횟수(salaryPaidRounds)를 기준으로 원금을 계산해
+  //   "phase는 open으로 바뀌었지만 급여 effect가 아직 실행되지 않은 한 박자"에
+  //   원금만 먼저 부풀어 수익률이 잠깐 -%로 표시되는 깜빡임을 막는다.
+  // salaryPaidRounds가 주어지지 않으면(팀 모드/교사 산출) 기존 phase 기반 추정값 사용.
+  const paidCount = Array.isArray(salaryPaidRounds)
+    ? salaryPaidRounds.length
+    : getPaidRoundCount({ gameStarted, round, phase });
+  return INITIAL_CASH + ROUND_SALARY * paidCount * Math.max(1, memberCount);
 }
 
 function getInvestmentReturnRate(totalAsset, investedPrincipal) {
@@ -4673,6 +4680,23 @@ function AssetLearningPanel({ asset }) {
     '전 재산을 넣었을 때 상장폐지나 급락을 버틸 수 있나?',
   ];
 
+  // 상품 설명에 노출할 배당/이자 안내 문구 — 라운드별 배당/쿠폰 구조를 학생이 명시적으로 인지하도록 별도 줄로 표시
+  let incomeNote = null;
+  if (asset.type === 'stock' && asset.dividendTier) {
+    const tierLabel = DIVIDEND_TIER_LABELS[asset.dividendTier];
+    const tierRate = DIVIDEND_TIER_RATES[asset.dividendTier];
+    if (asset.dividendTier === 'growth') {
+      incomeNote = `배당: ${tierLabel}. 4·8·12라운드 종료 시점에도 배당 지급이 없고, 수익은 가격 변동(자본이득)만으로 발생합니다.`;
+    } else {
+      incomeNote = `배당: ${tierLabel}. 4·8·12라운드 종료 시점에 보유 중이면 가격의 약 ${(tierRate * 100).toFixed(0)}%가 배당으로 지급되고, 다음 라운드 시작 가격은 배당의 절반만큼 배당락으로 내려갑니다.`;
+    }
+  } else if (asset.type === 'bond' && asset.couponRate) {
+    const coupon = Math.round(asset.faceValue * asset.couponRate);
+    incomeNote = `쿠폰: 라운드마다 액면가 ${formatWon(asset.faceValue)} 기준 단리 ${(asset.couponRate * 100).toFixed(1)}% 이자가 지급됩니다 (1주 보유 시 매 라운드 +${formatWon(coupon)}).`;
+  } else if (asset.type !== 'stock' && asset.type !== 'bond') {
+    incomeNote = '배당·이자 없음. 수익은 오로지 가격 변동(자본이득)만으로 결정됩니다.';
+  }
+
   return (
     <section className="asset-learning-panel" aria-label={`${asset.name} 분석`}>
       <div className="panel-heading split">
@@ -4718,6 +4742,23 @@ function AssetLearningPanel({ asset }) {
           ) : null}
         </div>
         <p>{profile.story}</p>
+        {incomeNote ? (
+          <p
+            className="asset-income-note"
+            style={{
+              marginTop: 6,
+              padding: '8px 10px',
+              borderLeft: '3px solid #2563eb',
+              background: '#eff6ff',
+              color: '#1e3a8a',
+              fontSize: 13,
+              lineHeight: 1.5,
+              borderRadius: 4,
+            }}
+          >
+            {incomeNote}
+          </p>
+        ) : null}
       </article>
 
       <div className="metric-grid" aria-label={`${asset.name} 간단 재무표`}>
@@ -6407,7 +6448,16 @@ export function App() {
   const studentHoldingsValue = getPortfolioValue(effectivePortfolio, assets);
   const studentTotalAsset = effectiveCash + effectiveDeposit + studentHoldingsValue;
   const activeTeamMemberCount = teamMode ? players.filter((player) => player.teamKey === selectedTeamKey).length : 1;
-  const investedPrincipal = getInvestedPrincipal({ gameStarted, round, phase, memberCount: activeTeamMemberCount });
+  // 개인 모드는 학생 단말이 직접 추적하는 salaryPaidRounds로 원금을 계산해
+  //   급여가 실제로 cash에 들어온 시점과 원금이 늘어나는 시점을 정확히 일치시킨다.
+  // 팀 모드는 교사 측이 라운드 시작 핸들러에서 팀 cash와 phase를 동시에 업데이트하므로 기존 추정값을 그대로 사용.
+  const investedPrincipal = getInvestedPrincipal({
+    gameStarted,
+    round,
+    phase,
+    memberCount: activeTeamMemberCount,
+    salaryPaidRounds: teamMode ? null : salaryPaidRounds,
+  });
   const submittedReport = submissions.find((submission) => submission.nickname === reportNickname);
   const activeStudent = buildStudentSnapshot({
     id: teamMode ? activeTeam.key : 'active-student',
