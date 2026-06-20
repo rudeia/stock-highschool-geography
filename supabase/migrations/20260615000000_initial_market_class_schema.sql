@@ -81,6 +81,7 @@ create table if not exists public.student_states (
   deposit_principal bigint not null default 0,
   deposit_interest_earned bigint not null default 0,
   portfolio jsonb not null default '{}'::jsonb,
+  last_dividend_round integer not null default 0,
   trade_logs jsonb not null default '[]'::jsonb,
   round_logs jsonb not null default '[]'::jsonb,
   reflection jsonb not null default '{}'::jsonb,
@@ -94,6 +95,7 @@ alter table public.student_states add column if not exists team_key text not nul
 alter table public.student_states add column if not exists deposit_principal bigint not null default 0;
 alter table public.student_states add column if not exists deposit_interest_earned bigint not null default 0;
 alter table public.student_states add column if not exists portfolio jsonb not null default '{}'::jsonb;
+alter table public.student_states add column if not exists last_dividend_round integer not null default 0;
 alter table public.student_states add column if not exists trade_logs jsonb not null default '[]'::jsonb;
 alter table public.student_states add column if not exists round_logs jsonb not null default '[]'::jsonb;
 alter table public.student_states add column if not exists reflection jsonb not null default '{}'::jsonb;
@@ -109,6 +111,7 @@ create table if not exists public.team_accounts (
   deposit bigint not null default 0,
   deposit_interest_earned bigint not null default 0,
   portfolio jsonb not null default '{}'::jsonb,
+  last_dividend_round integer not null default 0,
   trade_holder text,
   trade_holder_expires_at timestamptz,
   negative_rounds integer not null default 0,
@@ -116,6 +119,8 @@ create table if not exists public.team_accounts (
   updated_at timestamptz not null default now(),
   unique (room_id, team_key)
 );
+
+alter table public.team_accounts add column if not exists last_dividend_round integer not null default 0;
 
 create table if not exists public.assets (
   id uuid primary key default gen_random_uuid(),

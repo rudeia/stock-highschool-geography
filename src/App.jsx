@@ -81,8 +81,9 @@ const DIRECT_REPEATED_IMPACT_THRESHOLD = 0.08;
 const MIN_INDIRECT_REPEATED_EVENT_IMPACT = 0.05;
 const MAX_INDIRECT_REPEATED_EVENT_IMPACT = 0.12;
 const PASSIVE_MARKET_MOVE = 0.05;
-// Week 2 E — 배당 시스템 상수
-const DIVIDEND_ROUNDS = [4, 8, 12]; // 배당 지급 라운드 (지정 라운드에서만 작동)
+// 배당 지급일과 학습 회고 체크포인트는 서로 독립적으로 관리한다.
+const DIVIDEND_ROUNDS = [3, 6, 9, 11];
+const LEARNING_CHECKPOINT_ROUNDS = [4, 8, 12];
 
 // Week 4 §3.6 — 체크포인트 라운드 학습 질문 (객관식 + 자유 서술)
 const REFLECTION_PROMPTS = {
@@ -131,9 +132,9 @@ const REFLECTION_PROMPTS = {
   },
 };
 const REFLECTION_OPEN_MAX_BYTES = 200; // 자유 서술 200바이트 (한글 약 66자)
-const EX_DIVIDEND_RATIO = 0.5; // 배당락 비율 (배당금의 절반만큼 주가 하락)
+const EX_DIVIDEND_RATIO = 0.5;
 const DIVIDEND_TIER_RATES = { growth: 0, stable: 0.05, highYield: 0.10 };
-const DIVIDEND_TIER_LABELS = { growth: '성장주(배당 없음)', stable: '안정주(5%)', highYield: '고배당주(10%)' };
+const DIVIDEND_TIER_LABELS = { growth: '성장주(배당 없음)', stable: '안정주(기준 5%)', highYield: '고배당주(기준 10%)' };
 const DIVIDEND_TIER_DISTRIBUTION = [
   { tier: 'growth', weight: 0.40 },
   { tier: 'stable', weight: 0.40 },
@@ -406,21 +407,25 @@ function applyTriggerSensitivity(macroSnapshot, sensitivity) {
   };
 }
 
-// Week 2 E — 배당 정산 계산: 배당 라운드 종료 시점 보유 중인 주식에 지급 (A안: 연속 보유 요건 폐지)
-function computeDividendPayout(portfolio, assets, currentRound) {
+function getPortfolioShares(portfolio, assetId) {
+  const holding = portfolio?.[assetId];
+  if (typeof holding === 'number') return holding;
+  return Number(holding?.shares ?? 0);
+}
+
+// 배당일 라운드 마감 시점에 보유한 주식 수량을 기준으로 배당을 계산한다.
+function computeDividendPayout(currentPortfolio, assets, currentRound) {
   const result = { totalDividend: 0, exDividendByAsset: {}, breakdown: [] };
   if (!DIVIDEND_ROUNDS.includes(currentRound)) return result;
   for (const asset of assets) {
     if (asset.type !== 'stock' || asset.delisted) continue;
-    const shares = portfolio[asset.id]?.shares ?? 0;
+    const shares = getPortfolioShares(currentPortfolio, asset.id);
     if (shares <= 0) continue;
     const rate = asset.dividendRate ?? 0;
     if (rate <= 0) continue;
-    // 가격 변동 후 기준
     const dividendPerShare = Math.round(asset.price * rate);
-    const totalDividend = dividendPerShare * shares;
+    const totalDividend = Math.round(dividendPerShare * shares);
     if (totalDividend <= 0) continue;
-    // 배당락: 배당금의 절반만큼 주가 하락 (1주당 가격에 적용)
     const exDividendDrop = Math.round(dividendPerShare * EX_DIVIDEND_RATIO);
     result.totalDividend += totalDividend;
     result.exDividendByAsset[asset.id] = exDividendDrop;
@@ -436,6 +441,27 @@ function computeDividendPayout(portfolio, assets, currentRound) {
     });
   }
   return result;
+}
+
+function formatDividendShares(shares) {
+  return Number(shares).toLocaleString('ko-KR', { maximumFractionDigits: 1 });
+}
+
+function buildDividendLogs(breakdown, currentRound, existingLogs = []) {
+  return breakdown.map((entry, index) => buildTradeLog({
+    round: currentRound,
+    type: '배당 지급',
+    detail: `${currentRound}라운드 ${entry.name} · 마감 보유 ${formatDividendShares(entry.shares)}주 · ${DIVIDEND_TIER_LABELS[entry.tier]} · 배당 +${formatWon(entry.totalDividend)} · 배당락 -${formatWon(entry.exDividendDrop)}/주`,
+    sequence: existingLogs.length + index,
+    now: Date.now(),
+  }));
+}
+
+function mergeExDividendDrops(target, source) {
+  for (const [assetId, drop] of Object.entries(source)) {
+    target[assetId] = Math.max(target[assetId] ?? 0, drop);
+  }
+  return target;
 }
 
 // Week 2 E — 배당락을 자산 가격에 적용 + 히스토리 마지막 값도 동기화
@@ -2501,11 +2527,11 @@ function runRegressionChecks({ round, phase, gameStarted, salaryPaidRounds, trad
     }
   }
 
-  // (2) 배당 지급 검사 — R4/R8/R12 종료 후, 보유 자산에 배당 가능 종목이 있으면 tradeLogs에 배당 로그 존재
+  // (2) 배당 지급 검사 — 지정 배당일 종료 후 배당 로그 확인
   {
-    const checkpoints = [4, 8, 12].filter((r) => r < round || (r === round && phase === 'closed'));
+    const checkpoints = DIVIDEND_ROUNDS.filter((r) => r < round || (r === round && phase === 'closed'));
     if (!gameStarted || checkpoints.length === 0) {
-      checks.push({ id: 'dividend', label: '배당 지급 (R4·R8·R12)', status: 'ok', detail: '아직 배당 체크포인트 미도달' });
+      checks.push({ id: 'dividend', label: '배당 지급 (R3·R6·R9·R11)', status: 'ok', detail: '아직 배당 체크포인트 미도달' });
     } else {
       // 배당 가능 자산 = stock + dividendTier !== 'growth'
       const dividendAssets = (assets || []).filter((a) => a.type === 'stock' && a.dividendTier && a.dividendTier !== 'growth');
@@ -2517,9 +2543,9 @@ function runRegressionChecks({ round, phase, gameStarted, salaryPaidRounds, trad
         return msg.includes('배당 지급');
       });
       if (dividendLogs.length === 0 && dividendAssetIds.size > 0) {
-        checks.push({ id: 'dividend', label: '배당 지급 (R4·R8·R12)', status: 'warn', detail: `체크포인트 ${checkpoints.length}회 통과했으나 배당 로그 없음 (보유분 없음 가능)` });
+        checks.push({ id: 'dividend', label: '배당 지급 (R3·R6·R9·R11)', status: 'warn', detail: `체크포인트 ${checkpoints.length}회 통과했으나 배당 로그 없음 (마감 보유분 없음 가능)` });
       } else {
-        checks.push({ id: 'dividend', label: '배당 지급 (R4·R8·R12)', status: 'ok', detail: `배당 로그 ${dividendLogs.length}건 확인` });
+        checks.push({ id: 'dividend', label: '배당 지급 (R3·R6·R9·R11)', status: 'ok', detail: `배당 로그 ${dividendLogs.length}건 확인` });
       }
     }
   }
@@ -3064,7 +3090,7 @@ function ReflectionPrompt({ round, reflection, onReflectionChange, readOnly = fa
 }
 
 function InflationCheckpointCard({ round, totalAsset, investedPrincipal, priceIndex, aggregateReturn, compact = false, roundReflection = null, onRoundReflectionChange = null, macroTimeline = null }) {
-  if (!DIVIDEND_ROUNDS.includes(round)) return null;
+  if (!LEARNING_CHECKPOINT_ROUNDS.includes(round)) return null;
   if (priceIndex == null || priceIndex <= 0) return null;
   if (investedPrincipal == null || investedPrincipal <= 0) return null;
 
@@ -3474,6 +3500,7 @@ function createTeamAccounts(funded) {
     deposit: 0,
     depositInterestEarned: 0,
     portfolio: {},
+    lastDividendRound: 0,
     tradeHolder: null,
     tradeHolderExpiresAt: null,
     negativeRounds: 0,
@@ -3488,6 +3515,7 @@ function fundTeamAccounts(teamAccounts) {
     deposit: 0,
     depositInterestEarned: 0,
     portfolio: {},
+    lastDividendRound: 0,
     tradeHolder: null,
     tradeHolderExpiresAt: null,
     negativeRounds: 0,
@@ -4488,7 +4516,7 @@ function FinalReport({
       ) : null}
 
       {/* Week 4 §3.6 — 체크포인트 학습 질문 회고 (R4·R8·R12) */}
-      {roundReflections && DIVIDEND_ROUNDS.some((r) => {
+      {roundReflections && LEARNING_CHECKPOINT_ROUNDS.some((r) => {
         const ref = roundReflections[r];
         return ref && (Number.isInteger(ref.selected) || (ref.open ?? '').trim().length > 0);
       }) ? (
@@ -4496,14 +4524,14 @@ function FinalReport({
           <summary>
             <strong>체크포인트 학습 질문 회고</strong>
             <span className="reflection-timeline-count">
-              {DIVIDEND_ROUNDS.filter((r) => {
+              {LEARNING_CHECKPOINT_ROUNDS.filter((r) => {
                 const ref = roundReflections[r];
                 return ref && (Number.isInteger(ref.selected) || (ref.open ?? '').trim().length > 0);
               }).length}건
             </span>
           </summary>
           <div className="reflection-timeline-list">
-            {DIVIDEND_ROUNDS.map((r) => {
+            {LEARNING_CHECKPOINT_ROUNDS.map((r) => {
               const ref = roundReflections[r];
               if (!ref || (!Number.isInteger(ref.selected) && !(ref.open ?? '').trim())) return null;
               return (
@@ -4705,9 +4733,9 @@ function AssetLearningPanel({ asset }) {
   if (asset.type === 'stock' && asset.dividendTier) {
     const tierLabel = { growth: '성장주', stable: '안정주', highYield: '고배당주' }[asset.dividendTier];
     if (asset.dividendTier === 'growth') {
-      incomeNote = `배당 성향: ${tierLabel}. 4·8·12라운드 종료 시점에도 배당 지급이 없고, 수익은 가격 변동(자본이득)만으로 발생합니다.`;
+      incomeNote = `배당 성향: ${tierLabel}. 3·6·9·11라운드 종료 시점에도 배당 지급이 없고, 수익은 가격 변동(자본이득)만으로 발생합니다.`;
     } else {
-      incomeNote = `배당 성향: ${tierLabel}. 4·8·12라운드 종료 시점에 보유 중이면 가격에 따라 배당이 지급되고, 다음 라운드 시작 가격은 배당의 절반만큼 배당락으로 내려갑니다.`;
+      incomeNote = `배당 성향: ${tierLabel}. 3·6·9·11라운드 마감 때 보유한 수량을 기준으로 배당이 지급되며, 주가는 1주당 배당금의 50%만큼 배당락이 적용됩니다.`;
     }
   } else if (asset.type === 'bond' && asset.couponRate) {
     const coupon = Math.round(asset.faceValue * asset.couponRate);
@@ -4734,7 +4762,7 @@ function AssetLearningPanel({ asset }) {
           {asset.type === 'stock' && asset.dividendTier ? (
             <span
               className={`dividend-tier-badge tier-${asset.dividendTier}`}
-              title="4·8·12라운드 종료 시점 보유 시 배당 지급 (가격 변동 후 기준, 배당락 = 배당의 절반)"
+              title="3·6·9·11라운드 마감 보유 수량 기준 배당 지급, 배당락 50%"
               style={{ marginTop: 4 }}
             >
               배당: {DIVIDEND_TIER_LABELS[asset.dividendTier]}
@@ -5639,7 +5667,7 @@ function HostView({
           currentRound={round}
         />
         {/* Week 4 §2.2 Phase B — 호스트에도 체크포인트 카드 (학생 평균 기준) */}
-        {phase === 'closed' && DIVIDEND_ROUNDS.includes(round) && players?.length > 0 ? (
+        {phase === 'closed' && LEARNING_CHECKPOINT_ROUNDS.includes(round) && players?.length > 0 ? (
           (() => {
             const avgTotalAsset = players.reduce((sum, p) => sum + (p.totalAsset ?? INITIAL_CASH), 0) / players.length;
             const investedPerHead = getInvestedPrincipal({ gameStarted: true, round, phase: 'closed', memberCount: 1 });
@@ -6086,7 +6114,7 @@ function StudentView({
         <MacroAlertBanner alerts={activeMacroAlerts} compact />
         <IssueTicker events={currentRoundEvents} phase={phase} compact />
         {/* Week 4 §2.2 Phase B — 인플레이션 체크포인트 카드 (R4·R8·R12 종료 시) */}
-        {phase === 'closed' && DIVIDEND_ROUNDS.includes(round) ? (
+        {phase === 'closed' && LEARNING_CHECKPOINT_ROUNDS.includes(round) ? (
           <InflationCheckpointCard
             round={round}
             totalAsset={totalAsset}
@@ -6305,7 +6333,7 @@ function StudentView({
                 </span>
               ) : null}
               {selectedAsset.type === 'stock' && selectedAsset.dividendTier ? (
-                <span className={`dividend-tier-badge tier-${selectedAsset.dividendTier}`} title="4·8·12라운드 종료 시점에 보유 중이면 배당 지급 (가격 변동 후 기준, 배당락 = 배당의 절반)">
+                <span className={`dividend-tier-badge tier-${selectedAsset.dividendTier}`} title="3·6·9·11라운드 마감 보유 수량 기준 배당 지급, 배당락 50%">
                   배당: {DIVIDEND_TIER_LABELS[selectedAsset.dividendTier]}
                 </span>
               ) : null}
@@ -6329,9 +6357,9 @@ function StudentView({
             if (selectedAsset.type === 'stock' && selectedAsset.dividendTier) {
               const tierLabel = { growth: '성장주', stable: '안정주', highYield: '고배당주' }[selectedAsset.dividendTier];
               if (selectedAsset.dividendTier === 'growth') {
-                line = `이 종목은 ${tierLabel} — 4·8·12라운드에도 배당이 없습니다. 수익은 가격 변동(자본이득)만으로 발생.`;
+                line = `이 종목은 ${tierLabel} — 3·6·9·11라운드에도 배당이 없습니다. 수익은 가격 변동(자본이득)만으로 발생.`;
               } else {
-                line = `이 종목은 ${tierLabel} — 4·8·12라운드 종료 시점에 보유 중이면 배당이 지급되고, 다음 라운드 시작가는 배당의 ½만큼 배당락이 적용됩니다.`;
+                line = `이 종목은 ${tierLabel} — 3·6·9·11라운드 마감 때 보유한 수량으로 배당이 지급되며, 주가는 1주당 배당금의 50%만큼 내려갑니다.`;
               }
             } else if (selectedAsset.type === 'bond' && selectedAsset.couponRate) {
               const coupon = Math.round(selectedAsset.faceValue * selectedAsset.couponRate);
@@ -6372,11 +6400,11 @@ function StudentView({
                 <span className="dividend-banner-text">
                   {isToday ? (
                     <>
-                      <strong>이번 라운드가 배당 지급일</strong>입니다. 장 마감 시점에 보유 중인 주식의 티어대로 배당이 입금되며, 배당락(배당금의 ½)도 함께 적용됩니다.
+                      <strong>이번 라운드가 배당 지급일</strong>입니다. 장 마감 때 보유한 수량으로 배당이 입금되며, 1주당 배당금의 50%만큼 배당락도 함께 적용됩니다.
                     </>
                   ) : (
                     <>
-                      다음 배당까지 <strong>{distance}라운드</strong> 남았습니다. {nextDividendRound}라운드 마감 시점에 보유 중인 주식만 배당 자격.
+                      다음 배당까지 <strong>{distance}라운드</strong> 남았습니다. {nextDividendRound}라운드 마감 때 보유한 주식이 배당 대상입니다.
                     </>
                   )}
                 </span>
@@ -6494,6 +6522,7 @@ export function App() {
   const [depositInterestEarned, setDepositInterestEarned] = useState(0);
   const [initialCapitalGranted, setInitialCapitalGranted] = useState(false);
   const [portfolio, setPortfolio] = useState({});
+  const [lastDividendRound, setLastDividendRound] = useState(0);
   const [teamAccounts, setTeamAccounts] = useState(createDefaultTeamAccounts);
   const [selectedTeamKey, setSelectedTeamKey] = useState(teamTemplates[0].key);
   const [selectedAssetId, setSelectedAssetId] = useState(initialTradableAssets[0].id);
@@ -6732,6 +6761,7 @@ export function App() {
       depositPrincipal: teamMode ? 0 : depositPrincipal,
       depositInterestEarned: effectiveDepositInterestEarned,
       portfolio: effectivePortfolio,
+      lastDividendRound: teamMode ? activeTeam.lastDividendRound ?? 0 : lastDividendRound,
       tradeLogs,
       roundLogs,
       reflection,
@@ -6752,7 +6782,23 @@ export function App() {
     }, 600);
 
     return () => window.clearTimeout(studentStateSaveTimer.current);
-  }, [depositPrincipal, effectiveCash, effectiveDeposit, effectiveDepositInterestEarned, effectivePortfolio, gameStarted, initialCapitalGranted, joined, nickname, reflection, remoteRoomId, roundLogs, roundNotes, roundReflections, salaryPaidRounds, selectedTeamKey, studentNumber, studentPasscodeHash, teamMode, tradeLogs]);
+  }, [activeTeam.lastDividendRound, depositPrincipal, effectiveCash, effectiveDeposit, effectiveDepositInterestEarned, effectivePortfolio, gameStarted, initialCapitalGranted, joined, lastDividendRound, nickname, reflection, remoteRoomId, roundLogs, roundNotes, roundReflections, salaryPaidRounds, selectedTeamKey, studentNumber, studentPasscodeHash, teamMode, tradeLogs]);
+
+  useEffect(() => {
+    if (!joined || teamMode || phase !== 'closed') return;
+    const remoteState = studentStates.find((state) => Number(state.studentNumber) === Number(studentNumber));
+    if (!remoteState) return;
+
+    const hasNewDividend = Number(remoteState.lastDividendRound ?? 0) > lastDividendRound;
+    if (!hasNewDividend) return;
+    const timer = window.setTimeout(() => {
+      setCash(Number(remoteState.cash ?? 0));
+      setPortfolio(remoteState.portfolio ?? {});
+      setTradeLogs(remoteState.tradeLogs ?? []);
+      setLastDividendRound(Number(remoteState.lastDividendRound ?? 0));
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [joined, lastDividendRound, phase, studentNumber, studentStates, teamMode]);
 
   useEffect(() => {
     // Week 3 H — 생활소득 신뢰성 패치
@@ -6842,6 +6888,7 @@ export function App() {
     setDepositPrincipal(savedState.depositPrincipal ?? 0);
     setDepositInterestEarned(savedState.depositInterestEarned ?? 0);
     setPortfolio(savedState.portfolio ?? {});
+    setLastDividendRound(Number(savedState.lastDividendRound ?? 0));
     setTradeLogs(savedState.tradeLogs ?? []);
     setRoundLogs(savedState.roundLogs ?? []);
     setSalaryPaidRounds(savedState.salaryPaidRounds ?? []);
@@ -7165,6 +7212,7 @@ export function App() {
     setDepositInterestEarned(0);
     setInitialCapitalGranted(false);
     setPortfolio(nextRoom.portfolio);
+    setLastDividendRound(0);
     setTeamAccounts(nextTeams);
     setSelectedTeamKey(teamTemplates[0].key);
     setSelectedAssetId(nextRoom.selectedAssetId);
@@ -7408,6 +7456,16 @@ export function App() {
   async function handleCloseRound() {
     if (roomExpired || phase !== 'open') return;
 
+    let latestStudentStates = studentStates;
+    if (!teamMode && remoteRoomId) {
+      try {
+        latestStudentStates = await fetchRemoteStudentStates(remoteRoomId);
+        setStudentStates(latestStudentStates);
+      } catch (error) {
+        setSyncStatus(`학생 계좌 확인 실패: ${error.message}`);
+      }
+    }
+
     const eventsForResolution = currentRoundEvents.filter((event) => event.published);
     const conflictOutcomeMap = getConflictOutcomeMap(eventsForResolution);
     const initialResolvedEvents = eventsForResolution.map((event) => {
@@ -7644,65 +7702,91 @@ export function App() {
       }
     }
 
-    // ── Week 2 E — 배당 정산 (4·8·12라운드, 종료 시점 보유, 가격 변동 후 기준, 배당락 ½) ──
-    let nextAssetsAfterDividend = nextAssets;
+    // 지정 배당일의 장 마감 보유 수량으로 정산한다.
+    const isDividendRound = DIVIDEND_ROUNDS.includes(round);
+    const mergedExDividend = {};
     const dividendBreakdown = [];
-    let dividendApplied = false;
-    if (DIVIDEND_ROUNDS.includes(round)) {
-      dividendApplied = true;
-      if (!teamMode) {
-        // 솔로 모드: 라운드 종료 시점 본인 보유 기준으로 정산
-        const payout = computeDividendPayout(portfolio, nextAssets, round);
-        if (payout.totalDividend > 0) {
-          setCash((current) => current + payout.totalDividend);
-          nextAssetsAfterDividend = applyExDividendDrop(nextAssets, payout.exDividendByAsset);
-          for (const entry of payout.breakdown) {
-            addTradeLog(
-              '배당 지급',
-              `${round}라운드 ${entry.name} ${entry.shares}주 · ${DIVIDEND_TIER_LABELS[entry.tier]} · 배당 +${formatWon(entry.totalDividend)} · 배당락 -${formatWon(entry.exDividendDrop)}/주`,
-            );
-            dividendBreakdown.push(entry);
-          }
-        }
-      } else {
-        // 팀 모드: 팀별 배당 정산
-        const teamDividendUpdates = nextTeamAccounts.map((team) => {
-          if (team.bankrupt) return { team, breakdown: [], exDividend: {} };
-          const payout = computeDividendPayout(team.portfolio, nextAssets, round);
-          return {
-            team: payout.totalDividend > 0 ? { ...team, cash: team.cash + payout.totalDividend } : team,
-            breakdown: payout.breakdown,
-            exDividend: payout.exDividendByAsset,
-          };
-        });
-        // 배당락은 자산 한 벌에 모두 누적 (팀별 배당이 같은 자산에 대해 발생하면 가장 큰 배당락 1회만 적용)
-        const mergedExDividend = {};
-        for (const update of teamDividendUpdates) {
-          for (const [assetId, drop] of Object.entries(update.exDividend)) {
-            mergedExDividend[assetId] = Math.max(mergedExDividend[assetId] ?? 0, drop);
-          }
-        }
-        nextAssetsAfterDividend = applyExDividendDrop(nextAssets, mergedExDividend);
-        const dividendUpdatedTeams = teamDividendUpdates.map((u) => u.team);
-        setTeamAccounts(dividendUpdatedTeams);
-        // 본인 팀 배당 로그
-        const myUpdate = teamDividendUpdates.find((u) => u.team.key === selectedTeamKey);
-        if (myUpdate) {
-          for (const entry of myUpdate.breakdown) {
-            addTradeLog(
-              '배당 지급',
-              `${round}라운드 ${entry.name} ${entry.shares}주 · ${DIVIDEND_TIER_LABELS[entry.tier]} · 배당 +${formatWon(entry.totalDividend)} · 배당락 -${formatWon(entry.exDividendDrop)}/주`,
-            );
-            dividendBreakdown.push(entry);
-          }
-        }
-      }
-      // 배당락이 실제 적용된 자산 상태로 동기화
-      if (nextAssetsAfterDividend !== nextAssets) {
-        setAssets(nextAssetsAfterDividend);
+    let localDividendAmount = 0;
+    let nextStudentStatesAfterDividend = teamMode ? latestStudentStates : latestStudentStates.map((state) => {
+      const currentPortfolio = state.portfolio ?? {};
+      const alreadyPaid = Number(state.lastDividendRound ?? 0) === round;
+      const payout = alreadyPaid
+        ? { totalDividend: 0, exDividendByAsset: {}, breakdown: [] }
+        : computeDividendPayout(currentPortfolio, nextAssets, round);
+      const dividendLogs = buildDividendLogs(payout.breakdown, round, state.tradeLogs ?? []);
+      mergeExDividendDrops(mergedExDividend, payout.exDividendByAsset);
+      return {
+        ...state,
+        cash: Number(state.cash ?? 0) + payout.totalDividend,
+        lastDividendRound: isDividendRound ? round : Number(state.lastDividendRound ?? 0),
+        tradeLogs: [...dividendLogs, ...(state.tradeLogs ?? [])],
+        updatedAt: Date.now(),
+      };
+    });
+
+    const nextTeamAccountsAfterDividend = nextTeamAccounts.map((team) => {
+      const currentPortfolio = team.portfolio ?? {};
+      const alreadyPaid = Number(team.lastDividendRound ?? 0) === round;
+      const payout = team.bankrupt || alreadyPaid
+        ? { totalDividend: 0, exDividendByAsset: {}, breakdown: [] }
+        : computeDividendPayout(currentPortfolio, nextAssets, round);
+      mergeExDividendDrops(mergedExDividend, payout.exDividendByAsset);
+      if (team.key === selectedTeamKey) dividendBreakdown.push(...payout.breakdown);
+      return {
+        ...team,
+        cash: Number(team.cash ?? 0) + payout.totalDividend,
+        lastDividendRound: isDividendRound ? round : Number(team.lastDividendRound ?? 0),
+      };
+    });
+
+    if (teamMode && dividendBreakdown.length) {
+      const teamDividendLogs = buildDividendLogs(dividendBreakdown, round, tradeLogs);
+      setTradeLogs((current) => [...teamDividendLogs, ...current]);
+    }
+
+    // 로컬 개인 연습 또는 현재 접속 학생 화면도 즉시 같은 결과를 반영한다.
+    if (!teamMode && joined) {
+      const localPayout = lastDividendRound === round
+        ? { totalDividend: 0, exDividendByAsset: {}, breakdown: [] }
+        : computeDividendPayout(portfolio, nextAssets, round);
+      const localDividendLogs = buildDividendLogs(localPayout.breakdown, round, tradeLogs);
+      localDividendAmount = localPayout.totalDividend;
+      mergeExDividendDrops(mergedExDividend, localPayout.exDividendByAsset);
+      dividendBreakdown.push(...localPayout.breakdown);
+      if (isDividendRound) setLastDividendRound(round);
+      if (localPayout.totalDividend > 0) setCash((current) => current + localPayout.totalDividend);
+      if (localDividendLogs.length) setTradeLogs((current) => [...localDividendLogs, ...current]);
+
+      if (remoteRoomId && !nextStudentStatesAfterDividend.some((state) => Number(state.studentNumber) === Number(studentNumber))) {
+        nextStudentStatesAfterDividend = [
+          ...nextStudentStatesAfterDividend,
+          {
+            studentNumber: Number(studentNumber),
+            nickname: nickname.trim(),
+            passcodeHash: studentPasscodeHash,
+            teamKey: '',
+            cash: cash + localPayout.totalDividend,
+            deposit,
+            depositPrincipal,
+            depositInterestEarned,
+            portfolio: { ...portfolio },
+            lastDividendRound: isDividendRound ? round : lastDividendRound,
+            tradeLogs: [...localDividendLogs, ...tradeLogs],
+            roundLogs,
+            reflection,
+            salaryPaidRounds,
+            initialCapitalGranted,
+            updatedAt: Date.now(),
+          },
+        ];
       }
     }
-    setLatestDividendSummary({ round, applied: dividendApplied, breakdown: dividendBreakdown });
+
+    const nextAssetsAfterDividend = applyExDividendDrop(nextAssets, mergedExDividend);
+    setAssets(nextAssetsAfterDividend);
+    setStudentStates(nextStudentStatesAfterDividend);
+    setTeamAccounts(nextTeamAccountsAfterDividend);
+    setLatestDividendSummary({ round, applied: isDividendRound, breakdown: dividendBreakdown });
 
     // ── Week 4 §2.2: 물가지수(인플레이션) 갱신 — 라운드 N 종료 시점 ──
     //   분기당 기본 1% + α (수요견인 / 이슈 / 거시) × 시드 D
@@ -7718,11 +7802,11 @@ export function App() {
       const aggregatePrincipal = investedPerHead * memberCount;
       // 총 자산: 라운드 종료 시점 가격(nextAssets) 기준 — 솔로는 players.totalAsset, 팀은 cash+deposit+포트폴리오
       const aggregateNetWorth = teamMode
-        ? nextTeamAccounts.reduce((sum, team) => sum + getTotalAsset({
+        ? nextTeamAccountsAfterDividend.reduce((sum, team) => sum + getTotalAsset({
             cash: team.cash ?? 0,
             deposit: team.deposit ?? 0,
             portfolio: team.portfolio ?? {},
-            assets: nextAssets,
+            assets: nextAssetsAfterDividend,
           }), 0)
         : (players ?? []).reduce((sum, p) => sum + (p.totalAsset ?? INITIAL_CASH), 0);
       aggregateReturnForRound = aggregatePrincipal > 0
@@ -7789,8 +7873,9 @@ export function App() {
       ].sort((a, b) => a.round - b.round));
     }
     setPhase('closed');
-    const selectedTeamAfterRound = nextTeamAccounts.find((team) => team.key === selectedTeamKey) ?? activeTeam;
-    const logCash = teamMode ? selectedTeamAfterRound.cash : cash;
+    const selectedTeamAfterRound = nextTeamAccountsAfterDividend.find((team) => team.key === selectedTeamKey) ?? activeTeam;
+    const localBondInterest = teamMode ? 0 : computeBondInterest(portfolio, nextAssets).totalInterest;
+    const logCash = teamMode ? selectedTeamAfterRound.cash : cash + localBondInterest + localDividendAmount;
     const logDeposit = teamMode ? selectedTeamAfterRound.deposit : nextDeposit;
     const logPortfolio = teamMode ? selectedTeamAfterRound.portfolio : portfolio;
     // Week 2 E — 라운드 로그는 배당락 적용 후 자산 가격 기준으로 산정
@@ -7821,15 +7906,31 @@ export function App() {
     } else {
       pushNews(`${round}라운드 장 마감`, '등록된 이슈가 실제 이벤트로 확인되어 장 마감 가격에 반영되었습니다.');
     }
-    setPlayers((current) =>
-      current.map((player) => ({
+    const studentStateByNumber = new Map(
+      nextStudentStatesAfterDividend.map((state) => [Number(state.studentNumber), state]),
+    );
+    const nextPlayersAfterDividend = players.map((player) => {
+      const state = !teamMode ? studentStateByNumber.get(Number(player.studentNumber)) : null;
+      const totalAsset = state
+        ? getTotalAsset({
+            cash: state.cash ?? 0,
+            deposit: state.deposit ?? 0,
+            portfolio: state.portfolio ?? {},
+            assets: nextAssetsAfterDividend,
+          })
+        : player.totalAsset ?? Math.round(INITIAL_CASH * (1 + (player.returnRate ?? 0) / 100));
+      return {
         ...player,
+        cash: state ? state.cash : player.cash,
+        deposit: state ? state.deposit : player.deposit,
+        totalAsset,
         returnRate: getInvestmentReturnRate(
-          player.totalAsset ?? Math.round(INITIAL_CASH * (1 + (player.returnRate ?? 0) / 100)),
+          totalAsset,
           getInvestedPrincipal({ gameStarted: true, round, phase: 'closed' }),
         ),
-      })),
-    );
+      };
+    });
+    setPlayers(nextPlayersAfterDividend);
 
     if (remoteRoomId) {
       try {
@@ -7842,9 +7943,11 @@ export function App() {
             unemployment_rate: macroMove.nextUnemploymentRate,
             open_macro_context: {},
           }),
-          upsertRemoteAssets(remoteRoomId, nextAssets),
+          upsertRemoteAssets(remoteRoomId, nextAssetsAfterDividend),
           updateRemoteIssues(remoteRoomId, resolvedEvents, round),
-          upsertRemoteTeamAccounts(remoteRoomId, nextTeamAccounts),
+          upsertRemoteTeamAccounts(remoteRoomId, nextTeamAccountsAfterDividend),
+          ...(!teamMode ? nextStudentStatesAfterDividend.map((state) => upsertRemoteStudentState(remoteRoomId, state)) : []),
+          ...nextPlayersAfterDividend.map((player) => upsertRemotePlayer(remoteRoomId, player)),
         ]);
       } catch (error) {
         setSyncStatus(`장 마감 저장 실패: ${error.message}`);
