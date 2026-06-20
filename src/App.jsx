@@ -343,8 +343,16 @@ function createRandomizedAssets() {
     const price = asset.priceOptions[Math.floor(Math.random() * asset.priceOptions.length)];
     const financials = createInitialFinancials(asset);
     // Week 2 E — 주식 자산에 한해 방 생성 시 배당 티어 난수 부여
+    // Week 4 §2.5 — 배당율도 ±1%p 난수를 더해 같은 안정주여도 방마다 4~6%, 같은 고배당주여도 9~11% 사이에서 갈리도록 함.
+    //   성장주(0%)는 변동 없이 0 유지. 학습자가 상세 수치 없이도 '성향' 차이를 체감하도록 미세한 분산을 둠.
     const dividendTier = asset.type === 'stock' ? pickDividendTier() : null;
-    const dividendRate = dividendTier ? DIVIDEND_TIER_RATES[dividendTier] : 0;
+    let dividendRate = 0;
+    if (dividendTier === 'stable' || dividendTier === 'highYield') {
+      const base = DIVIDEND_TIER_RATES[dividendTier]; // 0.05 또는 0.10
+      const jitter = (Math.random() * 2 - 1) * 0.01;  // -0.01 ~ +0.01
+      // 소수점 4자리에서 반올림 (예: 0.0473 → 4.73%) — 너무 깔끔한 5.00% / 10.00%가 안 나오도록 그대로 유지
+      dividendRate = Math.max(0, Math.round((base + jitter) * 10000) / 10000);
+    }
     return {
       ...asset,
       price,
@@ -1906,9 +1914,16 @@ function getPaidRoundCount({ gameStarted, round, phase }) {
   return phase === 'setup' ? Math.max(0, round - 1) : round;
 }
 
-function getInvestedPrincipal({ gameStarted, round, phase, memberCount = 1 }) {
+function getInvestedPrincipal({ gameStarted, round, phase, memberCount = 1, salaryPaidRounds = null }) {
   if (!gameStarted) return 0;
-  return INITIAL_CASH + ROUND_SALARY * getPaidRoundCount({ gameStarted, round, phase }) * Math.max(1, memberCount);
+  // 가능하면 실제로 지급된 급여 횟수(salaryPaidRounds)를 기준으로 원금을 계산해
+  //   "phase는 open으로 바뀌었지만 급여 effect가 아직 실행되지 않은 한 박자"에
+  //   원금만 먼저 부풀어 수익률이 잠깐 -%로 표시되는 깜빡임을 막는다.
+  // salaryPaidRounds가 주어지지 않으면(팀 모드/교사 산출) 기존 phase 기반 추정값 사용.
+  const paidCount = Array.isArray(salaryPaidRounds)
+    ? salaryPaidRounds.length
+    : getPaidRoundCount({ gameStarted, round, phase });
+  return INITIAL_CASH + ROUND_SALARY * paidCount * Math.max(1, memberCount);
 }
 
 function getInvestmentReturnRate(totalAsset, investedPrincipal) {
@@ -4661,10 +4676,25 @@ function AssetLearningPanel({ asset }) {
       </section>
     );
   }
+  // Week 4 §2.4 — 배당 성향을 주식 티어 라벨(성장주 / 안정주 / 고배당주)로 노출.
+  //   - 게임 시작 시 자산별로 dividendTier가 무작위 배정되어 있음 (성장주 40% / 안정주 40% / 고배당주 20%)
+  //   - 학습자가 퍼센트 수치 없이 '성향'만 보고 분석하도록 단계명만 노출
+  //   - 주식: dividendTier → 성장주 / 안정주 / 고배당주
+  //   - 채권: 라운드마다 쿠폰 이자가 들어오므로 '이자 지급'으로 별도 라벨
+  //   - 그 외(ETF·외환·선물·부동산): '배당 없음'
+  let dividendTendency;
+  if (asset.type === 'stock' && asset.dividendTier) {
+    dividendTendency = { growth: '성장주', stable: '안정주', highYield: '고배당주' }[asset.dividendTier] || '성장주';
+  } else if (asset.type === 'bond') {
+    dividendTendency = '이자 지급';
+  } else {
+    dividendTendency = '배당 없음';
+  }
   const signalEntries = [
     ['안정성', profile.signals.stability],
     ['성장성', profile.signals.growth],
     ['변동성', profile.signals.volatility],
+    ['배당 성향', dividendTendency],
   ];
   const checklist = [
     '이 자산은 어떤 나라와 산업에 연결되어 있나?',
@@ -4674,14 +4704,14 @@ function AssetLearningPanel({ asset }) {
   ];
 
   // Week 4 §2.2 — 종목 설명에 배당/이자 안내를 별도 박스로 노출 (CSS 누락 환경에서도 보이도록 inline-style 사용)
+  //   - dividendRate는 자산 생성 시 ±1% 난수가 더해진 실제 배당율을 그대로 사용
   let incomeNote = null;
   if (asset.type === 'stock' && asset.dividendTier) {
-    const tierLabel = DIVIDEND_TIER_LABELS[asset.dividendTier];
-    const tierRate = DIVIDEND_TIER_RATES[asset.dividendTier];
+    const tierLabel = { growth: '성장주', stable: '안정주', highYield: '고배당주' }[asset.dividendTier];
     if (asset.dividendTier === 'growth') {
-      incomeNote = `배당: ${tierLabel}. 4·8·12라운드 종료 시점에도 배당 지급이 없고, 수익은 가격 변동(자본이득)만으로 발생합니다.`;
+      incomeNote = `배당 성향: ${tierLabel}. 4·8·12라운드 종료 시점에도 배당 지급이 없고, 수익은 가격 변동(자본이득)만으로 발생합니다.`;
     } else {
-      incomeNote = `배당: ${tierLabel}. 4·8·12라운드 종료 시점에 보유 중이면 가격의 약 ${(tierRate * 100).toFixed(0)}%가 배당으로 지급되고, 다음 라운드 시작 가격은 배당의 절반만큼 배당락으로 내려갑니다.`;
+      incomeNote = `배당 성향: ${tierLabel}. 4·8·12라운드 종료 시점에 보유 중이면 가격에 따라 배당이 지급되고, 다음 라운드 시작 가격은 배당의 절반만큼 배당락으로 내려갑니다.`;
     }
   } else if (asset.type === 'bond' && asset.couponRate) {
     const coupon = Math.round(asset.faceValue * asset.couponRate);
@@ -4765,12 +4795,19 @@ function AssetLearningPanel({ asset }) {
       </div>
 
       <div className="signal-grid" aria-label={`${asset.name} 재무 신호`}>
-        {signalEntries.map(([label, value]) => (
-          <div className={`signal ${value === '높음' || value === '매우 높음' ? 'hot' : value === '낮음' ? 'cool' : ''}`} key={label}>
-            <span>{label}</span>
-            <strong>{value}</strong>
-          </div>
-        ))}
+        {signalEntries.map(([label, value]) => {
+          // 배당 성향은 위험 신호가 아니라 정보이므로 hot/cool 색 강조를 적용하지 않는다.
+          const isDividend = label === '배당 성향';
+          const tone = isDividend
+            ? ''
+            : (value === '높음' || value === '매우 높음' ? 'hot' : value === '낮음' ? 'cool' : '');
+          return (
+            <div className={`signal ${tone}`} key={label}>
+              <span>{label}</span>
+              <strong>{value}</strong>
+            </div>
+          );
+        })}
       </div>
 
       <div className="risk-tag-list" aria-label={`${asset.name} 위험 태그`}>
@@ -4806,8 +4843,8 @@ function AppHeader({ view, setView, hostAuthenticated, studentEntryAllowed, stud
       <button className="brand" type="button" onClick={() => setView('home')} aria-label="홈으로 이동">
         <ChartNoAxesCombined size={26} aria-hidden="true" />
         <span>
-          Market Class
-          <small>실시간 자산 투자 수업</small>
+          통장에 1억이 찍혔다.
+          <small>한 해 동안의 자산 일기</small>
         </span>
       </button>
 
@@ -4834,11 +4871,12 @@ function HomeView({ setView, roomPin, round, totalRounds, gameStarted, playerCou
     <main className="home-view">
       <section className="hero-band">
         <div className="hero-copy">
-          <p className="eyebrow">{totalRounds}라운드 · 1억 원 초기 자본 · 라운드 생활 소득 {formatWon(ROUND_SALARY)}</p>
-          <h1>모의 투자 시뮬레이터</h1>
-          <p className="hero-subtitle">화성에 갈까, 바닥 밑 지하실로 갈까?</p>
+          <p className="eyebrow">{totalRounds}번의 월급날 · 시작 자본 1억 원 · 매 라운드 월급 {formatWon(ROUND_SALARY)}</p>
+          <h1>통장에 1억이 찍혔다.</h1>
+          <p className="hero-subtitle">이제, 한 해 동안 그 돈을 어떻게 굴리시겠어요?</p>
           <p className="intro">
-            뉴스와 금리, 예금, ETF, 부동산 지수를 보며 월급을 받는 생활자의 입장에서 자산을 배분하고 결과를 해석합니다.
+            매 라운드 새 뉴스가 도착하고 금리·환율·물가가 움직입니다. 사고팔고 맡긴 선택이 차곡차곡 쌓여
+            12개월 뒤 당신의 한 해를 결말짓습니다. 화성으로 갈지, 지하실로 미끄러질지는 오늘의 결정에 달렸습니다.
           </p>
           <div className="hero-actions">
             {!studentJoined ? (
@@ -5328,6 +5366,8 @@ function HostView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debugMode, devRecheckTick, round, phase, gameStarted, salaryPaidRounds, tradeLogs, macroTimeline, activeMacroAlerts, macroAlertsByRound, economicSeed, initialSeedSensitivity]);
   function handleDevRecheck() { setDevRecheckTick((v) => v + 1); }
+  // Week 4 §3.6 — 교사 대시보드에서도 자산 행을 클릭해 기업·자산 분석을 펼쳐 보도록 추가
+  const [hostExpandedAssetId, setHostExpandedAssetId] = useState(null);
   const [eventCategory, setEventCategory] = useState('all');
   const filteredScenarioEvents = eventCategory === 'all'
     ? scenarioEvents
@@ -5663,24 +5703,54 @@ function HostView({
           <div className="stock-table">
             {assets.map((asset) => {
               const change = getChange(asset);
+              const expanded = hostExpandedAssetId === asset.id;
               return (
-                <article className="stock-row" key={asset.id}>
-                  <div className="stock-name">
-                    <span style={{ background: asset.color }} />
-                    <div>
-                      <strong>{asset.name}</strong>
-                      <small>{asset.country} · {assetTypeLabels[asset.type]} · {asset.sector}</small>
+                <div key={asset.id} style={{ display: 'flex', flexDirection: 'column' }}>
+                  <article
+                    className="stock-row"
+                    onClick={() => setHostExpandedAssetId(expanded ? null : asset.id)}
+                    style={{
+                      cursor: 'pointer',
+                      borderBottom: expanded ? '1px solid #2563eb' : undefined,
+                    }}
+                    aria-expanded={expanded}
+                    aria-controls={`host-asset-detail-${asset.id}`}
+                  >
+                    <div className="stock-name">
+                      <span style={{ background: asset.color }} />
+                      <div>
+                        <strong>{asset.name}</strong>
+                        <small>{asset.country} · {assetTypeLabels[asset.type]} · {asset.sector}</small>
+                      </div>
                     </div>
-                  </div>
-                  <Sparkline history={asset.history} color={asset.color} />
-                  <div className="stock-price">
-                    <strong>{formatAssetPrice(asset)}</strong>
-                    <small className={change >= 0 ? 'up' : 'down'}>{formatPercent(change)}</small>
-                  </div>
-                </article>
+                    <Sparkline history={asset.history} color={asset.color} />
+                    <div className="stock-price">
+                      <strong>{formatAssetPrice(asset)}</strong>
+                      <small className={change >= 0 ? 'up' : 'down'}>{formatPercent(change)}</small>
+                    </div>
+                  </article>
+                  {expanded ? (
+                    <div
+                      id={`host-asset-detail-${asset.id}`}
+                      style={{
+                        padding: '12px',
+                        background: '#f8fafc',
+                        border: '1px solid #cbd5e1',
+                        borderTop: 'none',
+                        borderRadius: '0 0 8px 8px',
+                        marginBottom: 8,
+                      }}
+                    >
+                      <AssetLearningPanel asset={asset} />
+                    </div>
+                  ) : null}
+                </div>
               );
             })}
           </div>
+          <p style={{ marginTop: 8, fontSize: 12, color: '#64748b' }}>
+            자산 행을 클릭하면 기업·자산 분석(배당 성향·재무 신호·변동 가능성)을 펼쳐 볼 수 있습니다.
+          </p>
         </section>
       </section>
 
@@ -6256,17 +6326,16 @@ function StudentView({
             <Sparkline history={selectedAsset.history} color={selectedAsset.color} />
           </div>
 
-          {/* Week 4 §2.3 — 거래 티켓 헤더 직하단에 이 종목의 배당/이자/없음 안내를 큰 박스로 항상 노출 */}
+          {/* Week 4 §2.3 — 거래 티켓 헤더 직하단에 이 종목의 배당/이자/없음 안내를 큰 박스로 항상 노출
+              퍼센트 수치는 학생에게 노출하지 않고 성향만 표시 (성장주/안정주/고배당주/이자 지급/없음) */}
           {(() => {
             let line = null;
             if (selectedAsset.type === 'stock' && selectedAsset.dividendTier) {
-              const tierLabel = DIVIDEND_TIER_LABELS[selectedAsset.dividendTier];
-              const tierRate = DIVIDEND_TIER_RATES[selectedAsset.dividendTier];
+              const tierLabel = { growth: '성장주', stable: '안정주', highYield: '고배당주' }[selectedAsset.dividendTier];
               if (selectedAsset.dividendTier === 'growth') {
                 line = `이 종목은 ${tierLabel} — 4·8·12라운드에도 배당이 없습니다. 수익은 가격 변동(자본이득)만으로 발생.`;
               } else {
-                const expected = Math.round(selectedAsset.price * tierRate);
-                line = `이 종목은 ${tierLabel} — 4·8·12라운드 종료 시점에 보유 중이면 약 ${(tierRate * 100).toFixed(0)}% 배당 (현재가 기준 1주당 +${formatWon(expected)} 예상), 다음 라운드 시작가는 배당의 ½만큼 배당락 적용.`;
+                line = `이 종목은 ${tierLabel} — 4·8·12라운드 종료 시점에 보유 중이면 배당이 지급되고, 다음 라운드 시작가는 배당의 ½만큼 배당락이 적용됩니다.`;
               }
             } else if (selectedAsset.type === 'bond' && selectedAsset.couponRate) {
               const coupon = Math.round(selectedAsset.faceValue * selectedAsset.couponRate);
@@ -6481,7 +6550,16 @@ export function App() {
   const studentHoldingsValue = getPortfolioValue(effectivePortfolio, assets);
   const studentTotalAsset = effectiveCash + effectiveDeposit + studentHoldingsValue;
   const activeTeamMemberCount = teamMode ? players.filter((player) => player.teamKey === selectedTeamKey).length : 1;
-  const investedPrincipal = getInvestedPrincipal({ gameStarted, round, phase, memberCount: activeTeamMemberCount });
+  // 개인 모드는 학생 단말이 직접 추적하는 salaryPaidRounds로 원금을 계산해
+  //   급여가 실제로 cash에 들어온 시점과 원금이 늘어나는 시점을 정확히 일치시킨다.
+  // 팀 모드는 교사 측이 라운드 시작 핸들러에서 팀 cash와 phase를 동시에 업데이트하므로 기존 추정값을 사용.
+  const investedPrincipal = getInvestedPrincipal({
+    gameStarted,
+    round,
+    phase,
+    memberCount: activeTeamMemberCount,
+    salaryPaidRounds: teamMode ? null : salaryPaidRounds,
+  });
   const submittedReport = submissions.find((submission) => submission.nickname === reportNickname);
   const activeStudent = buildStudentSnapshot({
     id: teamMode ? activeTeam.key : 'active-student',
