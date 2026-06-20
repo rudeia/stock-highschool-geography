@@ -3640,7 +3640,7 @@ function getInvestorType({ cashLikeAsset, holdingsValue, portfolioRows, totalAss
   return '균형 분산형 투자자';
 }
 
-function buildFinalSubmissionReport({ nickname, mode = 'individual', teamKey = '', teamName = '', submissionMethod = 'student', cash, deposit, depositInterestEarned = 0, investedPrincipal = INITIAL_CASH, portfolio, assets, tradeLogs, roundLogs, reflection, priceIndex = INITIAL_PRICE_INDEX, demandPullCumulative = 0 }) {
+function buildFinalSubmissionReport({ nickname, studentNumber = null, mode = 'individual', teamKey = '', teamName = '', submissionMethod = 'student', cash, deposit, depositInterestEarned = 0, investedPrincipal = INITIAL_CASH, portfolio, assets, tradeLogs, roundLogs, reflection, priceIndex = INITIAL_PRICE_INDEX, demandPullCumulative = 0 }) {
   const portfolioRows = getHoldingRows(portfolio, assets);
   const investmentAsset = portfolioRows.reduce((sum, row) => sum + row.value, 0);
   const cashLikeAsset = cash + deposit;
@@ -3674,6 +3674,7 @@ function buildFinalSubmissionReport({ nickname, mode = 'individual', teamKey = '
 
   return {
     nickname,
+    studentNumber: studentNumber == null ? null : Number(studentNumber),
     mode,
     teamKey,
     teamName,
@@ -3727,8 +3728,11 @@ function downloadCsv(filename, rows) {
   const link = document.createElement('a');
   link.href = url;
   link.download = filename;
+  link.style.display = 'none';
+  document.body.appendChild(link);
   link.click();
-  URL.revokeObjectURL(url);
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function HoldingsDashboard({ portfolio, assets, onSelectAsset, onSetTradeAmount }) {
@@ -3944,16 +3948,31 @@ function TeacherTeamPanel({ roomMode, teamAccounts, assets, players, gameStarted
   );
 }
 
-function getSubmissionParticipantNames(players, activeStudent) {
-  const activeStudentName = activeStudent.name.includes('(대기)') ? '' : activeStudent.name;
-  return [...new Set([activeStudentName, ...players.map((player) => getStudentDisplayName(player.studentNumber, player.name))].filter(Boolean))];
+function getSubmissionParticipantNames(players) {
+  return [...new Set(players.map((player) => getStudentDisplayName(player.studentNumber, player.name)).filter(Boolean))];
 }
 
-function TeacherSubmissionPanel({ players, activeStudent, submissions, gameFinished, allSubmissionsComplete, finalReportsDownloaded, onCloseSubmissions, onDownloadSubmissions }) {
-  const participantNames = getSubmissionParticipantNames(players, activeStudent);
-  const submittedNames = new Set(submissions.map((submission) => submission.nickname));
+function submissionMatchesPlayer(submission, player) {
+  if (submission?.studentNumber != null && player?.studentNumber != null) {
+    return Number(submission.studentNumber) === Number(player.studentNumber);
+  }
+  return submission?.nickname === getStudentDisplayName(player?.studentNumber, player?.name);
+}
+
+function reportsMatchParticipant(first, second) {
+  if (first?.studentNumber != null && second?.studentNumber != null) {
+    return Number(first.studentNumber) === Number(second.studentNumber);
+  }
+  return first?.nickname === second?.nickname;
+}
+
+function TeacherSubmissionPanel({ players, submissions, gameFinished, allSubmissionsComplete, finalReportsDownloaded, onCloseSubmissions, onDownloadSubmissions }) {
+  const participantNames = getSubmissionParticipantNames(players);
   const submittedRows = [...submissions].sort((a, b) => b.totalAsset - a.totalAsset);
-  const missingNames = participantNames.filter((name) => !submittedNames.has(name));
+  const submittedPlayerCount = players.filter((player) => submissions.some((submission) => submissionMatchesPlayer(submission, player))).length;
+  const missingNames = players
+    .filter((player) => !submissions.some((submission) => submissionMatchesPlayer(submission, player)))
+    .map((player) => getStudentDisplayName(player.studentNumber, player.name));
 
   return (
     <section className="submission-panel" aria-label="최종 제출 현황">
@@ -3962,7 +3981,7 @@ function TeacherSubmissionPanel({ players, activeStudent, submissions, gameFinis
           <Download size={22} aria-hidden="true" />
           <h2>최종 제출 현황</h2>
         </div>
-        <span className="limit-pill">{submittedRows.length}/{participantNames.length}</span>
+        <span className="limit-pill">{submittedPlayerCount}/{participantNames.length}</span>
       </div>
       {!gameFinished ? <p className="empty-note">최종 라운드 종료 후 학생 제출과 다운로드를 사용할 수 있습니다.</p> : null}
       <div className="submission-actions">
@@ -3972,7 +3991,7 @@ function TeacherSubmissionPanel({ players, activeStudent, submissions, gameFinis
         <button className="command secondary" type="button" onClick={onCloseSubmissions} disabled={!gameFinished || allSubmissionsComplete}>
           제출 마감
         </button>
-        <button className="command primary" type="button" onClick={onDownloadSubmissions} disabled={!gameFinished || !allSubmissionsComplete}>
+        <button className="command primary" type="button" onClick={onDownloadSubmissions} disabled={!gameFinished || !allSubmissionsComplete || !submissions.length}>
           {finalReportsDownloaded ? 'CSV 다시 다운로드' : 'CSV 다운로드'}
         </button>
       </div>
@@ -5723,7 +5742,6 @@ function HostView({
         />
         <TeacherSubmissionPanel
           players={players}
-          activeStudent={roomMode === 'team' ? buildStudentSnapshot({ id: 'team-mode', name: '모둠 계좌 (대기)', totalAsset: 0, holdings: [] }) : activeStudent}
           submissions={submissions}
           gameFinished={gameFinished}
           allSubmissionsComplete={allSubmissionsComplete}
@@ -6619,10 +6637,10 @@ export function App() {
     investmentAsset: studentHoldingsValue,
     investedPrincipal,
   });
-  const submissionParticipantNames = getSubmissionParticipantNames(players, activeStudent);
-  const submittedNames = new Set(submissions.map((submission) => submission.nickname));
-  const submittedCount = submissionParticipantNames.filter((name) => submittedNames.has(name)).length;
-  const participantCount = submissionParticipantNames.length;
+  const submittedCount = players.length
+    ? players.filter((player) => submissions.some((submission) => submissionMatchesPlayer(submission, player))).length
+    : submissions.length;
+  const participantCount = players.length || submissions.length;
   const finalRoundClosed = round === totalRounds && phase === 'closed';
   const allSubmissionsComplete = participantCount > 0 && submittedCount === participantCount;
   const canEndGame = finalRoundClosed && allSubmissionsComplete && finalReportsDownloaded;
@@ -8069,6 +8087,7 @@ export function App() {
     });
     const report = buildFinalSubmissionReport({
       nickname: nicknameLabel,
+      studentNumber: player.studentNumber,
       mode: roomMode,
       teamKey: team?.key ?? '',
       teamName: team?.name ?? '',
@@ -8116,6 +8135,7 @@ export function App() {
     if (!gameFinished || !joined || submittedReport) return;
     const report = buildFinalSubmissionReport({
       nickname: reportNickname,
+      studentNumber: Number(studentNumber),
       mode: roomMode,
       teamKey: teamMode ? activeTeam.key : '',
       teamName: teamMode ? activeTeam.name : '',
@@ -8150,33 +8170,48 @@ export function App() {
   async function handleCloseSubmissions() {
     if (!gameFinished || allSubmissionsComplete) return;
     let latestStates = studentStates;
+    let latestSubmissions = submissions;
     if (remoteRoomId) {
       try {
-        latestStates = await fetchRemoteStudentStates(remoteRoomId);
+        [latestStates, latestSubmissions] = await Promise.all([
+          fetchRemoteStudentStates(remoteRoomId),
+          fetchRemoteSubmissions(remoteRoomId),
+        ]);
         setStudentStates(latestStates);
+        setSubmissions(latestSubmissions);
       } catch (error) {
-        setSyncStatus(`학생 저장 상태 불러오기 실패: ${error.message}`);
+        setSyncStatus(`최종 제출 상태 불러오기 실패: ${error.message}`);
       }
     }
 
-    const submittedNames = new Set(submissions.map((submission) => submission.nickname));
-    const missingPlayers = players.filter((player) => !submittedNames.has(getStudentDisplayName(player.studentNumber, player.name)));
+    const missingPlayers = players.filter(
+      (player) => !latestSubmissions.some((submission) => submissionMatchesPlayer(submission, player)),
+    );
     const autoReports = missingPlayers.map((player) => buildTeacherClosedSubmission(player, latestStates));
-    if (!autoReports.length) return;
+    if (!autoReports.length) {
+      setSubmissions(latestSubmissions);
+      return;
+    }
 
-    setSubmissions((current) => [
+    const mergedReports = [
       ...autoReports,
-      ...current.filter((submission) => !autoReports.some((report) => report.nickname === submission.nickname)),
-    ]);
+      ...latestSubmissions.filter(
+        (submission) => !autoReports.some((report) => reportsMatchParticipant(submission, report)),
+      ),
+    ];
+
+    setSubmissions(mergedReports);
     setFinalReportsDownloaded(false);
     pushNews('제출 마감', `${autoReports.length}명의 미제출 보고서가 현재 저장 상태로 자동 제출되었습니다.`);
 
     if (remoteRoomId) {
       try {
         const savedReports = await Promise.all(autoReports.map((report) => upsertRemoteSubmission(remoteRoomId, report)));
-        setSubmissions((current) => [
+        setSubmissions([
           ...savedReports.filter(Boolean),
-          ...current.filter((submission) => !savedReports.some((report) => report?.nickname === submission.nickname)),
+          ...mergedReports.filter(
+            (submission) => !savedReports.some((report) => report && reportsMatchParticipant(submission, report)),
+          ),
         ]);
         await updateRemoteRoom(remoteRoomId, { final_reports_downloaded: false });
       } catch (error) {
@@ -8188,9 +8223,10 @@ export function App() {
   function handleDownloadSubmissions() {
     if (!gameFinished || !allSubmissionsComplete) return;
     const rows = [
-      ['순위', '이름', '제출방식', '투자방식', '모둠', '총자산', '투입원금', '현금성자산', '투자평가금', '예금이자수익', '수익률', '투자성향', '보유자산', '잘한점', '부족한점', '다음계획'],
+      ['순위', '학번', '이름', '제출방식', '투자방식', '모둠', '총자산', '투입원금', '현금성자산', '투자평가금', '예금이자수익', '수익률', '투자성향', '보유자산', '잘한점', '부족한점', '다음계획'],
       ...[...submissions].sort((a, b) => b.totalAsset - a.totalAsset).map((submission, index) => [
         index + 1,
+        submission.studentNumber ?? '',
         submission.nickname,
         submission.submissionMethod === 'teacher-close' ? '교사 마감 제출' : '학생 직접 제출',
         submission.mode === 'team' ? '모둠 투자' : '개인 투자',

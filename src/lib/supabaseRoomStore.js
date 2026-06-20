@@ -210,6 +210,7 @@ function fromSubmissionRow(row) {
   return {
     id: row.id,
     nickname: row.nickname,
+    studentNumber: row.student_number ?? null,
     mode: row.mode ?? 'individual',
     teamKey: row.team_key ?? '',
     teamName: row.team_name ?? '',
@@ -539,6 +540,7 @@ export async function upsertRemoteSubmission(roomId, report) {
       {
         room_id: roomId,
         nickname: report.nickname,
+        student_number: report.studentNumber == null ? null : Number(report.studentNumber),
         mode: report.mode ?? 'individual',
         team_key: report.teamKey ?? '',
         team_name: report.teamName ?? '',
