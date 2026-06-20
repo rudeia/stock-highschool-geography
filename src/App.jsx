@@ -134,7 +134,7 @@ const REFLECTION_PROMPTS = {
 const REFLECTION_OPEN_MAX_BYTES = 200; // 자유 서술 200바이트 (한글 약 66자)
 const EX_DIVIDEND_RATIO = 0.5;
 const DIVIDEND_TIER_RATES = { growth: 0, stable: 0.05, highYield: 0.10 };
-const DIVIDEND_TIER_LABELS = { growth: '성장주(배당 없음)', stable: '안정주(기준 5%)', highYield: '고배당주(기준 10%)' };
+const DIVIDEND_TIER_LABELS = { growth: '성장주(배당 없음)', stable: '안정 배당주', highYield: '고배당주' };
 const DIVIDEND_TIER_DISTRIBUTION = [
   { tier: 'growth', weight: 0.40 },
   { tier: 'stable', weight: 0.40 },
