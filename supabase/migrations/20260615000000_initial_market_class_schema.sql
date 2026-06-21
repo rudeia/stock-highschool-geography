@@ -14,7 +14,13 @@ create table if not exists public.rooms (
   property_index bigint not null default 250000,
   exchange_rate integer not null default 1350,
   unemployment_rate numeric(5, 2) not null default 3.5,
+  price_index numeric(10, 6) not null default 1,
+  demand_pull_cumulative numeric(10, 6) not null default 0,
   open_macro_context jsonb not null default '{}'::jsonb,
+  trigger_cooldowns jsonb not null default '{}'::jsonb,
+  pending_macro_alerts jsonb not null default '[]'::jsonb,
+  active_macro_alerts jsonb not null default '[]'::jsonb,
+  economic_seed jsonb not null default '{}'::jsonb,
   is_paused boolean not null default false,
   created_at timestamptz not null default now(),
   expires_at timestamptz not null default now() + interval '24 hours',
@@ -27,6 +33,12 @@ alter table public.rooms add column if not exists exchange_rate integer not null
 alter table public.rooms add column if not exists unemployment_rate numeric(5, 2) not null default 3.5;
 alter table public.rooms add column if not exists property_index bigint not null default 250000;
 alter table public.rooms add column if not exists open_macro_context jsonb not null default '{}'::jsonb;
+alter table public.rooms add column if not exists price_index numeric(10, 6) not null default 1;
+alter table public.rooms add column if not exists demand_pull_cumulative numeric(10, 6) not null default 0;
+alter table public.rooms add column if not exists trigger_cooldowns jsonb not null default '{}'::jsonb;
+alter table public.rooms add column if not exists pending_macro_alerts jsonb not null default '[]'::jsonb;
+alter table public.rooms add column if not exists active_macro_alerts jsonb not null default '[]'::jsonb;
+alter table public.rooms add column if not exists economic_seed jsonb not null default '{}'::jsonb;
 alter table public.rooms add column if not exists mode text not null default 'individual';
 alter table public.rooms add column if not exists game_started boolean not null default false;
 alter table public.rooms add column if not exists final_reports_downloaded boolean not null default false;
@@ -186,6 +198,28 @@ create table if not exists public.round_events (
 
 alter table public.round_events add column if not exists published boolean not null default false;
 
+alter table public.round_events drop constraint if exists round_events_outcome_type_check;
+alter table public.round_events
+  add constraint round_events_outcome_type_check
+  check (outcome_type in ('event', 'expectation', 'failed', 'reverse', 'macroAlert'));
+
+create table if not exists public.room_round_results (
+  id uuid primary key default gen_random_uuid(),
+  room_id uuid not null references public.rooms(id) on delete cascade,
+  round integer not null check (round between 1 and 12),
+  events jsonb not null default '[]'::jsonb,
+  macro_alerts jsonb not null default '[]'::jsonb,
+  macro_move jsonb not null default '{}'::jsonb,
+  delisted_assets jsonb not null default '[]'::jsonb,
+  price_index numeric(10, 6) not null default 1,
+  aggregate_return numeric(12, 6) not null default 0,
+  demand_pull_delta numeric(10, 6) not null default 0,
+  demand_pull_cumulative numeric(10, 6) not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (room_id, round)
+);
+
 create table if not exists public.trade_logs (
   id uuid primary key default gen_random_uuid(),
   room_id uuid not null references public.rooms(id) on delete cascade,
@@ -247,6 +281,9 @@ create table if not exists public.final_submissions (
   round_logs jsonb not null default '[]'::jsonb,
   round_notes jsonb not null default '{}'::jsonb,
   round_reflections jsonb not null default '{}'::jsonb,
+  round_results jsonb not null default '[]'::jsonb,
+  price_index numeric(10, 6) not null default 1,
+  demand_pull_cumulative numeric(10, 6) not null default 0,
   reflection jsonb not null default '{}'::jsonb,
   submitted_at timestamptz not null default now(),
   unique (room_id, nickname)
@@ -261,6 +298,9 @@ alter table public.final_submissions add column if not exists team_name text not
 alter table public.final_submissions add column if not exists submission_method text not null default 'student';
 alter table public.final_submissions add column if not exists round_notes jsonb not null default '{}'::jsonb;
 alter table public.final_submissions add column if not exists round_reflections jsonb not null default '{}'::jsonb;
+alter table public.final_submissions add column if not exists round_results jsonb not null default '[]'::jsonb;
+alter table public.final_submissions add column if not exists price_index numeric(10, 6) not null default 1;
+alter table public.final_submissions add column if not exists demand_pull_cumulative numeric(10, 6) not null default 0;
 
 do $$
 begin
@@ -281,6 +321,9 @@ begin
   end if;
   if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'round_events') then
     alter publication supabase_realtime add table public.round_events;
+  end if;
+  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'room_round_results') then
+    alter publication supabase_realtime add table public.room_round_results;
   end if;
   if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'final_submissions') then
     alter publication supabase_realtime add table public.final_submissions;
@@ -356,6 +399,11 @@ create trigger touch_reflections_updated_at
 before update on public.reflections
 for each row execute function public.touch_updated_at();
 
+drop trigger if exists touch_room_round_results_updated_at on public.room_round_results;
+create trigger touch_room_round_results_updated_at
+before update on public.room_round_results
+for each row execute function public.touch_updated_at();
+
 alter table public.rooms enable row level security;
 alter table public.players enable row level security;
 alter table public.student_states enable row level security;
@@ -363,6 +411,7 @@ alter table public.team_accounts enable row level security;
 alter table public.assets enable row level security;
 alter table public.portfolios enable row level security;
 alter table public.round_events enable row level security;
+alter table public.room_round_results enable row level security;
 alter table public.trade_logs enable row level security;
 alter table public.round_logs enable row level security;
 alter table public.reflections enable row level security;
@@ -382,6 +431,8 @@ drop policy if exists "classroom prototype portfolios read" on public.portfolios
 drop policy if exists "classroom prototype portfolios write" on public.portfolios;
 drop policy if exists "classroom prototype round events read" on public.round_events;
 drop policy if exists "classroom prototype round events write" on public.round_events;
+drop policy if exists "classroom prototype room round results read" on public.room_round_results;
+drop policy if exists "classroom prototype room round results write" on public.room_round_results;
 drop policy if exists "classroom prototype trade logs read" on public.trade_logs;
 drop policy if exists "classroom prototype trade logs write" on public.trade_logs;
 drop policy if exists "classroom prototype round logs read" on public.round_logs;
@@ -411,6 +462,9 @@ create policy "classroom prototype portfolios write" on public.portfolios for al
 
 create policy "classroom prototype round events read" on public.round_events for select using (true);
 create policy "classroom prototype round events write" on public.round_events for all using (true) with check (true);
+
+create policy "classroom prototype room round results read" on public.room_round_results for select using (true);
+create policy "classroom prototype room round results write" on public.room_round_results for all using (true) with check (true);
 
 create policy "classroom prototype trade logs read" on public.trade_logs for select using (true);
 create policy "classroom prototype trade logs write" on public.trade_logs for all using (true) with check (true);

@@ -229,8 +229,42 @@ function fromSubmissionRow(row) {
     roundLogs: row.round_logs ?? [],
     roundNotes: row.round_notes ?? {},
     roundReflections: row.round_reflections ?? {},
+    roundResults: row.round_results ?? [],
+    priceIndex: Number(row.price_index ?? 1),
+    demandPullCumulative: Number(row.demand_pull_cumulative ?? 0),
     reflection: row.reflection ?? {},
     submittedAt: row.submitted_at,
+  };
+}
+
+function toRoundResultRow(roomId, result) {
+  return {
+    room_id: roomId,
+    round: Number(result.round),
+    events: result.events ?? [],
+    macro_alerts: result.macroAlerts ?? [],
+    macro_move: result.macroMove ?? {},
+    delisted_assets: result.delistedAssets ?? [],
+    price_index: Number(result.priceIndex ?? 1),
+    aggregate_return: Number(result.aggregateReturn ?? 0),
+    demand_pull_delta: Number(result.demandPullDelta ?? 0),
+    demand_pull_cumulative: Number(result.demandPullCumulative ?? 0),
+  };
+}
+
+function fromRoundResultRow(row) {
+  return {
+    id: row.id,
+    round: Number(row.round),
+    events: row.events ?? [],
+    macroAlerts: row.macro_alerts ?? [],
+    macroMove: row.macro_move ?? {},
+    delistedAssets: row.delisted_assets ?? [],
+    priceIndex: Number(row.price_index ?? 1),
+    aggregateReturn: Number(row.aggregate_return ?? 0),
+    demandPullDelta: Number(row.demand_pull_delta ?? 0),
+    demandPullCumulative: Number(row.demand_pull_cumulative ?? 0),
+    createdAt: row.created_at,
   };
 }
 
@@ -241,12 +275,13 @@ async function fetchRoomBundle(query) {
     throw roomError;
   }
 
-  const [assetsResult, eventsResult, playersResult, teamsResult, statesResult] = await Promise.all([
+  const [assetsResult, eventsResult, playersResult, teamsResult, statesResult, roundResultsResult] = await Promise.all([
     supabase.from('assets').select('*').eq('room_id', room.id).order('name', { ascending: true }),
     supabase.from('round_events').select('*').eq('room_id', room.id).order('created_at', { ascending: true }),
     supabase.from('players').select('*').eq('room_id', room.id).order('joined_at', { ascending: true }),
     supabase.from('team_accounts').select('*').eq('room_id', room.id).order('team_key', { ascending: true }),
     supabase.from('student_states').select('*').eq('room_id', room.id).order('updated_at', { ascending: true }),
+    supabase.from('room_round_results').select('*').eq('room_id', room.id).order('round', { ascending: true }),
   ]);
 
   if (assetsResult.error) throw assetsResult.error;
@@ -254,6 +289,7 @@ async function fetchRoomBundle(query) {
   if (playersResult.error) throw playersResult.error;
   if (teamsResult.error && teamsResult.error.code !== '42P01') throw teamsResult.error;
   if (statesResult.error && statesResult.error.code !== '42P01') throw statesResult.error;
+  if (roundResultsResult.error && roundResultsResult.error.code !== '42P01') throw roundResultsResult.error;
 
   return {
     room,
@@ -262,11 +298,12 @@ async function fetchRoomBundle(query) {
     players: playersResult.data.map(fromPlayerRow),
     teams: teamsResult.error ? [] : teamsResult.data.map(fromTeamRow),
     studentStates: statesResult.error ? [] : statesResult.data.map(fromStudentStateRow),
+    roundResults: roundResultsResult.error ? [] : roundResultsResult.data.map(fromRoundResultRow),
     submissions: [],
   };
 }
 
-export async function createRemoteRoom({ pin, now, hostId = 'geography', totalRounds = 12, baseRate, propertyIndex = 250000, exchangeRate = 1350, unemploymentRate = 3.5, assets, mode = 'individual', teams = [] }) {
+export async function createRemoteRoom({ pin, now, hostId = 'geography', totalRounds = 12, baseRate, propertyIndex = 250000, exchangeRate = 1350, unemploymentRate = 3.5, economicSeed = {}, assets, mode = 'individual', teams = [] }) {
   if (!supabaseConfigured) return null;
 
   const { data: existing } = await supabase.from('rooms').select('id').eq('pin', pin).maybeSingle();
@@ -289,8 +326,13 @@ export async function createRemoteRoom({ pin, now, hostId = 'geography', totalRo
       property_index: propertyIndex,
       exchange_rate: exchangeRate,
       unemployment_rate: unemploymentRate,
+      price_index: 1,
+      demand_pull_cumulative: 0,
       open_macro_context: {},
       trigger_cooldowns: {},
+      pending_macro_alerts: [],
+      active_macro_alerts: [],
+      economic_seed: economicSeed,
       is_paused: false,
       created_at: toIso(now),
       expires_at: toIso(now + 24 * 60 * 60 * 1000),
@@ -346,7 +388,7 @@ export async function insertRemoteIssue(roomId, event, round) {
 
 export async function updateRemoteIssues(roomId, events, round) {
   if (!supabaseConfigured || !roomId) return null;
-  await Promise.all(
+  const results = await Promise.all(
     events.map((event) => {
       if (event.remoteId) {
         return supabase.from('round_events').update(toEventRow(roomId, event, round)).eq('id', event.remoteId);
@@ -354,7 +396,20 @@ export async function updateRemoteIssues(roomId, events, round) {
       return supabase.from('round_events').insert(toEventRow(roomId, event, round));
     }),
   );
+  const failed = results.find((result) => result.error);
+  if (failed?.error) throw failed.error;
   return true;
+}
+
+export async function upsertRemoteRoundResult(roomId, result) {
+  if (!supabaseConfigured || !roomId || !result?.round) return null;
+  const { data, error } = await supabase
+    .from('room_round_results')
+    .upsert(toRoundResultRow(roomId, result), { onConflict: 'room_id,round' })
+    .select()
+    .single();
+  if (error) throw error;
+  return fromRoundResultRow(data);
 }
 
 export async function deleteRemoteIssue(roomId, event) {
@@ -561,6 +616,9 @@ export async function upsertRemoteSubmission(roomId, report) {
         round_logs: report.roundLogs ?? [],
         round_notes: report.roundNotes ?? {},
         round_reflections: report.roundReflections ?? {},
+        round_results: report.roundResults ?? [],
+        price_index: Number(report.priceIndex ?? 1),
+        demand_pull_cumulative: Number(report.demandPullCumulative ?? 0),
         reflection: report.reflection ?? {},
         submitted_at: toIso(report.submittedAt ?? Date.now()),
       },
@@ -588,6 +646,7 @@ export function subscribeRemoteRoom(roomId, onChange) {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms', filter: `id=eq.${roomId}` }, onChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'assets', filter: `room_id=eq.${roomId}` }, onChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'round_events', filter: `room_id=eq.${roomId}` }, onChange)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'room_round_results', filter: `room_id=eq.${roomId}` }, onChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'players', filter: `room_id=eq.${roomId}` }, onChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'team_accounts', filter: `room_id=eq.${roomId}` }, onChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'student_states', filter: `room_id=eq.${roomId}` }, onChange)
