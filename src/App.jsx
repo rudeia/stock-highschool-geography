@@ -792,6 +792,10 @@ const assetLearningProfiles = {
     story: '아르헨티나 정부가 발행한 고위험 국채를 단순화한 자산입니다. 높은 이자 기대가 있지만 환율, 정치, 신용등급 이슈에 크게 민감합니다.',
     metrics: [['발행자', '아르헨티나 정부'], ['신용위험', '높음'], ['금리 민감도', '높음'], ['통화가치 민감도', '매우 높음'], ['원자재 수출 영향', '있음'], ['만기', '중장기'], ['변동성', '매우 높음']],
     signals: { stability: '낮음', growth: '보통', volatility: '높음' },
+    riskTags: ['고위험채권', '신용등급민감', '환율민감', '정치위험'],
+    sensitivity: ['IMF 협상', '신용등급 하향', '통화가치 급락', '원자재 수출'],
+    prompt: '채권은 안전하다고만 생각하기 쉬운데, 저신용 국가 채권은 왜 위험자산처럼 움직일까요?',
+  },
   goldFut: {
     story: '금 가격을 추종하는 선물 상품입니다. 위기·인플레이션·실질금리 하락 국면에서 안전자산으로 주목받습니다.',
     metrics: [['자산 유형', '귀금속 선물'], ['거래 시장', '글로벌'], ['주요 변수', '실질금리·달러'], ['안전자산성', '높음'], ['배당/이자', '없음'], ['보관 비용', '있음'], ['변동성', '중간']],
@@ -808,11 +812,94 @@ const assetLearningProfiles = {
     sensitivity: ['미국 금리 인상', '한미 금리차', '경상수지', '외국인 자금 흐름'],
     prompt: '환율 상승이 우리 경제와 자산 가격에 어떤 영향을 줄까요?',
   },
-    riskTags: ['고위험채권', '신용등급민감', '환율민감', '정치위험'],
-    sensitivity: ['IMF 협상', '신용등급 하향', '통화가치 급락', '원자재 수출'],
-    prompt: '채권은 안전하다고만 생각하기 쉬운데, 저신용 국가 채권은 왜 위험자산처럼 움직일까요?',
+};
+
+const productLearningDetails = {
+  sp500: {
+    structure: '미국 대형주 약 500개로 구성된 지수를 한 상품으로 추종합니다. 한 기업의 주식이 아니라 미국 대표 기업 묶음에 투자하는 구조입니다.',
+    returnSource: '구성 기업들의 평균적인 주가 변화와 원/달러 환율 변화가 원화 기준 손익을 함께 만듭니다.',
+    keyRisk: '분산돼 있어도 미국 시장과 대형 기술주 비중이 높아 미국 금리·기술 규제·경기 충격을 함께 받을 수 있습니다.',
+    simulationRule: '이 게임에서는 운용보수·추적오차·분배금을 생략하고 ETF 가격 변화만 반영합니다.',
+    marketSensitivity: '높음',
+    checklist: ['미국 기준금리와 장기 국채금리는 어느 방향인가?', '대형 기술주 비중이 전체 지수에 미치는 영향은 큰가?', '원/달러 환율이 원화 수익률을 돕는가 방해하는가?', 'ETF라고 해서 미국 시장 전체 위험까지 사라지는가?'],
+  },
+  kospi: {
+    structure: '한국 대형주 200개로 구성된 대표지수를 추종합니다. 반도체·자동차·금융 등 국내 주요 산업을 한 번에 담는 상품입니다.',
+    returnSource: '국내 대형주의 평균 가격 변화가 핵심이며, 수출 경기와 외국인 자금 흐름이 지수 전체에 영향을 줍니다.',
+    keyRisk: '종목 수는 많아도 반도체와 수출 대기업의 영향력이 커서 특정 산업 충격에 지수 전체가 흔들릴 수 있습니다.',
+    simulationRule: '이 게임에서는 운용보수·추적오차·분배금을 생략하고 지수 가격 변화만 반영합니다.',
+    marketSensitivity: '높음',
+    checklist: ['한국 수출과 반도체 경기는 개선 중인가?', '원/달러 환율이 수출주와 외국인 자금에 어떤 영향을 주는가?', '대형 업종 한두 개가 지수 방향을 주도하고 있지 않은가?', '개별주보다 분산됐지만 국내시장 집중 위험은 남아 있지 않은가?'],
+  },
+  realty: {
+    structure: '실제 건물 한 채를 사는 상품이 아니라 도시 주거·상업 부동산 지수의 움직임을 추종하는 가상 ETF입니다.',
+    returnSource: '부동산 가격과 거래 심리가 좋아지면 상승 압력이 생기고, 금리·대출 규제·경기 둔화가 부담으로 작용합니다.',
+    keyRisk: '부동산은 대출 의존도가 높고 거래가 느립니다. 가격이 버티더라도 거래량 급감과 금융 부실 위험이 먼저 나타날 수 있습니다.',
+    simulationRule: '이 게임에서는 임대료·세금·공실·매매비용을 생략하고 부동산지수 변화만 반영합니다.',
+    marketSensitivity: '높음',
+    checklist: ['기준금리와 대출금리는 오르는가 내리는가?', '대출 규제와 세금 정책은 수요를 늘리는가 줄이는가?', '가격뿐 아니라 거래량과 미분양 위험도 확인했는가?', '현금화가 쉬운 주식과 같은 방식으로 생각하고 있지 않은가?'],
+  },
+  oilFut: {
+    structure: '미래 인도 시점의 원유 가격 기대를 거래하는 선물 상품입니다. 기업의 재무제표보다 세계 원유 수요와 공급이 중요합니다.',
+    returnSource: '산유국 감산·전쟁·재고 감소는 공급 부족 기대를, 경기 침체·증산·재고 증가는 수요 또는 공급 완화 기대를 만듭니다.',
+    keyRisk: '원유는 지정학과 공급 결정에 매우 민감해 짧은 시간에 큰 폭으로 움직일 수 있습니다. 달러 가치도 가격에 영향을 줍니다.',
+    simulationRule: '실제 선물의 증거금·레버리지·만기·롤오버는 생략하고 원유 가격 방향과 변동성만 학습합니다.',
+    marketSensitivity: '매우 높음',
+    checklist: ['가격 변화가 수요 때문인가 공급 때문인가?', '산유국 생산량과 원유 재고는 어떤 방향인가?', '전쟁·운송로 차질이 실제 공급을 줄였는가?', '실제 선물에는 레버리지와 만기 위험이 있다는 점을 구분했는가?'],
+  },
+  grainFut: {
+    structure: '밀·옥수수 등 주요 곡물의 미래 가격 기대를 반영하는 식량 원자재 선물입니다.',
+    returnSource: '가뭄·홍수·전쟁·수출 제한은 공급 부족 기대를 높이고, 풍작·비료 가격 안정·수출 정상화는 공급 부담을 낮춥니다.',
+    keyRisk: '날씨와 정책은 예측이 어렵고 식량은 대체가 제한적이어서 작은 공급 충격도 가격을 크게 움직일 수 있습니다.',
+    simulationRule: '실제 선물의 증거금·레버리지·만기·롤오버는 생략하고 곡물 가격 변화만 반영합니다.',
+    marketSensitivity: '매우 높음',
+    checklist: ['주요 곡창지대의 작황과 기후는 어떤가?', '수출 제한이나 전쟁이 실제 물류를 막고 있는가?', '비료·에너지 가격이 생산비를 올리는가?', '곡물 상승이 식품기업과 물가까지 어떻게 이어지는가?'],
+  },
+  goldFut: {
+    structure: '국제 금 가격의 미래 기대를 추종하는 귀금속 선물입니다. 기업 실적 대신 실질금리·달러·위기 심리가 핵심 변수입니다.',
+    returnSource: '실질금리 하락, 달러 약세, 지정학적 불안이 금 수요를 높일 수 있고 반대 상황에서는 보유 매력이 약해질 수 있습니다.',
+    keyRisk: '안전자산이라는 이름과 달리 이자를 주지 않으며 달러와 실질금리가 오르면 위기 상황에서도 하락할 수 있습니다.',
+    simulationRule: '실제 선물의 레버리지·만기·롤오버와 금 보관비용은 생략하고 금 가격 변화만 반영합니다.',
+    marketSensitivity: '높음',
+    checklist: ['명목금리가 아니라 물가를 뺀 실질금리는 어떤 방향인가?', '달러가 강해지고 있는가 약해지고 있는가?', '위기 뉴스가 실제 안전자산 수요로 이어졌는가?', '금은 이자와 배당이 없다는 점을 고려했는가?'],
+  },
+  usdKrw: {
+    structure: '원/달러 환율을 추종하는 ETN입니다. 1달러를 사는 데 필요한 원화가 늘면 상품 가격도 오르는 구조입니다.',
+    returnSource: '미국 금리 상승·달러 선호·외국인 자금 유출은 상승 압력을, 한국 수출 호조·외환시장 안정은 하락 압력을 만들 수 있습니다.',
+    keyRisk: '환율 방향을 맞혀도 ETN에는 발행사 신용위험과 추적오차가 존재합니다. 환율 상승은 한국 경제 전체에 일방적인 호재가 아닙니다.',
+    simulationRule: '이 게임에서는 발행사 신용위험·운용보수·추적오차를 생략하고 원/달러 환율 변화만 반영합니다.',
+    marketSensitivity: '높음',
+    checklist: ['한미 금리차는 확대되는가 축소되는가?', '외국인 자금이 국내로 들어오는가 빠져나가는가?', '한국 수출과 경상수지는 환율을 지지하는가?', '환율 상승의 수혜 업종과 피해 업종을 구분했는가?'],
+  },
+  usBond: {
+    structure: '미국 정부가 발행한 10년 만기 채권을 단순화한 상품입니다. 약속된 이자와 만기 상환 기대를 가격으로 거래합니다.',
+    returnSource: '보유 중 받는 쿠폰 이자와 채권 가격 변화가 수익을 만듭니다. 시장금리가 내려가면 기존 채권의 상대적 매력이 커져 가격이 오를 수 있습니다.',
+    keyRisk: '신용위험은 낮지만 금리 상승과 인플레이션에는 가격이 하락할 수 있습니다. 한국 투자자에게는 달러 환율 위험도 있습니다.',
+    simulationRule: '이 게임에서는 만기 상환을 생략하고 매 라운드 액면가 기준 쿠폰 이자와 시장가격 변화만 반영합니다.',
+    marketSensitivity: '보통',
+    checklist: ['시장금리와 채권 가격이 반대로 움직이는 이유를 설명할 수 있는가?', '물가 상승이 고정 이자의 실질가치를 낮추지 않는가?', '경기 침체로 안전자산 수요가 늘고 있는가?', '원/달러 환율이 원화 기준 손익에 어떤 영향을 주는가?'],
+  },
+  argBond: {
+    structure: '아르헨티나 정부가 발행한 고금리 국채를 단순화한 상품입니다. 높은 이자는 높은 상환 위험에 대한 보상입니다.',
+    returnSource: '쿠폰 이자와 채권 가격 변화가 수익을 만들며, IMF 협상·재정개혁·신용등급 개선은 상환 기대를 높일 수 있습니다.',
+    keyRisk: '국가 부도·채무 재조정·통화가치 급락이 발생하면 높은 이자를 받아도 원금을 크게 잃을 수 있습니다.',
+    simulationRule: '이 게임에서는 실제 채무 재조정과 통화 환전을 단순화하고 쿠폰 이자와 신용위험에 따른 가격 변화만 반영합니다.',
+    marketSensitivity: '매우 높음',
+    checklist: ['높은 이자율이 왜 높은 위험의 신호일 수 있는가?', '정부 재정과 외환보유액은 상환에 충분한가?', 'IMF 협상과 신용등급은 개선되는가 악화되는가?', '통화가치 하락이 이자 수익을 지워버릴 수 있지 않은가?'],
   },
 };
+
+function getProductLearningDetail(asset) {
+  if (!asset || asset.type === 'stock') return null;
+  return productLearningDetails[asset.id] ?? {
+    structure: `${asset.name}은 ${asset.sector} 가격 흐름을 추종하도록 단순화한 상품입니다.`,
+    returnSource: '보유 중 발생하는 현금흐름과 시장가격 변화가 수익과 손실을 만듭니다.',
+    keyRisk: '기초자산, 금리, 환율, 정책 변화가 동시에 작용할 수 있습니다.',
+    simulationRule: '실제 상품의 비용과 복잡한 계약 조건 일부는 학습을 위해 생략했습니다.',
+    marketSensitivity: '보통',
+    checklist: ['무엇의 가격을 추종하는 상품인가?', '수익은 이자·분배금·가격 변화 중 어디서 발생하는가?', '가장 직접적인 거시지표는 무엇인가?', '실제 상품에서 생략된 위험은 무엇인가?'],
+  };
+}
 
 const scenarioEvents = [
   {
@@ -4844,6 +4931,7 @@ function MacroGuide({ baseRate, depositRate, propertyIndex, exchangeRate, unempl
 function AssetLearningPanel({ asset }) {
   if (!asset) return null;
   let profile;
+  const productDetail = getProductLearningDetail(asset);
   try {
     profile = getAssetProfile(asset);
   } catch (err) {
@@ -4872,14 +4960,21 @@ function AssetLearningPanel({ asset }) {
   } else {
     dividendTendency = '배당 없음';
   }
-  const signalEntries = [
-    ['안정성', profile.signals.stability],
-    ['성장성', profile.signals.growth],
-    ['변동성', profile.signals.volatility],
-    ['배당 성향', dividendTendency],
-  ];
-  const checklist = [
-    '이 자산은 어떤 나라와 산업에 연결되어 있나?',
+  const signalEntries = asset.type === 'stock'
+    ? [
+        ['안정성', profile.signals.stability],
+        ['성장성', profile.signals.growth],
+        ['변동성', profile.signals.volatility],
+        ['배당 성향', dividendTendency],
+      ]
+    : [
+        ['안정성', profile.signals.stability],
+        ['시장 민감도', productDetail?.marketSensitivity ?? '보통'],
+        ['변동성', profile.signals.volatility],
+        ['현금흐름', asset.type === 'bond' ? '이자 지급' : '없음'],
+      ];
+  const checklist = productDetail?.checklist ?? [
+    '이 기업은 어떤 나라와 산업에 연결되어 있나?',
     '부채비율, 현금보유, 원자재 의존도 중 무엇이 눈에 띄나?',
     '지금 공개된 이슈가 실제 이벤트가 아니어도 기대감만으로 움직일 수 있나?',
     '전 재산을 넣었을 때 상장폐지나 급락을 버틸 수 있나?',
@@ -4896,17 +4991,17 @@ function AssetLearningPanel({ asset }) {
     }
   } else if (asset.type === 'bond' && asset.couponRate) {
     const coupon = Math.round(asset.faceValue * asset.couponRate);
-    incomeNote = `쿠폰: 라운드마다 액면가 ${formatWon(asset.faceValue)} 기준 단리 ${(asset.couponRate * 100).toFixed(1)}% 이자가 지급됩니다 (1주 보유 시 매 라운드 +${formatWon(coupon)}).`;
+    incomeNote = `게임 규칙: 라운드마다 액면가 ${formatWon(asset.faceValue)} 기준 단리 ${(asset.couponRate * 100).toFixed(1)}% 이자가 지급됩니다 (1주 보유 시 매 라운드 +${formatWon(coupon)}).`;
   } else if (asset.type !== 'stock' && asset.type !== 'bond') {
-    incomeNote = '배당·이자 없음. 수익은 오로지 가격 변동(자본이득)만으로 결정됩니다.';
+    incomeNote = '게임 규칙: 이 상품에는 배당·이자를 지급하지 않으며, 수익은 가격 변동만으로 결정됩니다. 실제 상품에는 분배금·보수·만기 등 추가 조건이 있을 수 있습니다.';
   }
 
   return (
     <section className="asset-learning-panel" aria-label={`${asset.name} 분석`}>
       <div className="panel-heading split">
         <div>
-          <Building2 size={20} aria-hidden="true" />
-          <h2>기업·자산 분석</h2>
+          {asset.type === 'stock' ? <Building2 size={20} aria-hidden="true" /> : <ChartNoAxesCombined size={20} aria-hidden="true" />}
+          <h2>{asset.type === 'stock' ? '기업 분석' : '상품 분석'}</h2>
         </div>
         <span className="limit-pill">{assetTypeLabels[asset.type] ?? asset.type}</span>
       </div>
@@ -4966,6 +5061,27 @@ function AssetLearningPanel({ asset }) {
         ) : null}
       </article>
 
+      {productDetail ? (
+        <div className="product-mechanics-grid" aria-label={`${asset.name} 상품 구조`}> 
+          <article>
+            <strong>무엇을 사는 상품인가</strong>
+            <p>{productDetail.structure}</p>
+          </article>
+          <article>
+            <strong>수익과 손실의 원천</strong>
+            <p>{productDetail.returnSource}</p>
+          </article>
+          <article>
+            <strong>가장 중요한 위험</strong>
+            <p>{productDetail.keyRisk}</p>
+          </article>
+          <article>
+            <strong>게임에서 단순화한 부분</strong>
+            <p>{productDetail.simulationRule}</p>
+          </article>
+        </div>
+      ) : null}
+
       <div className="metric-grid" aria-label={`${asset.name} 간단 재무표`}>
         {profile.metrics.map(([label, value]) => (
           <div key={label}>
@@ -4978,7 +5094,7 @@ function AssetLearningPanel({ asset }) {
       <div className="signal-grid" aria-label={`${asset.name} 재무 신호`}>
         {signalEntries.map(([label, value]) => {
           // 배당 성향은 위험 신호가 아니라 정보이므로 hot/cool 색 강조를 적용하지 않는다.
-          const isDividend = label === '배당 성향';
+          const isDividend = label === '배당 성향' || label === '현금흐름';
           const tone = isDividend
             ? ''
             : (value === '높음' || value === '매우 높음' ? 'hot' : value === '낮음' ? 'cool' : '');
