@@ -19,7 +19,6 @@ import {
   RotateCcw,
   School,
   Shuffle,
-  Smartphone,
   TrendingUp,
   Trophy,
   Users,
@@ -32,7 +31,6 @@ import {
   buildRoundLog,
   buildStudentSnapshot,
   buildTradeLog,
-  classroomRoles,
   getRoomCapacityState,
 } from './lib/classroomStore.js';
 import { supabaseConfigured } from './lib/supabaseClient.js';
@@ -40,6 +38,7 @@ import {
   createRemoteRoom,
   deleteRemoteIssue,
   deleteRemoteRoundDraftIssues,
+  fetchRemoteActiveRoomByHostId,
   fetchRemoteStudentState,
   fetchRemoteStudentStates,
   fetchRemoteSubmissions,
@@ -1933,15 +1932,15 @@ function getJoinUrl(roomPin) {
 }
 
 function getInitialRoomPin() {
-  if (typeof window === 'undefined') return '428915';
+  if (typeof window === 'undefined') return '';
   const pinFromUrl = new URLSearchParams(window.location.search).get('pin');
-  return pinFromUrl && /^[0-9]{6}$/.test(pinFromUrl) ? pinFromUrl : '428915';
+  return pinFromUrl && /^[0-9]{6}$/.test(pinFromUrl) ? pinFromUrl : '';
 }
 
 function getInitialView() {
-  if (typeof window === 'undefined') return 'home';
+  if (typeof window === 'undefined') return 'host-login';
   const params = new URLSearchParams(window.location.search);
-  return params.get('view') === 'student' && params.get('entry') === 'qr' ? 'student' : 'home';
+  return params.get('view') === 'student' && params.get('entry') === 'qr' ? 'student' : 'host-login';
 }
 
 function getInitialStudentEntryAllowed() {
@@ -5019,10 +5018,15 @@ function AssetLearningPanel({ asset }) {
   );
 }
 
-function AppHeader({ view, setView, hostAuthenticated, studentEntryAllowed, studentJoined }) {
+function AppHeader({ setView, hostAuthenticated, studentEntryAllowed }) {
   return (
     <header className="topbar">
-      <button className="brand" type="button" onClick={() => setView('home')} aria-label="홈으로 이동">
+      <button
+        className="brand"
+        type="button"
+        onClick={() => setView(studentEntryAllowed ? 'student' : hostAuthenticated ? 'host' : 'host-login')}
+        aria-label={studentEntryAllowed ? '학생 입장 화면으로 이동' : '교사 화면으로 이동'}
+      >
         <ChartNoAxesCombined size={26} aria-hidden="true" />
         <span>
           통장에 1억이 찍혔다.
@@ -5030,20 +5034,6 @@ function AppHeader({ view, setView, hostAuthenticated, studentEntryAllowed, stud
         </span>
       </button>
 
-      <nav className="view-switch" aria-label="화면 전환">
-        {!studentJoined ? (
-          <button className={view === 'host' || view === 'host-login' ? 'active' : ''} type="button" data-role={classroomRoles.host} onClick={() => setView(hostAuthenticated ? 'host' : 'host-login')}>
-            <School size={18} aria-hidden="true" />
-            교사
-          </button>
-        ) : null}
-        {studentEntryAllowed || view === 'student' ? (
-          <button className={view === 'student' ? 'active' : ''} type="button" data-role={classroomRoles.student} onClick={() => setView('student')}>
-            <Smartphone size={18} aria-hidden="true" />
-            학생
-          </button>
-        ) : null}
-      </nav>
     </header>
   );
 }
@@ -5246,6 +5236,7 @@ function pickRandomRoundIssues({ round, now, count = 3 }) {
 }
 
 function HostSetupView({
+  roomReady,
   roomPin,
   hostId,
   totalRounds,
@@ -5262,6 +5253,23 @@ function HostSetupView({
   onTotalRoundsChange,
   onVolatilityModeChange,
 }) {
+  if (!roomReady) {
+    return (
+      <main className="auth-screen">
+        <section className="auth-card">
+          <p className="eyebrow">교사용 방 관리</p>
+          <h1>{hostId} 계정의 새 수업을 준비합니다.</h1>
+          <p className="help-text">현재 유지 중인 방이 없습니다. 새 방을 만들면 이 계정 전용 PIN과 시장 데이터가 생성됩니다.</p>
+          <button className="command primary wide" type="button" onClick={onCreateRoom}>
+            <Radio size={19} aria-hidden="true" />
+            새 수업 방 만들기
+          </button>
+          <p className="sync-note">{syncStatus}</p>
+        </section>
+      </main>
+    );
+  }
+
   return (
     <main className="host-layout setup-mode">
       <section className="host-main">
@@ -5449,6 +5457,7 @@ function HostSetupView({
 }
 
 function HostView({
+  roomReady,
   roomPin,
   hostId,
   round,
@@ -5558,6 +5567,7 @@ function HostView({
   if (!gameStarted) {
     return (
       <HostSetupView
+        roomReady={roomReady}
         roomPin={roomPin}
         hostId={hostId}
         totalRounds={totalRounds}
@@ -6629,6 +6639,7 @@ export function App() {
   const [hostLogin, setHostLogin] = useState({ id: '', password: '' });
   const [hostLoginError, setHostLoginError] = useState('');
   const [roomPin, setRoomPin] = useState(getInitialRoomPin);
+  const [roomReady, setRoomReady] = useState(false);
   const [roomCreatedAt, setRoomCreatedAt] = useState(() => Date.now());
   const [roomExpired, setRoomExpired] = useState(false);
   const [round, setRound] = useState(1);
@@ -6777,6 +6788,7 @@ export function App() {
     const isExpired = new Date(bundle.room.expires_at).getTime() <= Date.now() || bundle.room.phase === 'expired';
 
     setRemoteRoomId(bundle.room.id);
+    setRoomReady(true);
     setRoomPin(bundle.room.pin);
     setHostId((current) => current || bundle.room.host_id || '');
     setRoomCreatedAt(createdAt);
@@ -6857,7 +6869,7 @@ export function App() {
   }, [expiresAt]);
 
   useEffect(() => {
-    if (!supabaseConfigured || !/^[0-9]{6}$/.test(roomPin)) return undefined;
+    if (!studentEntryAllowed || !supabaseConfigured || !/^[0-9]{6}$/.test(roomPin)) return undefined;
     let cancelled = false;
 
     fetchRemoteRoomByPin(roomPin)
@@ -6874,7 +6886,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [applyRemoteRoomBundle, roomPin]);
+  }, [applyRemoteRoomBundle, roomPin, studentEntryAllowed]);
 
   useEffect(() => {
     if (!supabaseConfigured || !remoteRoomId) return undefined;
@@ -7067,7 +7079,7 @@ export function App() {
     setNewsFeed((current) => [{ id: `${Date.now()}-${title}`, round: targetRound, title, detail }, ...current].slice(0, 6));
   }
 
-  function handleHostLogin(event) {
+  async function handleHostLogin(event) {
     event.preventDefault();
     const authorizedHostId = getAuthorizedHostId(hostLogin.id, hostLogin.password);
     if (authorizedHostId) {
@@ -7075,6 +7087,28 @@ export function App() {
       setHostAuthenticated(true);
       setHostLoginError('');
       setView('host');
+      setRoomReady(false);
+      setRemoteRoomId(null);
+      setRoomPin('');
+
+      if (!supabaseConfigured) {
+        setSyncStatus('로컬 연습 모드 · 새 수업 방을 만들어 주세요.');
+        return;
+      }
+
+      setSyncStatus(`${authorizedHostId} 계정의 수업 방을 확인하는 중입니다.`);
+      try {
+        const bundle = await fetchRemoteActiveRoomByHostId(authorizedHostId);
+        if (bundle) {
+          applyRemoteRoomBundle(bundle);
+          setSubmissions(await fetchRemoteSubmissions(bundle.room.id));
+          setSyncStatus(`${authorizedHostId} 계정의 기존 방을 불러왔습니다.`);
+        } else {
+          setSyncStatus(`${authorizedHostId} 계정에 유지 중인 방이 없습니다.`);
+        }
+      } catch (error) {
+        setSyncStatus(`교사 방 확인 실패: ${error.message}`);
+      }
       return;
     }
     setHostLoginError('아이디 또는 비밀번호가 맞지 않습니다.');
@@ -7431,6 +7465,7 @@ export function App() {
     });
 
     setRoomPin(nextRoom.roomPin);
+    setRoomReady(true);
     setRoomCreatedAt(nextRoom.roomCreatedAt);
     setRoomExpired(nextRoom.roomExpired);
     setRound(nextRoom.round);
@@ -7531,6 +7566,8 @@ export function App() {
         setEconomicSeed(nextEconomicSeed);
       }
     } catch (error) {
+      setRoomReady(false);
+      setRoomPin('');
       setSyncStatus(`수업 방 생성 실패: ${error.message}`);
     }
   }
@@ -8609,7 +8646,7 @@ export function App() {
 
   return (
     <div className="app-shell">
-      <AppHeader view={view} setView={setView} hostAuthenticated={hostAuthenticated} studentEntryAllowed={studentEntryAllowed} studentJoined={joined} />
+      <AppHeader setView={setView} hostAuthenticated={hostAuthenticated} studentEntryAllowed={studentEntryAllowed} />
       {view === 'home' ? (
         <HomeView
           setView={setView}
@@ -8635,6 +8672,7 @@ export function App() {
       ) : null}
       {view === 'host' && hostAuthenticated && !joined ? (
         <HostView
+          roomReady={roomReady}
           roomPin={roomPin}
           hostId={hostId}
           round={round}

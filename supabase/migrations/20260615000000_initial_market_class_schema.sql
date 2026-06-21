@@ -43,6 +43,9 @@ alter table public.rooms add column if not exists mode text not null default 'in
 alter table public.rooms add column if not exists game_started boolean not null default false;
 alter table public.rooms add column if not exists final_reports_downloaded boolean not null default false;
 
+create index if not exists rooms_host_active_lookup_idx
+  on public.rooms(host_id, expires_at desc, updated_at desc);
+
 create table if not exists public.players (
   id uuid primary key default gen_random_uuid(),
   room_id uuid not null references public.rooms(id) on delete cascade,

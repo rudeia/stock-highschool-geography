@@ -306,10 +306,14 @@ async function fetchRoomBundle(query) {
 export async function createRemoteRoom({ pin, now, hostId = 'geography', totalRounds = 12, baseRate, propertyIndex = 250000, exchangeRate = 1350, unemploymentRate = 3.5, economicSeed = {}, assets, mode = 'individual', teams = [] }) {
   if (!supabaseConfigured) return null;
 
-  const { data: existing } = await supabase.from('rooms').select('id').eq('pin', pin).maybeSingle();
-  if (existing?.id) {
-    await supabase.from('rooms').delete().eq('id', existing.id);
+  const { data: pinOwner, error: pinError } = await supabase.from('rooms').select('id,host_id').eq('pin', pin).maybeSingle();
+  if (pinError) throw pinError;
+  if (pinOwner?.id && pinOwner.host_id !== hostId) {
+    throw new Error('이미 사용 중인 방 PIN입니다. 새 PIN으로 다시 시도하세요.');
   }
+
+  const { error: previousRoomsError } = await supabase.from('rooms').delete().eq('host_id', hostId);
+  if (previousRoomsError) throw previousRoomsError;
 
   const { data: room, error } = await supabase
     .from('rooms')
@@ -356,6 +360,20 @@ export async function createRemoteRoom({ pin, now, hostId = 'geography', totalRo
 export async function fetchRemoteRoomByPin(pin) {
   if (!supabaseConfigured || !/^[0-9]{6}$/.test(pin)) return null;
   return fetchRoomBundle(supabase.from('rooms').select('*').eq('pin', pin));
+}
+
+export async function fetchRemoteActiveRoomByHostId(hostId) {
+  if (!supabaseConfigured || !hostId) return null;
+  return fetchRoomBundle(
+    supabase
+      .from('rooms')
+      .select('*')
+      .eq('host_id', hostId)
+      .gt('expires_at', new Date().toISOString())
+      .neq('phase', 'expired')
+      .order('updated_at', { ascending: false })
+      .limit(1),
+  );
 }
 
 export async function fetchRemoteRoomById(roomId) {
