@@ -5,7 +5,9 @@ import {
   BellRing,
   Building2,
   ChartNoAxesCombined,
+  CheckCircle2,
   ChevronRight,
+  CircleAlert,
   Clock3,
   Download,
   Globe2,
@@ -23,6 +25,7 @@ import {
   Trophy,
   Users,
   Wallet,
+  X,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import {
@@ -168,13 +171,6 @@ const PASSIVE_MOVE_FOREX_MULT = 0.4;
 const PASSIVE_MOVE_GOLD_MULT = 0.6;
 // 이슈 impact 에 사이즈 가중치 (호재/악재 진폭도 사이즈 차등)
 const SIZE_ISSUE_MULT = { large: 0.8, small: 1.4 };
-// 정기예금 (잠금형 정기예금) — 목돈 일시 예치, 만기 잠금
-const TIME_DEPOSIT_LOCK_ROUNDS = 4;
-const TIME_DEPOSIT_BONUS_RATE = 0.6;
-const TIME_DEPOSIT_EARLY_PENALTY = 0.02;
-// 정기적금 (월 적립식) — 매 라운드 일정액 자동 납입
-const RECURRING_BONUS_RATE = 0.8;
-const RECURRING_EARLY_PENALTY = 0.02;
 // 거시지표 임계점 트리거
 const MACRO_TRIGGERS = [
   // Week 2 K — sensitivity 적용된 _adj 값이 있으면 우선 사용, 없으면 원본 값 사용 (하위 호환)
@@ -249,6 +245,31 @@ function cacheStudentState(roomScope, studentNumber, state) {
     window.localStorage.setItem(getStudentStateCacheKey(roomScope, studentNumber), JSON.stringify(state));
   } catch {
     // Server persistence remains the source of truth when browser storage is unavailable.
+  }
+}
+
+function getRoundNoteDraftCacheKey(roomScope, studentNumber) {
+  return `market-class-note-drafts:${roomScope}:${studentNumber}`;
+}
+
+function loadRoundNoteDrafts(roomScope, studentNumber) {
+  if (!roomScope || !studentNumber) return {};
+  try {
+    const raw = window.localStorage.getItem(getRoundNoteDraftCacheKey(roomScope, studentNumber));
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function cacheRoundNoteDrafts(roomScope, studentNumber, drafts) {
+  if (!roomScope || !studentNumber) return;
+  try {
+    const key = getRoundNoteDraftCacheKey(roomScope, studentNumber);
+    if (Object.keys(drafts ?? {}).length) window.localStorage.setItem(key, JSON.stringify(drafts));
+    else window.localStorage.removeItem(key);
+  } catch {
+    // Draft caching is a convenience; explicit server save remains authoritative.
   }
 }
 
@@ -1972,7 +1993,7 @@ function getByteLength(str) {
   if (!str) return 0;
   try {
     return new TextEncoder().encode(str).length;
-  } catch (e) {
+  } catch {
     // Fallback: 대략 추정
     let bytes = 0;
     for (let i = 0; i < str.length; i++) {
@@ -2282,56 +2303,6 @@ function detectMacroTriggers(macroSnapshot, triggerCooldowns) {
   return { fired, nextCooldowns };
 }
 
-// 정기예금: 목돈 일시 예치 + 만기 잠금 + 우대금리
-function getTimeDepositRate(baseRate) {
-  return Math.max(0.6, baseRate + TIME_DEPOSIT_BONUS_RATE);
-}
-function depositToTimeDeposit(account, amount, currentRound, baseRate) {
-  if (amount <= 0 || amount > (account.cash ?? 0)) return account;
-  if ((account.timeDepositBalance ?? 0) > 0) return account;
-  const rate = getTimeDepositRate(baseRate);
-  return {
-    ...account,
-    cash: account.cash - amount,
-    timeDepositBalance: amount,
-    timeDepositPrincipal: amount,
-    timeDepositDepositedAtRound: currentRound,
-    timeDepositLockedUntilRound: currentRound + TIME_DEPOSIT_LOCK_ROUNDS,
-    timeDepositRate: rate,
-  };
-}
-function accrueTimeDepositInterest(account) {
-  if (!(account.timeDepositBalance > 0) || !account.timeDepositRate) return account;
-  const quarterRate = account.timeDepositRate / 100 / 4;
-  return { ...account, timeDepositBalance: Math.round(account.timeDepositBalance * (1 + quarterRate)) };
-}
-function maybeMatureTimeDeposit(account, currentRound) {
-  if (!(account.timeDepositBalance > 0)) return account;
-  if (currentRound < (account.timeDepositLockedUntilRound ?? Infinity)) return account;
-  return {
-    ...account,
-    cash: account.cash + account.timeDepositBalance,
-    timeDepositBalance: 0,
-    timeDepositPrincipal: 0,
-    timeDepositDepositedAtRound: null,
-    timeDepositLockedUntilRound: null,
-    timeDepositRate: null,
-  };
-}
-function withdrawTimeDepositEarly(account) {
-  if (!(account.timeDepositBalance > 0)) return account;
-  const refund = Math.round((account.timeDepositPrincipal ?? account.timeDepositBalance) * (1 - TIME_DEPOSIT_EARLY_PENALTY));
-  return {
-    ...account,
-    cash: account.cash + refund,
-    timeDepositBalance: 0,
-    timeDepositPrincipal: 0,
-    timeDepositDepositedAtRound: null,
-    timeDepositLockedUntilRound: null,
-    timeDepositRate: null,
-  };
-}
-
 // 학습용 비교 시뮬레이션: 같은 총 납입금으로 정기예금 vs 정기적금 만기 금액 비교
 function simulateSavingsComparison(totalAmount, rounds, annualRate) {
   // 정기예금: 라운드 0에 totalAmount 일시 예치, 만기까지 분기 복리
@@ -2596,7 +2567,7 @@ function useDebugMode() {
       if (typeof window === 'undefined') return false;
       const params = new URLSearchParams(window.location.search || '');
       return params.get('debug') === '1';
-    } catch (err) {
+    } catch {
       return false;
     }
   });
@@ -2606,7 +2577,7 @@ function useDebugMode() {
       try {
         const params = new URLSearchParams(window.location.search || '');
         setEnabled(params.get('debug') === '1');
-      } catch (err) {
+      } catch {
         /* ignore */
       }
     };
@@ -2618,7 +2589,7 @@ function useDebugMode() {
 
 // Week 4 §4.9 — 회귀 자동 점검: 5종 검사를 순수 함수로 수행
 // returns: [{ id, label, status: 'ok'|'fail'|'warn', detail }]
-function runRegressionChecks({ round, phase, gameStarted, salaryPaidRounds, tradeLogs, portfolio, teamAccounts, roomMode, assets, macroTimeline, pendingMacroAlerts, activeMacroAlerts, macroAlertsByRound, economicSeed, initialSeedSensitivity }) {
+function runRegressionChecks({ round, phase, gameStarted, salaryPaidRounds, tradeLogs, assets, macroTimeline, macroAlertsByRound, economicSeed, initialSeedSensitivity }) {
   const checks = [];
 
   // (1) 생활소득 누락 검사 — R5~R11 각 1회 입금
@@ -2735,18 +2706,13 @@ function DevPanel({ checks, onRecheck, round }) {
   const failCount = checks.filter((c) => c.status === 'fail').length;
   const warnCount = checks.filter((c) => c.status === 'warn').length;
   const totalBad = failCount + warnCount;
-
-  // 실패 발생 시 자동 펼침
-  useEffect(() => {
-    if (failCount > 0) setExpanded(true);
-  }, [failCount]);
+  const isExpanded = expanded || failCount > 0;
 
   // console.warn 출력
   useEffect(() => {
     if (typeof console === 'undefined') return;
     checks.forEach((c) => {
       if (c.status === 'fail') {
-        // eslint-disable-next-line no-console
         console.warn(`[DevPanel·FAIL] R${round} ${c.label}: ${c.detail}`);
       }
     });
@@ -2757,17 +2723,17 @@ function DevPanel({ checks, onRecheck, round }) {
   else if (warnCount > 0) statusClass = 'warn';
 
   return (
-    <aside className={`dev-panel ${expanded ? 'expanded' : 'collapsed'}`} aria-label="회귀 자동 점검 DEV 패널">
+    <aside className={`dev-panel ${isExpanded ? 'expanded' : 'collapsed'}`} aria-label="회귀 자동 점검 DEV 패널">
       <button
         type="button"
         className={`dev-panel-toggle ${statusClass}`}
-        onClick={() => setExpanded(!expanded)}
-        aria-expanded={expanded}
+        onClick={() => setExpanded(!isExpanded)}
+        aria-expanded={isExpanded}
       >
         <span className="dev-panel-dot" />
         <span className="dev-panel-toggle-label">DEV · {failCount + warnCount === 0 ? 'OK' : `${totalBad}건`}</span>
       </button>
-      {expanded ? (
+      {isExpanded ? (
         <div className="dev-panel-body">
           <header className="dev-panel-head">
             <strong>회귀 자동 점검</strong>
@@ -3507,7 +3473,7 @@ function MacroTriggerPanel({ alertsByRound = {}, activeAlerts = [], compact = fa
 }
 
 // Week 3 H — 교사 대시보드: 라운드별 이슈 분석 탭
-function TeacherRoundIssuesPanel({ triggeredEventsByRound, totalRounds, currentRound }) {
+function TeacherRoundIssuesPanel({ triggeredEventsByRound, totalRounds }) {
   const roundsWithData = Object.keys(triggeredEventsByRound ?? {})
     .map((k) => Number(k))
     .filter((r) => Number.isFinite(r) && (triggeredEventsByRound[r] ?? []).length > 0)
@@ -4475,10 +4441,10 @@ function FinalReport({
   const finalDemandPullCumulative = submission?.demandPullCumulative ?? demandPullCumulative;
   const safePriceIndex = finalPriceIndex > 0 ? finalPriceIndex : 1;
   const cumulativeInflationPct = (safePriceIndex - 1) * 100;
-  const nominalReturnPct = returnRate * 100;
+  const nominalReturnPct = returnRate;
   const realNetWorth = totalAsset / safePriceIndex;
   const realReturnPct = investedPrincipal > 0 ? ((realNetWorth - investedPrincipal) / investedPrincipal) * 100 : 0;
-  const inflationLossWon = Math.round(realNetWorth - totalAsset);
+  const inflationLossWon = Math.max(0, Math.round(totalAsset - realNetWorth));
   const demandPullSharePct = (safePriceIndex - 1) > 0
     ? Math.min(100, Math.max(0, (finalDemandPullCumulative / (safePriceIndex - 1)) * 100))
     : 0;
@@ -4934,7 +4900,7 @@ function AssetLearningPanel({ asset }) {
   const productDetail = getProductLearningDetail(asset);
   try {
     profile = getAssetProfile(asset);
-  } catch (err) {
+  } catch {
     return (
       <section className="asset-learning-panel" aria-label="자산 분석">
         <p style={{ padding: '12px', color: '#64748b', fontSize: '13px' }}>자산 정보를 불러올 수 없습니다.</p>
@@ -5151,6 +5117,27 @@ function AppHeader({ setView, hostAuthenticated, studentEntryAllowed }) {
       </button>
 
     </header>
+  );
+}
+
+function AppToast({ toast, onDismiss }) {
+  if (!toast) return null;
+  const Icon = toast.tone === 'success' ? CheckCircle2 : toast.tone === 'error' ? CircleAlert : BellRing;
+  return (
+    <div
+      className={`app-toast ${toast.tone ?? 'info'}`}
+      role={toast.tone === 'error' ? 'alert' : 'status'}
+      aria-live={toast.tone === 'error' ? 'assertive' : 'polite'}
+    >
+      <Icon size={22} aria-hidden="true" />
+      <div>
+        <strong>{toast.title}</strong>
+        {toast.message ? <span>{toast.message}</span> : null}
+      </div>
+      <button type="button" onClick={onDismiss} aria-label="알림 닫기">
+        <X size={18} aria-hidden="true" />
+      </button>
+    </div>
   );
 }
 
@@ -6086,7 +6073,7 @@ function HostView({
 }
 
 // Week 4 §3.5 사전 작업 — 라운드별 메모 히스토리 (정보보드 탭에서 라운드 무관 항상 열람)
-function RoundNoteHistory({ round, phase, gameFinished, gameStarted, roundNotes, onRoundNoteChange }) {
+function RoundNoteHistory({ round, phase, gameFinished, gameStarted, roundNotes, roundNoteDrafts, roundNoteSaveStates, onRoundNoteDraftChange, onRoundNoteSave }) {
   if (!gameStarted) return null;
   const canEditCurrent = phase === 'closed' && !gameFinished;
   const rounds = [];
@@ -6101,6 +6088,9 @@ function RoundNoteHistory({ round, phase, gameFinished, gameStarted, roundNotes,
       <ol className="round-note-list">
         {rounds.slice().reverse().map((r) => {
           const note = roundNotes?.[r] ?? '';
+          const hasDraft = Object.prototype.hasOwnProperty.call(roundNoteDrafts ?? {}, r);
+          const draft = hasDraft ? roundNoteDrafts[r] : note;
+          const saveState = roundNoteSaveStates?.[r] ?? null;
           const isCurrent = r === round;
           const isEditableNow = isCurrent && canEditCurrent;
           return (
@@ -6108,18 +6098,33 @@ function RoundNoteHistory({ round, phase, gameFinished, gameStarted, roundNotes,
               <div className="note-item-head">
                 <strong>R{r}</strong>
                 {isEditableNow ? (
-                  <span className="round-note-meter">{getByteLength(note)}/100바이트</span>
+                  <span className="round-note-meter">{getByteLength(draft)}/100바이트</span>
                 ) : null}
               </div>
               {isEditableNow ? (
-                <textarea
-                  className="round-note-input"
-                  value={note}
-                  onChange={(event) => onRoundNoteChange(r, event.target.value)}
-                  placeholder="이번 라운드 결정 이유, 학습 포인트 (한글 약 33자)"
-                  rows={2}
-                  aria-label={`${r}라운드 메모 입력`}
-                />
+                <>
+                  <textarea
+                    className="round-note-input"
+                    value={draft}
+                    onChange={(event) => onRoundNoteDraftChange(r, event.target.value)}
+                    placeholder="이번 라운드 결정 이유, 학습 포인트 (한글 약 33자)"
+                    rows={2}
+                    aria-label={`${r}라운드 메모 입력`}
+                  />
+                  <div className="round-note-save-row">
+                    <span className={`round-note-save-status ${saveState?.status ?? ''}`}>
+                      {saveState?.message ?? (hasDraft ? '저장 전' : note ? '저장됨' : '메모를 입력해주세요')}
+                    </span>
+                    <button
+                      className="command primary"
+                      type="button"
+                      onClick={() => onRoundNoteSave(r)}
+                      disabled={saveState?.status === 'saving' || (!hasDraft && draft === note)}
+                    >
+                      {saveState?.status === 'saving' ? '저장 중' : '메모 저장'}
+                    </button>
+                  </div>
+                </>
               ) : note ? (
                 <p className="note-body">{note}</p>
               ) : (
@@ -6188,12 +6193,16 @@ function StudentView({
   setDepositAmount,
   onBuy,
   onSell,
+  tradePending,
   onDeposit,
   onWithdrawDeposit,
   onSubmitReport,
   onReflectionChange,
   roundNotes,
-  onRoundNoteChange,
+  roundNoteDrafts,
+  roundNoteSaveStates,
+  onRoundNoteDraftChange,
+  onRoundNoteSave,
   roundReflections,
   onRoundReflectionChange,
   macroTimeline,
@@ -6204,7 +6213,7 @@ function StudentView({
       if (typeof window === 'undefined') return 'info';
       const saved = window.localStorage.getItem('studentDashboardTab');
       return saved === 'trade' ? 'trade' : 'info';
-    } catch (err) {
+    } catch {
       return 'info';
     }
   });
@@ -6213,7 +6222,7 @@ function StudentView({
       if (typeof window !== 'undefined') {
         window.localStorage.setItem('studentDashboardTab', activeTab);
       }
-    } catch (err) {
+    } catch {
       /* localStorage 비활성 환경 무시 */
     }
   }, [activeTab]);
@@ -6424,7 +6433,10 @@ function StudentView({
             gameFinished={gameFinished}
             gameStarted={gameStarted}
             roundNotes={roundNotes}
-            onRoundNoteChange={onRoundNoteChange}
+            roundNoteDrafts={roundNoteDrafts}
+            roundNoteSaveStates={roundNoteSaveStates}
+            onRoundNoteDraftChange={onRoundNoteDraftChange}
+            onRoundNoteSave={onRoundNoteSave}
           />
         ) : null}
         <MacroGuide baseRate={baseRate} depositRate={depositRate} propertyIndex={propertyIndex} exchangeRate={exchangeRate} unemploymentRate={unemploymentRate} priceIndex={priceIndex} />
@@ -6510,7 +6522,7 @@ function StudentView({
                 </p>
               </div>
             );
-            } catch (err) {
+            } catch {
               return (
                 <p style={{ padding: '12px', color: '#64748b', fontSize: '13px' }}>
                   비교 학습 정보를 불러올 수 없습니다.
@@ -6726,11 +6738,11 @@ function StudentView({
           </div>
 
           <div className="trade-actions">
-            <button className="buy" type="button" onClick={onBuy} disabled={!canTradeStocks || selectedAsset.delisted || !canUseAccount}>
-              {gameFinished ? '종료' : phase !== 'open' ? '장 시작 대기' : selectedAsset.delisted ? '거래중단' : teamMode && !canUseAccount ? tradeDisabledReason : '매수'}
+            <button className="buy" type="button" onClick={onBuy} disabled={!canTradeStocks || selectedAsset.delisted || !canUseAccount || tradePending}>
+              {tradePending ? '처리 중' : gameFinished ? '종료' : phase !== 'open' ? '장 시작 대기' : selectedAsset.delisted ? '거래중단' : teamMode && !canUseAccount ? tradeDisabledReason : '매수'}
             </button>
-            <button className="sell" type="button" onClick={onSell} disabled={!canTradeStocks || selectedAsset.delisted || !canUseAccount}>
-              {phase !== 'open' && !gameFinished ? '장 시작 대기' : teamMode && !canUseAccount ? tradeDisabledReason : '매도'}
+            <button className="sell" type="button" onClick={onSell} disabled={!canTradeStocks || selectedAsset.delisted || !canUseAccount || tradePending}>
+              {tradePending ? '처리 중' : phase !== 'open' && !gameFinished ? '장 시작 대기' : teamMode && !canUseAccount ? tradeDisabledReason : '매도'}
             </button>
           </div>
         </section>
@@ -6766,8 +6778,6 @@ export function App() {
   const [volatilityMode, setVolatilityMode] = useState('standard');
   // Week 2 K — 방 생성 시 부여되는 3가지 난수 시드 (게임마다 약간씩 다른 경제 조건)
   const [economicSeed, setEconomicSeed] = useState(null);
-  // Week 2 E — 가장 최근 배당 정산 결과 (라운드 결과 카드 학습 메시지용)
-  const [latestDividendSummary, setLatestDividendSummary] = useState(null);
   const [gameStarted, setGameStarted] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [baseRate, setBaseRate] = useState(INITIAL_BASE_RATE);
@@ -6776,15 +6786,11 @@ export function App() {
   const [unemploymentRate, setUnemploymentRate] = useState(INITIAL_UNEMPLOYMENT_RATE);
   // Week 4 §2.2 — 물가지수 시스템 (분기당 2% 기본 + 수요견인/이슈/거시 α × 시드 D)
   const [priceIndex, setPriceIndex] = useState(INITIAL_PRICE_INDEX);
-  const [priceIndexByRound, setPriceIndexByRound] = useState({ 1: INITIAL_PRICE_INDEX });
   // Week 4 §4.8 — 거시 시계열 차트용 라운드별 스냅샷
   const [macroTimeline, setMacroTimeline] = useState([]);
   // Week 4 §4.9 — 시드 D 일관성 검사용 초기값 보관
   const [initialSeedSensitivity, setInitialSeedSensitivity] = useState(null);
-  // Week 4 §4.9 — 회귀 자동 점검 재검사 트리거
-  const [devCheckTick, setDevCheckTick] = useState(0);
   const [previousAggregateReturn, setPreviousAggregateReturn] = useState(0);
-  const [principalBasisByPlayer, setPrincipalBasisByPlayer] = useState({}); // {nickname: 누적 원금}
   // Week 4 §2.2 Phase C — 누적 수요견인 인플레이션 (최종 보고서 KPI용)
   //   라운드별 demandPullInflation을 누적해 "전체 인플레이션 중 학생들 수익 때문에 발생한 비중" 계산.
   const [demandPullCumulative, setDemandPullCumulative] = useState(0);
@@ -6824,6 +6830,8 @@ export function App() {
   const [reflection, setReflection] = useState({ good: '', improve: '', next: '' });
   // Week 3 G — 라운드별 한 줄 메모 (UTF-8 100바이트 제한, 한글 약 33자)
   const [roundNotes, setRoundNotes] = useState({});
+  const [roundNoteDrafts, setRoundNoteDrafts] = useState({});
+  const [roundNoteSaveStates, setRoundNoteSaveStates] = useState({});
   // Week 4 §3.6 — 체크포인트 라운드별 학습 질문 응답 ({ 4:{selected,open}, 8:{...}, 12:{...} })
   const [roundReflections, setRoundReflections] = useState({});
   const [submissions, setSubmissions] = useState([]);
@@ -6834,8 +6842,33 @@ export function App() {
   const [resetError, setResetError] = useState('');
   const [remoteRoomId, setRemoteRoomId] = useState(null);
   const [syncStatus, setSyncStatus] = useState(supabaseConfigured ? '실시간 수업 연결 준비 중' : '로컬 연습 모드');
+  const [toast, setToast] = useState(null);
+  const [tradePending, setTradePending] = useState(false);
   const remoteRefreshTimer = useRef(null);
   const studentStateSaveTimer = useRef(null);
+  const toastTimerRef = useRef(null);
+  const shownToastIdsRef = useRef(new Set());
+  const remotePhaseRef = useRef({ initialized: false, roomId: '', round: 1, phase: 'setup' });
+  const tradeLockRef = useRef(false);
+  const tradeUnlockTimerRef = useRef(null);
+
+  const dismissToast = useCallback(() => {
+    window.clearTimeout(toastTimerRef.current);
+    setToast(null);
+  }, []);
+
+  const showToast = useCallback(({ id = '', title, message = '', tone = 'info', duration = 3600 }) => {
+    if (id && shownToastIdsRef.current.has(id)) return;
+    if (id) shownToastIdsRef.current.add(id);
+    window.clearTimeout(toastTimerRef.current);
+    setToast({ id: id || `${Date.now()}-${title}`, title, message, tone });
+    toastTimerRef.current = window.setTimeout(() => setToast(null), duration);
+  }, []);
+
+  useEffect(() => () => {
+    window.clearTimeout(toastTimerRef.current);
+    window.clearTimeout(tradeUnlockTimerRef.current);
+  }, []);
 
   const selectedAsset = useMemo(
     () => assets.find((asset) => asset.id === selectedAssetId) ?? assets[0],
@@ -6902,6 +6935,30 @@ export function App() {
     const resolvedCurrentEvents = remoteCurrentEvents.filter((event) => event.resolved);
     const createdAt = new Date(bundle.room.created_at).getTime();
     const isExpired = new Date(bundle.room.expires_at).getTime() <= Date.now() || bundle.room.phase === 'expired';
+    const nextPhase = isExpired ? 'expired' : bundle.room.phase;
+    const previousRemoteState = remotePhaseRef.current;
+    if (previousRemoteState.initialized && previousRemoteState.roomId === bundle.room.id) {
+      const transitionId = `${bundle.room.id}:${remoteRound}:${nextPhase}`;
+      if (nextPhase === 'open' && (previousRemoteState.phase !== 'open' || previousRemoteState.round !== remoteRound)) {
+        showToast({
+          id: transitionId,
+          title: `${remoteRound}라운드가 시작되었습니다.`,
+          message: '공개된 이슈를 확인하고 투자 판단을 시작하세요.',
+          tone: 'info',
+        });
+      }
+      if (nextPhase === 'closed' && previousRemoteState.phase === 'open') {
+        const finalRound = Number(bundle.room.total_rounds ?? DEFAULT_TOTAL_ROUNDS) === Number(remoteRound);
+        showToast({
+          id: transitionId,
+          title: `${remoteRound}라운드가 종료되었습니다.`,
+          message: finalRound ? '최종 자기평가를 작성해주세요.' : '라운드 메모를 작성해주세요.',
+          tone: 'success',
+          duration: 5000,
+        });
+      }
+    }
+    remotePhaseRef.current = { initialized: true, roomId: bundle.room.id, round: remoteRound, phase: nextPhase };
 
     setRemoteRoomId(bundle.room.id);
     setRoomReady(true);
@@ -6911,7 +6968,7 @@ export function App() {
     setRoomExpired(isExpired);
     setRound(remoteRound);
     setTotalRounds(Number(bundle.room.total_rounds ?? DEFAULT_TOTAL_ROUNDS));
-    setPhase(isExpired ? 'expired' : bundle.room.phase);
+    setPhase(nextPhase);
     setRoomMode(bundle.room.mode ?? 'individual');
     setGameStarted(Boolean(bundle.room.game_started));
     setFinalReportsDownloaded(Boolean(bundle.room.final_reports_downloaded));
@@ -6933,7 +6990,6 @@ export function App() {
     const latestResult = [...remoteRoundResults].sort((a, b) => b.round - a.round)[0] ?? null;
     setRoundResults(remoteRoundResults);
     setPreviousAggregateReturn(Number(latestResult?.aggregateReturn ?? 0));
-    setPriceIndexByRound(remoteRoundResults.reduce((acc, result) => ({ ...acc, [Number(result.round) + 1]: result.priceIndex }), { 1: INITIAL_PRICE_INDEX }));
     setMacroTimeline(remoteRoundResults.map((result) => ({
       round: result.round,
       baseRate: result.macroMove?.nextBaseRate,
@@ -6959,7 +7015,7 @@ export function App() {
     if (bundle.teams?.length) setTeamAccounts(bundle.teams);
     setStudentStates(bundle.studentStates ?? []);
     setSyncStatus('실시간 수업 연결 중');
-  }, []);
+  }, [showToast]);
 
   const refreshRemoteRoom = useCallback(async (roomId = remoteRoomId) => {
     if (!supabaseConfigured || !roomId) return;
@@ -7123,6 +7179,11 @@ export function App() {
   }, [activeTeam.lastDividendRound, depositPrincipal, effectiveCash, effectiveDeposit, effectiveDepositInterestEarned, effectivePortfolio, gameStarted, initialCapitalGranted, joined, lastDividendRound, nickname, phase, reflection, remoteRoomId, roomPin, round, roundLogs, roundNotes, roundReflections, salaryPaidRounds, selectedTeamKey, studentNumber, studentPasscodeHash, teamMode, tradeLogs]);
 
   useEffect(() => {
+    if (!joined || !studentNumber) return;
+    cacheRoundNoteDrafts(remoteRoomId || roomPin, studentNumber, roundNoteDrafts);
+  }, [joined, remoteRoomId, roomPin, roundNoteDrafts, studentNumber]);
+
+  useEffect(() => {
     if (!joined || teamMode || phase !== 'closed') return;
     const remoteState = studentStates.find((state) => Number(state.studentNumber) === Number(studentNumber));
     if (!remoteState) return;
@@ -7152,21 +7213,24 @@ export function App() {
     // Week 3 H — 생활소득 신뢰성 패치
     if (!gameStarted || !joined || teamMode || phase !== 'open') return;
     if (salaryPaidRounds.includes(round)) return;
-    setSalaryPaidRounds((current) => (current.includes(round) ? current : [...current, round]));
-    setCash((current) => current + ROUND_SALARY);
-    setTradeLogs((current) => {
-      if (current.some((log) => log.round === round && log.type === '월급')) return current;
-      return [
-        buildTradeLog({
-          round,
-          type: '월급',
-          detail: `${round}라운드 생활 소득 +${formatWon(ROUND_SALARY)}`,
-          sequence: current.length,
-          now: Date.now(),
-        }),
-        ...current,
-      ];
-    });
+    const timer = window.setTimeout(() => {
+      setSalaryPaidRounds((current) => (current.includes(round) ? current : [...current, round]));
+      setCash((current) => current + ROUND_SALARY);
+      setTradeLogs((current) => {
+        if (current.some((log) => log.round === round && log.type === '월급')) return current;
+        return [
+          buildTradeLog({
+            round,
+            type: '월급',
+            detail: `${round}라운드 생활 소득 +${formatWon(ROUND_SALARY)}`,
+            sequence: current.length,
+            now: Date.now(),
+          }),
+          ...current,
+        ];
+      });
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [gameStarted, joined, phase, round, salaryPaidRounds, teamMode]);
 
   useEffect(() => {
@@ -7343,10 +7407,58 @@ export function App() {
     setReflection((current) => ({ ...current, [key]: value }));
   }
 
-  // Week 3 G — 라운드별 메모 변경 (100바이트 제한)
-  function handleRoundNoteChange(roundNumber, value) {
+  // Week 3 G — 입력 중에는 로컬 초안으로 유지하고 저장 버튼에서 서버에 확정한다.
+  function handleRoundNoteDraftChange(roundNumber, value) {
     const clamped = clampToByteLength(value, 100);
-    setRoundNotes((current) => ({ ...current, [roundNumber]: clamped }));
+    setRoundNoteDrafts((current) => ({ ...current, [roundNumber]: clamped }));
+    setRoundNoteSaveStates((current) => ({ ...current, [roundNumber]: { status: 'editing', message: '저장 전' } }));
+  }
+
+  async function handleRoundNoteSave(roundNumber) {
+    if (!joined || phase !== 'closed' || gameFinished || Number(roundNumber) !== Number(round)) return;
+    const note = clampToByteLength(roundNoteDrafts[roundNumber] ?? roundNotes[roundNumber] ?? '', 100);
+    const nextRoundNotes = { ...roundNotes, [roundNumber]: note };
+    setRoundNoteSaveStates((current) => ({ ...current, [roundNumber]: { status: 'saving', message: '저장 중' } }));
+
+    const nextState = {
+      studentNumber: Number(studentNumber),
+      nickname: nickname.trim(),
+      passcodeHash: studentPasscodeHash,
+      teamKey: teamMode ? selectedTeamKey : '',
+      cash: effectiveCash,
+      deposit: effectiveDeposit,
+      depositPrincipal: teamMode ? 0 : depositPrincipal,
+      depositInterestEarned: effectiveDepositInterestEarned,
+      portfolio: effectivePortfolio,
+      lastDividendRound: teamMode ? activeTeam.lastDividendRound ?? 0 : lastDividendRound,
+      tradeLogs,
+      roundLogs,
+      reflection,
+      roundNotes: nextRoundNotes,
+      roundReflections,
+      salaryPaidRounds,
+      initialCapitalGranted: teamMode ? gameStarted : initialCapitalGranted,
+      updatedAt: Date.now(),
+    };
+
+    try {
+      if (supabaseConfigured && remoteRoomId) {
+        const savedState = await upsertRemoteStudentState(remoteRoomId, nextState);
+        if (savedState) rememberStudentState(savedState);
+      }
+      setRoundNotes(nextRoundNotes);
+      setRoundNoteDrafts((current) => {
+        const next = { ...current };
+        delete next[roundNumber];
+        return next;
+      });
+      const savedAt = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+      setRoundNoteSaveStates((current) => ({ ...current, [roundNumber]: { status: 'saved', message: `${savedAt} 저장됨` } }));
+      showToast({ title: `${roundNumber}라운드 메모가 저장되었습니다.`, tone: 'success' });
+    } catch (error) {
+      setRoundNoteSaveStates((current) => ({ ...current, [roundNumber]: { status: 'error', message: '저장 실패 · 다시 시도' } }));
+      showToast({ title: '메모 저장에 실패했습니다.', message: error.message, tone: 'error', duration: 5000 });
+    }
   }
 
   // Week 4 §3.6 — 체크포인트 학습 질문 응답 변경
@@ -7461,6 +7573,8 @@ export function App() {
       setStudentNumber(String(parsedNumber));
       setNickname(playerToStore.name ?? resolvedName);
       const restored = savedState ? restoreStudentState({ ...savedState, passcodeHash }) : false;
+      setRoundNoteDrafts(loadRoundNoteDrafts(joinRoomId || roomPin, parsedNumber));
+      setRoundNoteSaveStates({});
       if (joinRoomMode && playerToStore.teamKey) setSelectedTeamKey(playerToStore.teamKey);
       if (!restored && joinGameStarted && !joinRoomMode) {
         setCash((current) => (current > 0 ? current : INITIAL_CASH));
@@ -7486,9 +7600,7 @@ export function App() {
     setPortfolio({});
     // Week 4 §2.2 — 게임 시작 시 물가 시스템 리셋
     setPriceIndex(INITIAL_PRICE_INDEX);
-    setPriceIndexByRound({ 1: INITIAL_PRICE_INDEX });
     setPreviousAggregateReturn(0);
-    setPrincipalBasisByPlayer({});
     setDemandPullCumulative(0);
     setMacroTimeline([]); // Week 4 §4.8
     setTeamAccounts(fundedTeams);
@@ -7597,8 +7709,6 @@ export function App() {
     setUnemploymentRate(nextEconomicSeed.economicConstitution.unemploymentRate);
     setEconomicSeed(nextEconomicSeed);
     setInitialSeedSensitivity(nextEconomicSeed?.inflationSensitivity ?? null); // Week 4 §4.9
-    // Week 2 E — 신규 방 시작 시 배당 요약 초기화
-    setLatestDividendSummary(null);
     setAssets(nextRoom.assets);
     setOpenMacroContext(null);
     setTriggeredEventsByRound(nextRoom.triggeredEventsByRound);
@@ -7609,9 +7719,7 @@ export function App() {
     setMacroAlertsByRound({});
     // Week 4 §2.2 — 물가 시스템 초기화 (방 새로 시작/재초기화 시)
     setPriceIndex(INITIAL_PRICE_INDEX);
-    setPriceIndexByRound({ 1: INITIAL_PRICE_INDEX });
     setPreviousAggregateReturn(0);
-    setPrincipalBasisByPlayer({});
     setDemandPullCumulative(0);
     setMacroTimeline([]); // Week 4 §4.8
     setLatestRoundSummary(nextRoom.latestRoundSummary);
@@ -7642,6 +7750,8 @@ export function App() {
     setReflection(nextRoom.reflection);
     // Week 3 G — 라운드별 메모 초기화
     setRoundNotes({});
+    setRoundNoteDrafts({});
+    setRoundNoteSaveStates({});
     // Week 4 §3.6 — 체크포인트 학습 질문 응답 초기화
     setRoundReflections({});
     setSubmissions([]);
@@ -7651,6 +7761,8 @@ export function App() {
     setResetPassword('');
     setResetError('');
     setRemoteRoomId(null);
+    remotePhaseRef.current = { initialized: false, roomId: '', round: 1, phase: 'setup' };
+    shownToastIdsRef.current.clear();
 
     if (!supabaseConfigured) return;
     setSyncStatus(statusMessage);
@@ -7845,6 +7957,12 @@ export function App() {
       ? `${publishedEvents.length}개 이슈가 공개되었습니다. 생활 소득 ${formatWon(ROUND_SALARY)}이 지급되고 거시 지표가 먼저 움직였습니다.`
       : `선택 이슈 없이 장이 시작되었습니다. 생활 소득 ${formatWon(ROUND_SALARY)}과 기본 거시 변수만 먼저 반영됩니다.`;
     pushNews(`${round}라운드 장 시작`, startNewsDetail);
+    showToast({
+      id: `${remoteRoomId || `local-${roomPin}`}:${round}:open`,
+      title: `${round}라운드가 시작되었습니다.`,
+      message: '공개된 이슈를 확인하고 투자 판단을 시작하세요.',
+      tone: 'info',
+    });
     if (remoteRoomId) {
       try {
         const remoteUpdates = [
@@ -8231,7 +8349,6 @@ export function App() {
     setAssets(nextAssetsAfterDividend);
     setStudentStates(nextStudentStatesAfterDividend);
     setTeamAccounts(nextTeamAccountsAfterDividend);
-    setLatestDividendSummary({ round, applied: isDividendRound, breakdown: dividendBreakdown });
 
     // ── Week 4 §2.2: 물가지수(인플레이션) 갱신 — 라운드 N 종료 시점 ──
     //   분기당 기본 1% + α (수요견인 / 이슈 / 거시) × 시드 D
@@ -8283,11 +8400,6 @@ export function App() {
       const totalRoundInflation = Math.max(MIN_INFLATION_FLOOR, rawInflation * seedD);
       nextPriceIndexValue = priceIndex * (1 + totalRoundInflation);
       setPriceIndex(nextPriceIndexValue);
-      setPriceIndexByRound((current) => ({
-        ...current,
-        [round]: priceIndex,                  // 라운드 N 시작 시점 값
-        [round + 1]: nextPriceIndexValue,     // 라운드 N+1 시작 시점 값 (마지막 라운드의 경우 종료 후 값 = 최종)
-      }));
       setPreviousAggregateReturn(aggregateReturnForRound);
       // Phase C — 라운드별 수요견인 인플레이션 누적 (시드 D 적용 후 실제 기여분)
       //   기본 인플레가 floor에 의해 끌어올려진 경우, 수요견인분도 그 비율만큼 잘려나가게 정확히 산정.
@@ -8417,6 +8529,13 @@ export function App() {
       };
     });
     setPlayers(nextPlayersAfterDividend);
+    showToast({
+      id: `${remoteRoomId || `local-${roomPin}`}:${round}:closed`,
+      title: `${round}라운드가 종료되었습니다.`,
+      message: round === totalRounds ? '최종 자기평가를 작성해주세요.' : '라운드 메모를 작성해주세요.',
+      tone: 'success',
+      duration: 5000,
+    });
 
     if (remoteRoomId) {
       try {
@@ -8657,6 +8776,24 @@ export function App() {
     }
   }
 
+  function beginTradeProcessing() {
+    if (tradeLockRef.current) {
+      showToast({ title: '거래 처리 중입니다.', message: '잠시 후 다시 시도해주세요.', tone: 'info', duration: 1800 });
+      return false;
+    }
+    tradeLockRef.current = true;
+    setTradePending(true);
+    return true;
+  }
+
+  function finishTradeProcessing() {
+    window.clearTimeout(tradeUnlockTimerRef.current);
+    tradeUnlockTimerRef.current = window.setTimeout(() => {
+      tradeLockRef.current = false;
+      setTradePending(false);
+    }, 600);
+  }
+
   function handleBuy() {
     if (roomExpired || gameFinished || phase !== 'open' || selectedAsset.delisted || selectedAsset.price <= 0) return;
     if (!canUseTeamAccount()) return;
@@ -8665,23 +8802,38 @@ export function App() {
     // Week 1 B — 수수료를 포함한 최대 주식수 계산: shares × price × (1 + fee) ≤ amount
     const maxShares = Math.floor(amount / (selectedAsset.price * (1 + TRADE_FEE_RATE)));
     const shares = Math.max(0, maxShares);
-    if (shares <= 0) return;
+    if (shares <= 0) {
+      showToast({ title: '매수할 수 없습니다.', message: '주문 금액과 보유 현금을 확인해주세요.', tone: 'error' });
+      return;
+    }
+    if (!beginTradeProcessing()) return;
     const principal = shares * selectedAsset.price;
     const fee = Math.round(principal * TRADE_FEE_RATE);
     const cost = principal + fee;
-    if (teamMode) {
-      updateActiveTeamAccount((team) =>
-        releaseTeamTradeLock({
-          ...team,
-          cash: team.cash - cost,
-          portfolio: { ...team.portfolio, [selectedAsset.id]: (team.portfolio[selectedAsset.id] ?? 0) + shares },
-        }),
-      );
-    } else {
-      setCash((current) => current - cost);
-      setPortfolio((current) => ({ ...current, [selectedAsset.id]: (current[selectedAsset.id] ?? 0) + shares }));
+    try {
+      if (teamMode) {
+        updateActiveTeamAccount((team) =>
+          releaseTeamTradeLock({
+            ...team,
+            cash: team.cash - cost,
+            portfolio: { ...team.portfolio, [selectedAsset.id]: (team.portfolio[selectedAsset.id] ?? 0) + shares },
+          }),
+        );
+      } else {
+        setCash((current) => current - cost);
+        setPortfolio((current) => ({ ...current, [selectedAsset.id]: (current[selectedAsset.id] ?? 0) + shares }));
+      }
+      addTradeLog('매수', `${selectedAsset.name} ${shares.toLocaleString('ko-KR')}주 · ${formatWon(principal)} (수수료 ${formatWon(fee)})`);
+      showToast({
+        title: `${selectedAsset.name} 매수 완료`,
+        message: `${shares.toLocaleString('ko-KR')}주 · 결제 ${formatWon(cost)} (수수료 ${formatWon(fee)})`,
+        tone: 'success',
+      });
+    } catch (error) {
+      showToast({ title: '매수 처리에 실패했습니다.', message: error.message, tone: 'error' });
+    } finally {
+      finishTradeProcessing();
     }
-    addTradeLog('매수', `${selectedAsset.name} ${shares.toLocaleString('ko-KR')}주 · ${formatWon(principal)} (수수료 ${formatWon(fee)})`);
   }
 
   function handleSell() {
@@ -8691,25 +8843,40 @@ export function App() {
     const sourcePortfolio = teamMode ? activeTeam.portfolio : portfolio;
     const owned = sourcePortfolio[selectedAsset.id] ?? 0;
     const shares = Math.min(owned, Math.floor(amount / selectedAsset.price));
-    if (shares <= 0) return;
+    if (shares <= 0) {
+      showToast({ title: '매도할 수 없습니다.', message: '주문 금액과 보유 수량을 확인해주세요.', tone: 'error' });
+      return;
+    }
+    if (!beginTradeProcessing()) return;
     // Week 1 B — 매도: 거래 수수료 + 증권거래세 차감
     const principal = shares * selectedAsset.price;
     const fee = Math.round(principal * TRADE_FEE_RATE);
     const tax = Math.round(principal * TRADE_TAX_RATE);
     const revenue = principal - fee - tax;
-    if (teamMode) {
-      updateActiveTeamAccount((team) =>
-        releaseTeamTradeLock({
-          ...team,
-          cash: team.cash + revenue,
-          portfolio: { ...team.portfolio, [selectedAsset.id]: owned - shares },
-        }),
-      );
-    } else {
-      setCash((current) => current + revenue);
-      setPortfolio((current) => ({ ...current, [selectedAsset.id]: owned - shares }));
+    try {
+      if (teamMode) {
+        updateActiveTeamAccount((team) =>
+          releaseTeamTradeLock({
+            ...team,
+            cash: team.cash + revenue,
+            portfolio: { ...team.portfolio, [selectedAsset.id]: owned - shares },
+          }),
+        );
+      } else {
+        setCash((current) => current + revenue);
+        setPortfolio((current) => ({ ...current, [selectedAsset.id]: owned - shares }));
+      }
+      addTradeLog('매도', `${selectedAsset.name} ${shares.toLocaleString('ko-KR')}주 · ${formatWon(revenue)} (수수료 ${formatWon(fee)} · 거래세 ${formatWon(tax)})`);
+      showToast({
+        title: `${selectedAsset.name} 매도 완료`,
+        message: `${shares.toLocaleString('ko-KR')}주 · 입금 ${formatWon(revenue)} (수수료·세금 ${formatWon(fee + tax)})`,
+        tone: 'success',
+      });
+    } catch (error) {
+      showToast({ title: '매도 처리에 실패했습니다.', message: error.message, tone: 'error' });
+    } finally {
+      finishTradeProcessing();
     }
-    addTradeLog('매도', `${selectedAsset.name} ${shares.toLocaleString('ko-KR')}주 · ${formatWon(revenue)} (수수료 ${formatWon(fee)} · 거래세 ${formatWon(tax)})`);
   }
 
   function handleDeposit() {
@@ -8931,16 +9098,21 @@ export function App() {
           setDepositAmount={setDepositAmount}
           onBuy={handleBuy}
           onSell={handleSell}
+          tradePending={tradePending}
           onDeposit={handleDeposit}
           onWithdrawDeposit={handleWithdrawDeposit}
           onSubmitReport={handleSubmitReport}
           onReflectionChange={handleReflectionChange}
           roundNotes={roundNotes}
-          onRoundNoteChange={handleRoundNoteChange}
+          roundNoteDrafts={roundNoteDrafts}
+          roundNoteSaveStates={roundNoteSaveStates}
+          onRoundNoteDraftChange={handleRoundNoteDraftChange}
+          onRoundNoteSave={handleRoundNoteSave}
           roundReflections={roundReflections}
           onRoundReflectionChange={handleRoundReflectionChange}
         />
       ) : null}
+      <AppToast toast={toast} onDismiss={dismissToast} />
     </div>
   );
 }

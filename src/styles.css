@@ -47,6 +47,70 @@ p {
     radial-gradient(circle at top left, rgba(37, 99, 235, 0.14), transparent 32rem);
 }
 
+.app-toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(20px + env(safe-area-inset-bottom));
+  z-index: 1000;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  width: min(440px, calc(100vw - 24px));
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 12px 14px;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.2);
+  color: #1e3a8a;
+}
+
+.app-toast.success {
+  border-color: #86efac;
+  color: #166534;
+}
+
+.app-toast.error {
+  border-color: #fecaca;
+  color: #991b1b;
+}
+
+.app-toast > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.app-toast strong,
+.app-toast span {
+  overflow-wrap: anywhere;
+}
+
+.app-toast strong {
+  font-size: 0.92rem;
+}
+
+.app-toast span {
+  color: #475569;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.app-toast button {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: currentColor;
+}
+
+.app-toast button:hover {
+  background: #f1f5f9;
+}
+
 .topbar {
   position: sticky;
   top: 0;
@@ -3949,6 +4013,38 @@ input {
   color: var(--text-muted, #9ca3af);
   font-style: italic;
   font-size: 12px;
+}
+
+.round-note-save-row {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.round-note-save-row .command {
+  min-height: 36px;
+  padding: 0.45rem 0.8rem;
+  font-size: 0.78rem;
+}
+
+.round-note-save-status {
+  color: #64748b;
+  font-size: 0.75rem;
+  font-weight: 750;
+}
+
+.round-note-save-status.saved {
+  color: #15803d;
+}
+
+.round-note-save-status.error {
+  color: #b91c1c;
+}
+
+.round-note-save-status.saving {
+  color: #1d4ed8;
 }
 /* 메모 입력 textarea는 기존 .round-note-input 스타일을 그대로 재사용 */
 
