@@ -641,16 +641,29 @@ function exposureLabel(value) {
   return '낮음';
 }
 
+function getFiniteMetric(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
 function getFinancialSignals(financials) {
-  const stability = financials.debtRatio <= 80 && financials.cashReserve / Math.max(financials.revenue, 0.1) >= 0.18
+  const revenue = getFiniteMetric(financials?.revenue, 1);
+  const debtRatio = getFiniteMetric(financials?.debtRatio, 100);
+  const cashReserve = getFiniteMetric(financials?.cashReserve, 0.1);
+  const creditRisk = getFiniteMetric(financials?.creditRisk, 45);
+  const rdRatio = getFiniteMetric(financials?.rdRatio, 5);
+  const operatingMargin = getFiniteMetric(financials?.operatingMargin, 6);
+  const cyclicality = getFiniteMetric(financials?.cyclicality, 50);
+  const commodityExposure = getFiniteMetric(financials?.commodityExposure, 45);
+  const stability = debtRatio <= 80 && cashReserve / Math.max(revenue, 0.1) >= 0.18
     ? '높음'
-    : financials.debtRatio >= 170 || financials.creditRisk >= 70
+    : debtRatio >= 170 || creditRisk >= 70
       ? '낮음'
       : '보통';
-  const growth = financials.rdRatio >= 14 || financials.operatingMargin >= 13 ? '높음' : financials.rdRatio <= 3 && financials.operatingMargin <= 4 ? '낮음' : '보통';
-  const volatility = financials.cyclicality >= 75 || financials.commodityExposure >= 75 || financials.debtRatio >= 170
+  const growth = rdRatio >= 14 || operatingMargin >= 13 ? '높음' : rdRatio <= 3 && operatingMargin <= 4 ? '낮음' : '보통';
+  const volatility = cyclicality >= 75 || commodityExposure >= 75 || debtRatio >= 170
     ? '높음'
-    : financials.cyclicality <= 35 && financials.debtRatio <= 80
+    : cyclicality <= 35 && debtRatio <= 80
       ? '낮음'
       : '보통';
 
@@ -660,15 +673,23 @@ function getFinancialSignals(financials) {
 function buildFinancialMetrics(asset) {
   if (!asset.financials) return null;
   const financials = asset.financials;
+  const profile = financials.profile ?? asset.financialProfile ?? '상품형';
+  const revenue = getFiniteMetric(financials.revenue, 0);
+  const operatingMargin = getFiniteMetric(financials.operatingMargin, 0);
+  const debtRatio = getFiniteMetric(financials.debtRatio, 0);
+  const cashReserve = getFiniteMetric(financials.cashReserve, 0);
+  const rdRatio = getFiniteMetric(financials.rdRatio, 0);
+  const exportRatio = getFiniteMetric(financials.exportRatio, 0);
+  const commodityExposure = getFiniteMetric(financials.commodityExposure, 0);
   return [
-    ['재무 유형', financials.profile],
-    ['매출', formatTrillion(financials.revenue)],
-    ['영업이익률', `${financials.operatingMargin.toFixed(1)}%`],
-    ['부채비율', `${financials.debtRatio}%`],
-    ['현금보유', formatTrillion(financials.cashReserve)],
-    ['R&D 비중', `${financials.rdRatio.toFixed(1)}%`],
-    ['수출비중', `${financials.exportRatio}%`],
-    ['원자재 의존도', exposureLabel(financials.commodityExposure)],
+    ['재무 유형', profile],
+    ['매출', formatTrillion(revenue)],
+    ['영업이익률', `${operatingMargin.toFixed(1)}%`],
+    ['부채비율', `${debtRatio}%`],
+    ['현금보유', formatTrillion(cashReserve)],
+    ['R&D 비중', `${rdRatio.toFixed(1)}%`],
+    ['수출비중', `${exportRatio}%`],
+    ['원자재 의존도', exposureLabel(commodityExposure)],
   ];
 }
 
@@ -2689,13 +2710,22 @@ function getDepositRate(baseRate) {
 }
 
 function getAssetProfile(asset) {
-  const baseProfile = assetLearningProfiles[asset.id] ?? {
+  const fallbackProfile = {
     story: `${asset.name}은 ${asset.sector} 흐름을 단순화한 가상 자산입니다. 가격만 보지 말고 어떤 이슈에서 변동 가능성이 커지는지 함께 확인해보세요.`,
     metrics: [['자산 유형', assetTypeLabels[asset.type] ?? asset.type], ['국가', asset.country], ['분야', asset.sector], ['현재가', formatAssetPrice(asset)]],
     signals: { stability: '보통', growth: '보통', volatility: '보통' },
     riskTags: ['이슈민감', '분산투자필요'],
     sensitivity: ['금리 변화', '정책 변화', '시장 심리'],
     prompt: '이 자산은 어떤 뉴스에서 변동 가능성이 커질까요?',
+  };
+  const baseProfile = {
+    ...fallbackProfile,
+    ...(assetLearningProfiles[asset.id] ?? {}),
+    metrics: assetLearningProfiles[asset.id]?.metrics ?? fallbackProfile.metrics,
+    signals: assetLearningProfiles[asset.id]?.signals ?? fallbackProfile.signals,
+    riskTags: assetLearningProfiles[asset.id]?.riskTags ?? fallbackProfile.riskTags,
+    sensitivity: assetLearningProfiles[asset.id]?.sensitivity ?? fallbackProfile.sensitivity,
+    prompt: assetLearningProfiles[asset.id]?.prompt ?? fallbackProfile.prompt,
   };
   const financialMetrics = buildFinancialMetrics(asset);
   if (!financialMetrics) return baseProfile;
@@ -2704,7 +2734,11 @@ function getAssetProfile(asset) {
     ...baseProfile,
     metrics: financialMetrics,
     signals: getFinancialSignals(asset.financials),
-    riskTags: [...new Set([...baseProfile.riskTags, asset.financials.profile, asset.financials.debtRatio >= 160 ? '부채주의' : '재무체크'])],
+    riskTags: [...new Set([
+      ...baseProfile.riskTags,
+      asset.financials.profile ?? asset.financialProfile ?? '재무체크',
+      getFiniteMetric(asset.financials.debtRatio, 0) >= 160 ? '부채주의' : '재무체크',
+    ])],
   };
 }
 
