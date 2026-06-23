@@ -55,6 +55,9 @@ p {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   width: min(440px, calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
+  box-sizing: border-box;
+  transform: translateX(-50%);
   align-items: center;
   gap: 10px;
   border: 1px solid #bfdbfe;
@@ -109,6 +112,15 @@ p {
 
 .app-toast button:hover {
   background: #f1f5f9;
+}
+
+@media (max-width: 520px) {
+  .app-toast {
+    bottom: calc(14px + env(safe-area-inset-bottom));
+    width: calc(100vw - 20px);
+    max-width: calc(100vw - 20px);
+    padding: 11px 12px;
+  }
 }
 
 .topbar {
