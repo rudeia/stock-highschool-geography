@@ -69,7 +69,9 @@ const ROUND_OPTIONS = [4, 12];
 const MAX_PLAYERS_PER_ROOM = 40;
 const INITIAL_BASE_RATE = 3.5;
 const INITIAL_UNEMPLOYMENT_RATE = 3.5;
-const MAX_EVENTS_PER_ROUND = 5;
+const MAX_EVENTS_PER_ROUND = 3;
+const MAX_CORPORATE_RISKS_PER_ROUND = 1;
+const CORPORATE_RISK_PREFIX = 'corp-risk';
 const EVENT_SUCCESS_PROBABILITY = 0.7;
 const EXPECTATION_WITHIN_SUCCESS_PROBABILITY = 0.3;
 const EXPECTATION_IMPACT_MULTIPLIER = 0.7;
@@ -3157,6 +3159,10 @@ function getEventKey(event) {
 }
 
 function getSimpleExplanation(event) {
+  if (isCorporateRiskEvent(event)) {
+    return '기업 리스크 = 시장 전체가 아니라 선택한 기업 하나에 직접 영향';
+  }
+
   const explanations = {
     'rate-up': '금리 인상 = 돈을 빌리는 비용 증가',
     'rate-down': '금리 인하 = 돈을 빌리는 부담 감소',
@@ -3670,6 +3676,132 @@ function IssueTicker({ events, phase, compact = false }) {
             <small className="friendly-term">{getSimpleExplanation(event)}</small>
             <p>{event.detail}</p>
             {phase === 'open' ? <em>장 마감 후 이 이슈가 실제 가격에 반영됐는지 확인해보세요.</em> : null}
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function CorporateRiskTicker({ events, assets, phase, compact = false }) {
+  if (!events.length) return null;
+  return (
+    <section className={compact ? 'issue-panel compact corporate-risk-ticker' : 'issue-panel corporate-risk-ticker'} aria-label="기업 리스크">
+      <div className="panel-heading split">
+        <div>
+          <CircleAlert size={22} aria-hidden="true" />
+          <h2>{phase === 'open' ? '진행 중 기업 리스크' : '등록된 기업 리스크'}</h2>
+        </div>
+        <span className="limit-pill">{events.length}/{MAX_CORPORATE_RISKS_PER_ROUND}</span>
+      </div>
+      <div className="issue-list">
+        {events.map((event) => {
+          const targetAssetId = getCorporateRiskTargetAssetId(event);
+          const targetAsset = assets.find((asset) => asset.id === targetAssetId);
+          return (
+            <article key={event.id}>
+              <strong>{event.title}</strong>
+              <small className="friendly-term">{targetAsset?.name ?? event.affectedAssets?.[0] ?? '선택 기업'} 직접 영향</small>
+              <p>{event.detail}</p>
+              {phase === 'open' ? <em>장 마감 후 실제 기업가치에 반영됐는지 확인해보세요.</em> : null}
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function CorporateRiskPanel({
+  assets,
+  corporateRiskEvents = [],
+  selectedAssetId,
+  onSelectedAssetChange,
+  onRegisterCorporateRisk,
+  onCancelIssue,
+  onClearCorporateRisks,
+  canRegisterCorporateRisk,
+  phase,
+  gameStarted,
+  roomExpired,
+}) {
+  const stockAssets = assets.filter((asset) => asset.type === 'stock' && !asset.delisted);
+  const selectedAsset = stockAssets.find((asset) => asset.id === selectedAssetId) ?? stockAssets[0];
+  const riskOptions = getCorporateRiskOptions(selectedAsset);
+  const limitReached = corporateRiskEvents.length >= MAX_CORPORATE_RISKS_PER_ROUND;
+  const disabled = !canRegisterCorporateRisk || !selectedAsset;
+
+  return (
+    <section className="corporate-risk-panel" aria-labelledby="corporate-risk-heading">
+      <div className="panel-heading split">
+        <div>
+          <CircleAlert size={22} aria-hidden="true" />
+          <h2 id="corporate-risk-heading">기업 리스크 확장팩</h2>
+        </div>
+        <span className={limitReached ? 'limit-pill full' : 'limit-pill'}>
+          {corporateRiskEvents.length}/{MAX_CORPORATE_RISKS_PER_ROUND}
+        </span>
+      </div>
+      <p className="teacher-hint">
+        시장 전체 이슈와 별개로 특정 기업 하나에만 적용되는 뉴스입니다. 거시 지표에는 직접 영향을 주지 않고, 선택한 기업 가격에만 반영됩니다.
+      </p>
+      {!gameStarted ? <p className="teacher-hint warning">게임 시작 전에는 기업 리스크를 등록하지 않습니다.</p> : null}
+      {phase !== 'setup' ? <p className="teacher-hint">장이 진행 중이거나 마감된 뒤에는 기업 리스크를 새로 등록할 수 없습니다.</p> : null}
+      {roomExpired ? <p className="teacher-hint warning">만료된 방에서는 기업 리스크를 등록할 수 없습니다.</p> : null}
+      {limitReached ? <p className="teacher-hint warning">이번 라운드 기업 리스크 한도에 도달했습니다.</p> : null}
+
+      <label className="corporate-risk-picker">
+        기업 선택
+        <select
+          value={selectedAsset?.id ?? ''}
+          onChange={(event) => onSelectedAssetChange(event.target.value)}
+          disabled={!stockAssets.length || phase !== 'setup' || roomExpired}
+        >
+          {stockAssets.map((asset) => (
+            <option key={asset.id} value={asset.id}>
+              {asset.name} · {asset.sector}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      {corporateRiskEvents.length ? (
+        <div className="draft-issue-list corporate" aria-label="선택된 기업 리스크">
+          <div className="panel-heading split">
+            <div>
+              <CircleAlert size={18} aria-hidden="true" />
+              <h3>선택된 기업 리스크</h3>
+            </div>
+            <button className="command secondary" type="button" onClick={onClearCorporateRisks} disabled={phase !== 'setup'}>
+              초기화
+            </button>
+          </div>
+          {corporateRiskEvents.map((event) => (
+            <article key={event.id}>
+              <div>
+                <strong>{event.title}</strong>
+                <small className="friendly-term">{getSimpleExplanation(event)}</small>
+                <span>{event.detail}</span>
+              </div>
+              <button type="button" onClick={() => onCancelIssue(event.id)} disabled={phase !== 'setup'}>
+                취소
+              </button>
+            </article>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="corporate-risk-grid">
+        {riskOptions.map((risk) => (
+          <article className={risk.impactValue >= 0 ? 'risk-option-card positive' : 'risk-option-card negative'} key={risk.id}>
+            <div>
+              <strong>{risk.title}</strong>
+              <span>{risk.detail}</span>
+              <small>{risk.principle}</small>
+            </div>
+            <button type="button" onClick={() => onRegisterCorporateRisk(selectedAsset.id, risk)} disabled={disabled}>
+              적용
+            </button>
           </article>
         ))}
       </div>
@@ -5904,6 +6036,361 @@ function pickRandomRoundIssues({ round, now, count = 3 }) {
     });
 }
 
+function isCorporateRiskEvent(event) {
+  const key = String(event?.templateId ?? event?.id ?? '');
+  return Boolean(event?.corporateRisk) || key.startsWith(`${CORPORATE_RISK_PREFIX}-`);
+}
+
+function getCorporateRiskTargetAssetId(event) {
+  return event?.riskTargetAssetId ?? Object.keys(event?.impact ?? {})[0] ?? '';
+}
+
+function makeCorporateRiskOption({
+  id,
+  title,
+  detail,
+  principle,
+  impactValue,
+  failureTitle,
+  failureDetail,
+  financialLinks,
+  probability = DEFAULT_EVENT_PROBABILITY,
+}) {
+  return {
+    id,
+    title,
+    detail,
+    principle,
+    impactValue,
+    failureTitle,
+    failureDetail,
+    financialLinks,
+    probability,
+  };
+}
+
+function getCorporateRiskOptions(asset) {
+  if (!asset) return [];
+  const name = asset.name;
+  const sectorText = `${asset.id} ${asset.name} ${asset.sector ?? ''}`.toLowerCase();
+  const commonOptions = [
+    makeCorporateRiskOption({
+      id: 'buyback',
+      title: `${name} 자사주 소각 발표`,
+      detail: `${name}이 유통 주식 수를 줄이는 주주환원 계획을 발표했습니다. 주당 가치가 높아질 수 있다는 기대가 커집니다.`,
+      principle: '자사주 소각은 같은 기업가치를 더 적은 주식 수로 나누게 하므로 주당 가치와 주주환원 기대를 높일 수 있습니다.',
+      impactValue: 0.16,
+      failureTitle: `${name} 자사주 소각 계획 보류`,
+      failureDetail: '재무 여건과 이사회 검토가 길어지며 실제 소각은 이번 라운드에 확인되지 않았습니다.',
+      financialLinks: ['주주환원', '현금보유', '주당가치', '투자심리'],
+    }),
+    makeCorporateRiskOption({
+      id: 'governance-risk',
+      title: `${name} 경영진 신뢰 논란`,
+      detail: `${name} 경영진의 의사결정과 내부 통제에 대한 의문이 제기되었습니다. 기업 고유 위험이 커집니다.`,
+      principle: '오너리스크와 지배구조 논란은 업종 전체보다 해당 기업의 신뢰도와 할인율에 직접 영향을 주는 경우가 많습니다.',
+      impactValue: -0.18,
+      failureTitle: `${name} 경영진 논란 해명`,
+      failureDetail: '조사 결과 핵심 의혹이 확인되지 않아 기업가치에 직접 반영될 정도의 충격은 제한되었습니다.',
+      financialLinks: ['지배구조', '평판위험', '할인율', '투자심리'],
+    }),
+  ];
+
+  let sectorOptions = [
+    makeCorporateRiskOption({
+      id: 'rating-upgrade',
+      title: `${name} 목표주가 상향 보고서`,
+      detail: `${name}의 실적 추정치가 개선되며 주요 증권사의 평가가 상향되었습니다.`,
+      principle: '기업 분석 보고서는 실제 실적보다 먼저 기대를 움직일 수 있지만, 한 기업에 국한된 재평가라는 점이 중요합니다.',
+      impactValue: 0.15,
+      failureTitle: `${name} 목표주가 상향 불발`,
+      failureDetail: '추가 자료 확인 과정에서 실적 개선 근거가 부족해 평가 상향이 확정되지 않았습니다.',
+      financialLinks: ['실적전망', '영업이익률', '밸류에이션', '투자심리'],
+    }),
+    makeCorporateRiskOption({
+      id: 'accounting-question',
+      title: `${name} 회계 처리 의문 제기`,
+      detail: `${name}의 매출 인식과 비용 처리 방식에 대한 의문이 제기되었습니다.`,
+      principle: '회계 신뢰도는 기업의 재무제표를 믿을 수 있는가의 문제이므로 해당 기업 가격에 직접 충격을 줄 수 있습니다.',
+      impactValue: -0.19,
+      failureTitle: `${name} 회계 의문 해소`,
+      failureDetail: '외부 검토에서 중대한 회계 문제가 확인되지 않아 가격 영향은 제한되었습니다.',
+      financialLinks: ['회계신뢰도', '매출인식', '현금흐름', '평판위험'],
+    }),
+  ];
+
+  if (sectorText.includes('반도체') || sectorText.includes('ai') || sectorText.includes('우주')) {
+    sectorOptions = [
+      makeCorporateRiskOption({
+        id: 'ai-chip-order',
+        title: `${name} AI 칩 대형 공급 계약`,
+        detail: `${name}이 대형 고객사와 AI 칩 공급 계약을 추진한다는 소식이 나왔습니다.`,
+        principle: '기술주는 미래 매출 기대가 가격에 크게 반영되므로 대형 수주와 공급 계약에 민감합니다.',
+        impactValue: 0.2,
+        failureTitle: `${name} AI 칩 계약 지연`,
+        failureDetail: '고객사 검증과 생산 일정 조율이 길어지며 계약 확정은 다음 라운드 이후로 밀렸습니다.',
+        financialLinks: ['수주잔고', 'R&D 비중', '수출비중', '미래매출'],
+      }),
+      makeCorporateRiskOption({
+        id: 'export-license-delay',
+        title: `${name} 첨단 칩 수출 허가 지연`,
+        detail: `${name}의 일부 첨단 제품이 수출 심사 지연을 겪고 있다는 소식이 나왔습니다.`,
+        principle: '수출 비중이 높은 기술 기업은 특정 국가 규제와 허가 지연이 매출 전망을 흔들 수 있습니다.',
+        impactValue: -0.19,
+        failureTitle: `${name} 수출 허가 지연 우려 완화`,
+        failureDetail: '규제 대상 제품이 제한적이라는 해석이 나오며 직접 충격은 약해졌습니다.',
+        financialLinks: ['수출비중', '정책위험', 'R&D 비중', '공급망'],
+      }),
+    ];
+  } else if (sectorText.includes('바이오') || sectorText.includes('신약') || sectorText.includes('헬스')) {
+    sectorOptions = [
+      makeCorporateRiskOption({
+        id: 'clinical-success',
+        title: `${name} 핵심 임상 결과 긍정`,
+        detail: `${name}의 주요 파이프라인에서 긍정적인 임상 결과가 발표될 가능성이 제기되었습니다.`,
+        principle: '바이오 기업은 아직 실적보다 신약 성공 가능성이 기업가치를 크게 바꿀 수 있습니다.',
+        impactValue: 0.22,
+        failureTitle: `${name} 임상 결과 발표 연기`,
+        failureDetail: '자료 검증이 더 필요하다는 이유로 핵심 결과 발표가 미뤄졌습니다.',
+        financialLinks: ['R&D 비중', '신약 파이프라인', '미래매출', '현금소진'],
+      }),
+      makeCorporateRiskOption({
+        id: 'clinical-delay',
+        title: `${name} 임상 일정 지연`,
+        detail: `${name}의 핵심 신약 후보 물질 임상 일정이 지연될 수 있다는 소식이 나왔습니다.`,
+        principle: '바이오 기업은 개발 일정이 늦어지면 매출 발생 시점이 뒤로 밀려 기업가치가 흔들립니다.',
+        impactValue: -0.22,
+        failureTitle: `${name} 임상 지연 우려 해소`,
+        failureDetail: '임상 지연 보도와 달리 회사가 예정된 일정 유지 가능성을 제시했습니다.',
+        financialLinks: ['개발일정', 'R&D 비중', '현금보유', '미래매출'],
+      }),
+    ];
+  } else if (sectorText.includes('금융') || sectorText.includes('은행')) {
+    sectorOptions = [
+      makeCorporateRiskOption({
+        id: 'delinquency-stable',
+        title: `${name} 대출 연체율 안정`,
+        detail: `${name}의 가계·기업 대출 연체율이 예상보다 안정적이라는 내부 지표가 공개되었습니다.`,
+        principle: '은행은 금리뿐 아니라 빌려준 돈을 잘 돌려받는지가 이익과 건전성을 좌우합니다.',
+        impactValue: 0.16,
+        failureTitle: `${name} 연체율 안정 확인 실패`,
+        failureDetail: '일부 부문에서 추가 점검이 필요해 건전성 개선 신호로 보기 어렵다는 평가가 나왔습니다.',
+        financialLinks: ['대손비용', '연체율', '부동산대출', '신용위험'],
+      }),
+      makeCorporateRiskOption({
+        id: 'loan-loss-reserve',
+        title: `${name} 부실 대출 충당금 확대`,
+        detail: `${name}이 부실 가능성에 대비해 대손충당금을 크게 늘릴 수 있다는 전망이 나왔습니다.`,
+        principle: '은행은 부실 대출이 늘어나면 현재 이익을 충당금으로 줄여야 하므로 주가에 부담이 됩니다.',
+        impactValue: -0.2,
+        failureTitle: `${name} 충당금 우려 제한`,
+        failureDetail: '예상보다 부실 대출 규모가 작아 추가 충당금 부담은 제한적이라는 분석이 나왔습니다.',
+        financialLinks: ['대손충당금', '연체율', '자본건전성', '경기민감'],
+      }),
+    ];
+  } else if (sectorText.includes('항공') || sectorText.includes('여행') || sectorText.includes('물류')) {
+    sectorOptions = [
+      makeCorporateRiskOption({
+        id: 'route-booking-boom',
+        title: `${name} 주요 노선 예약률 급증`,
+        detail: `${name}의 주요 노선 예약률이 빠르게 회복되고 있다는 소식이 나왔습니다.`,
+        principle: '항공사는 좌석 판매율이 높아지면 고정비 부담을 나눌 수 있어 수익성이 개선될 수 있습니다.',
+        impactValue: 0.17,
+        failureTitle: `${name} 예약률 회복 둔화`,
+        failureDetail: '초기 예약 문의는 늘었지만 실제 결제 전환율은 기대보다 낮았습니다.',
+        financialLinks: ['탑승률', '고정비', '유류비', '여행수요'],
+      }),
+      makeCorporateRiskOption({
+        id: 'safety-grounding',
+        title: `${name} 안전 점검 장기화`,
+        detail: `${name} 일부 항공기의 안전 점검이 길어지며 운항 차질 가능성이 제기되었습니다.`,
+        principle: '운항 차질은 매출 감소와 보상 비용을 동시에 만들 수 있어 항공사에 직접 부담이 됩니다.',
+        impactValue: -0.19,
+        failureTitle: `${name} 안전 점검 조기 완료`,
+        failureDetail: '점검 결과 중대한 결함이 확인되지 않아 운항 차질 우려가 줄었습니다.',
+        financialLinks: ['운항률', '정비비', '평판위험', '현금흐름'],
+      }),
+    ];
+  } else if (sectorText.includes('식품') || sectorText.includes('농산물')) {
+    sectorOptions = [
+      makeCorporateRiskOption({
+        id: 'supply-contract',
+        title: `${name} 대형 납품 계약 체결`,
+        detail: `${name}이 대형 유통사와 장기 납품 계약을 맺었다는 소식이 나왔습니다.`,
+        principle: '식품 기업은 안정적인 판로가 생기면 매출 예측 가능성이 높아지고 재고 부담도 낮아질 수 있습니다.',
+        impactValue: 0.16,
+        failureTitle: `${name} 납품 계약 협상 지연`,
+        failureDetail: '가격 조건과 원재료 부담을 두고 협상이 길어지며 계약 확정이 미뤄졌습니다.',
+        financialLinks: ['매출안정성', '원재료비', '유통채널', '영업이익률'],
+      }),
+      makeCorporateRiskOption({
+        id: 'food-safety',
+        title: `${name} 식품 안전 논란`,
+        detail: `${name} 일부 제품의 품질 관리와 회수 가능성이 거론되었습니다.`,
+        principle: '식품 기업은 신뢰가 매출과 직결되므로 품질 논란이 해당 기업에 직접적인 충격을 줄 수 있습니다.',
+        impactValue: -0.18,
+        failureTitle: `${name} 품질 논란 해소`,
+        failureDetail: '검사 결과 문제가 제한적이라는 발표가 나오며 회수 비용 우려가 줄었습니다.',
+        financialLinks: ['브랜드신뢰', '회수비용', '영업이익률', '평판위험'],
+      }),
+    ];
+  } else if (sectorText.includes('정유') || sectorText.includes('원자재')) {
+    sectorOptions = [
+      makeCorporateRiskOption({
+        id: 'refining-margin-up',
+        title: `${name} 정제마진 개선`,
+        detail: `${name}의 정제마진이 예상보다 개선되고 있다는 업계 지표가 나왔습니다.`,
+        principle: '정유사는 원유 가격 자체보다 제품 가격과 원유 가격의 차이인 정제마진이 수익성을 좌우할 때가 많습니다.',
+        impactValue: 0.17,
+        failureTitle: `${name} 정제마진 개선 제한`,
+        failureDetail: '제품 수요가 기대보다 약해 정제마진 개선 폭이 제한적이라는 분석이 나왔습니다.',
+        financialLinks: ['정제마진', '원유가격', '재고평가', '영업이익률'],
+      }),
+      makeCorporateRiskOption({
+        id: 'environment-penalty',
+        title: `${name} 환경 규제 과징금 우려`,
+        detail: `${name}의 일부 사업장에서 환경 규제 위반 가능성이 제기되었습니다.`,
+        principle: '규제 비용과 설비 개선 비용은 단기 현금흐름과 평판에 부담을 줄 수 있습니다.',
+        impactValue: -0.18,
+        failureTitle: `${name} 환경 규제 우려 완화`,
+        failureDetail: '점검 결과 위반 범위가 제한적이라는 해석이 나오며 과징금 우려가 낮아졌습니다.',
+        financialLinks: ['규제비용', '현금흐름', '평판위험', '정책민감'],
+      }),
+    ];
+  } else if (sectorText.includes('건설') || sectorText.includes('인프라')) {
+    sectorOptions = [
+      makeCorporateRiskOption({
+        id: 'public-order',
+        title: `${name} 대형 공공 수주`,
+        detail: `${name}이 대형 인프라 사업의 우선협상 대상자로 선정되었다는 소식이 나왔습니다.`,
+        principle: '건설·인프라 기업은 수주잔고가 미래 매출의 출발점이므로 대형 계약 뉴스에 민감합니다.',
+        impactValue: 0.16,
+        failureTitle: `${name} 공공 수주 발표 보류`,
+        failureDetail: '입찰 심사가 길어지며 우선협상 대상자 발표가 미뤄졌습니다.',
+        financialLinks: ['수주잔고', '정책민감', '부채비율', '공사마진'],
+      }),
+      makeCorporateRiskOption({
+        id: 'cost-overrun',
+        title: `${name} 프로젝트 원가 초과`,
+        detail: `${name}의 대형 프로젝트에서 원가 초과와 공기 지연 가능성이 제기되었습니다.`,
+        principle: '공사 기간이 길어지고 비용이 늘어나면 이미 수주한 프로젝트도 이익이 줄어들 수 있습니다.',
+        impactValue: -0.18,
+        failureTitle: `${name} 원가 초과 우려 제한`,
+        failureDetail: '발주처와 비용 분담 협의가 진행되며 손실 확대 가능성이 낮아졌습니다.',
+        financialLinks: ['공사원가', '부채비율', '현금흐름', '수주마진'],
+      }),
+    ];
+  } else if (sectorText.includes('미디어') || sectorText.includes('콘텐츠')) {
+    sectorOptions = [
+      makeCorporateRiskOption({
+        id: 'global-ip-hit',
+        title: `${name} 글로벌 IP 흥행`,
+        detail: `${name}의 신규 콘텐츠가 글로벌 플랫폼에서 빠르게 흥행하고 있다는 소식이 나왔습니다.`,
+        principle: '콘텐츠 기업은 하나의 IP가 광고·구독·굿즈 매출을 동시에 키울 수 있어 기대가 빠르게 반영됩니다.',
+        impactValue: 0.18,
+        failureTitle: `${name} 글로벌 IP 흥행 둔화`,
+        failureDetail: '초기 관심은 컸지만 시청 지속률과 광고 단가가 기대에 못 미쳤습니다.',
+        financialLinks: ['IP가치', '광고매출', '구독매출', '소비심리'],
+      }),
+      makeCorporateRiskOption({
+        id: 'ip-dispute',
+        title: `${name} 핵심 IP 계약 분쟁`,
+        detail: `${name}의 핵심 콘텐츠 권리 계약을 둘러싼 분쟁 가능성이 제기되었습니다.`,
+        principle: '핵심 IP 권리가 흔들리면 미래 매출과 브랜드 가치가 함께 흔들릴 수 있습니다.',
+        impactValue: -0.17,
+        failureTitle: `${name} IP 분쟁 우려 완화`,
+        failureDetail: '권리 계약이 유지된다는 설명이 나오며 단기 충격은 제한되었습니다.',
+        financialLinks: ['IP권리', '브랜드가치', '미래매출', '평판위험'],
+      }),
+    ];
+  } else if (sectorText.includes('재생에너지')) {
+    sectorOptions = [
+      makeCorporateRiskOption({
+        id: 'ess-subsidy',
+        title: `${name} ESS 보조금 사업 선정`,
+        detail: `${name}이 에너지 저장장치 보조금 사업의 주요 공급사로 선정될 가능성이 제기되었습니다.`,
+        principle: '친환경 기업은 정책 지원이 실제 수요와 투자 여력을 동시에 바꿀 수 있습니다.',
+        impactValue: 0.18,
+        failureTitle: `${name} 보조금 선정 불발`,
+        failureDetail: '경쟁사의 가격 조건이 우세해 주요 공급사 선정 가능성이 낮아졌습니다.',
+        financialLinks: ['정책민감', '수주잔고', '원자재비', '성장성'],
+      }),
+      makeCorporateRiskOption({
+        id: 'battery-recall',
+        title: `${name} 배터리 리콜 가능성`,
+        detail: `${name} 일부 에너지 저장장치 제품의 리콜 가능성이 제기되었습니다.`,
+        principle: '리콜은 직접 비용뿐 아니라 다음 수주에서 신뢰도 하락을 만들 수 있습니다.',
+        impactValue: -0.2,
+        failureTitle: `${name} 리콜 우려 해소`,
+        failureDetail: '품질 점검 결과 결함 범위가 제한적이라는 발표가 나오며 우려가 낮아졌습니다.',
+        financialLinks: ['품질비용', '평판위험', '수주잔고', '현금흐름'],
+      }),
+    ];
+  } else if (sectorText.includes('전기차') || sectorText.includes('모빌리티')) {
+    sectorOptions = [
+      makeCorporateRiskOption({
+        id: 'autonomous-permit',
+        title: `${name} 자율주행 시범 운행 승인`,
+        detail: `${name}이 자율주행 셔틀 시범 운행 승인을 받을 가능성이 제기되었습니다.`,
+        principle: '모빌리티 기업은 기술 승인과 실증 사업이 미래 시장 진입 가능성을 높이는 신호가 됩니다.',
+        impactValue: 0.18,
+        failureTitle: `${name} 자율주행 승인 지연`,
+        failureDetail: '안전 기준 보완 요구로 시범 운행 승인이 다음 라운드 이후로 밀렸습니다.',
+        financialLinks: ['기술승인', 'R&D 비중', '정책민감', '미래매출'],
+      }),
+      makeCorporateRiskOption({
+        id: 'ev-battery-recall',
+        title: `${name} 배터리 리콜 우려`,
+        detail: `${name}의 일부 차량 배터리에서 품질 점검 이슈가 제기되었습니다.`,
+        principle: '전기차 기업은 배터리 품질이 비용과 브랜드 신뢰를 동시에 흔들 수 있습니다.',
+        impactValue: -0.19,
+        failureTitle: `${name} 배터리 리콜 우려 완화`,
+        failureDetail: '점검 결과 문제가 특정 부품에 한정된 것으로 확인되어 리콜 가능성이 낮아졌습니다.',
+        financialLinks: ['품질비용', '원자재민감', '평판위험', '현금흐름'],
+      }),
+    ];
+  }
+
+  return [...commonOptions, ...sectorOptions];
+}
+
+function buildCorporateRiskEvent({ asset, risk, round, now }) {
+  const riskId = risk?.id ?? 'custom';
+  return {
+    id: `${CORPORATE_RISK_PREFIX}-${asset.id}-${riskId}-${round}-${now}`,
+    templateId: `${CORPORATE_RISK_PREFIX}-${asset.id}-${riskId}`,
+    corporateRisk: true,
+    riskTargetAssetId: asset.id,
+    round,
+    title: risk.title,
+    detail: risk.detail,
+    principle: risk.principle,
+    affectedAssets: [asset.name],
+    discussionPrompt: `${asset.name} 하나에 생긴 기업 고유 뉴스가 업종 전체 이슈와 어떻게 다르게 작동하는지 비교해보세요.`,
+    issueOptions: [],
+    impact: { [asset.id]: risk.impactValue },
+    probability: risk.probability ?? DEFAULT_EVENT_PROBABILITY,
+    macroImpact: { baseRateDelta: 0, propertyMove: 0, exchangeMove: 0, unemploymentDelta: 0 },
+    failureTitle: risk.failureTitle,
+    failureDetail: risk.failureDetail,
+    financialLinks: risk.financialLinks ?? ['기업 고유 위험', '투자심리', '재무제표', '평판'],
+    published: false,
+  };
+}
+
+function pickRandomCorporateRisk({ assets, round, now }) {
+  const stockAssets = assets.filter((asset) => asset.type === 'stock' && !asset.delisted);
+  if (!stockAssets.length) return null;
+  const asset = stockAssets[Math.floor(Math.random() * stockAssets.length)];
+  const options = getCorporateRiskOptions(asset);
+  if (!options.length) return null;
+  const risk = options[Math.floor(Math.random() * options.length)];
+  return {
+    ...buildCorporateRiskEvent({ asset, risk, round, now }),
+    published: true,
+  };
+}
+
 function HostSetupView({
   roomReady,
   roomPin,
@@ -6191,9 +6678,12 @@ function HostView({
   onRegisterIssue,
   onCancelIssue,
   onClearIssues,
+  onRegisterCorporateRisk,
+  onClearCorporateRisks,
   startIssueChoiceOpen,
   onStartWithoutIssues,
   onStartWithRandomIssues,
+  onStartWithRandomIssuesAndCorporateRisk,
   onCloseStartIssueChoice,
   onCloseSubmissions,
   onDownloadSubmissions,
@@ -6202,8 +6692,17 @@ function HostView({
   salaryPaidRounds,
   tradeLogs,
 }) {
-  const eventLimitReached = currentRoundEvents.length >= MAX_EVENTS_PER_ROUND;
+  const marketRoundEvents = currentRoundEvents.filter((event) => !isCorporateRiskEvent(event));
+  const corporateRiskEvents = currentRoundEvents.filter(isCorporateRiskEvent);
+  const eventLimitReached = marketRoundEvents.length >= MAX_EVENTS_PER_ROUND;
+  const corporateRiskLimitReached = corporateRiskEvents.length >= MAX_CORPORATE_RISKS_PER_ROUND;
   const canRegisterIssue = gameStarted && phase === 'setup' && !eventLimitReached && !roomExpired;
+  const canRegisterCorporateRisk = gameStarted && phase === 'setup' && !corporateRiskLimitReached && !roomExpired;
+  const stockAssetsForRisk = useMemo(() => assets.filter((asset) => asset.type === 'stock' && !asset.delisted), [assets]);
+  const [corporateRiskAssetId, setCorporateRiskAssetId] = useState('');
+  const activeCorporateRiskAssetId = stockAssetsForRisk.some((asset) => asset.id === corporateRiskAssetId)
+    ? corporateRiskAssetId
+    : stockAssetsForRisk[0]?.id ?? '';
 
   // Week 4 §4.9 — 디버그 모드 + 회귀 자동 점검 (호스트 전용)
   const debugMode = useDebugMode();
@@ -6312,6 +6811,10 @@ function HostView({
             <Shuffle size={19} aria-hidden="true" />
             랜덤 이슈 3개로 장 시작
           </button>
+          <button className="command secondary" type="button" onClick={onStartWithRandomIssuesAndCorporateRisk} disabled={roomExpired || !gameStarted || phase !== 'setup'}>
+            <CircleAlert size={19} aria-hidden="true" />
+            랜덤 이슈 3개 + 기업 리스크
+          </button>
           <button className="command primary" type="button" onClick={onCloseRound} disabled={roomExpired || phase !== 'open'}>
             <Activity size={19} aria-hidden="true" />
             장 마감
@@ -6394,6 +6897,9 @@ function HostView({
                 <button className="command primary" type="button" onClick={onStartWithRandomIssues}>
                   랜덤 이슈 3개로 장 시작
                 </button>
+                <button className="command primary" type="button" onClick={onStartWithRandomIssuesAndCorporateRisk}>
+                  랜덤 이슈 3개 + 기업 리스크
+                </button>
                 <button className="command secondary" type="button" onClick={onCloseStartIssueChoice}>
                   돌아가기
                 </button>
@@ -6443,7 +6949,7 @@ function HostView({
               <h2 id="event-heading">라운드 이슈 등록</h2>
             </div>
             <span className={eventLimitReached ? 'limit-pill full' : 'limit-pill'}>
-              {currentRoundEvents.length}/{MAX_EVENTS_PER_ROUND}
+              {marketRoundEvents.length}/{MAX_EVENTS_PER_ROUND}
             </span>
           </div>
           <label className="issue-input">
@@ -6456,13 +6962,13 @@ function HostView({
               disabled={phase !== 'setup' || roomExpired}
             />
           </label>
-          {currentRoundEvents.length >= 3 && !eventLimitReached ? (
+          {marketRoundEvents.length >= 2 && !eventLimitReached ? (
             <p className="teacher-hint">이벤트가 많아질수록 원인 분석이 복합적으로 변합니다. 해설 화면에서 상쇄 효과를 함께 다루면 좋습니다.</p>
           ) : null}
           {eventLimitReached ? <p className="teacher-hint warning">이번 라운드 이벤트 한도에 도달했습니다. 다음 라운드에서 다시 선택할 수 있습니다.</p> : null}
           {phase !== 'setup' ? <p className="teacher-hint">장이 진행 중이거나 마감된 뒤에는 새 이슈를 등록할 수 없습니다.</p> : null}
           {!gameStarted ? <p className="teacher-hint warning">게임 시작 전에는 이슈를 등록하지 않습니다. 먼저 학생 입장을 확인한 뒤 게임을 시작하세요.</p> : null}
-          {currentRoundEvents.length ? (
+          {marketRoundEvents.length ? (
             <div className="draft-issue-list" aria-label="선택된 이슈">
               <div className="panel-heading split">
                 <div>
@@ -6473,7 +6979,7 @@ function HostView({
                   전체 초기화
                 </button>
               </div>
-              {currentRoundEvents.map((event) => (
+              {marketRoundEvents.map((event) => (
                 <article key={event.id}>
                   <div>
                     <strong>{event.title}</strong>
@@ -6523,10 +7029,25 @@ function HostView({
           </div>
         </section>
 
+        <CorporateRiskPanel
+          assets={assets}
+          corporateRiskEvents={corporateRiskEvents}
+          selectedAssetId={activeCorporateRiskAssetId}
+          onSelectedAssetChange={setCorporateRiskAssetId}
+          onRegisterCorporateRisk={onRegisterCorporateRisk}
+          onCancelIssue={onCancelIssue}
+          onClearCorporateRisks={onClearCorporateRisks}
+          canRegisterCorporateRisk={canRegisterCorporateRisk}
+          phase={phase}
+          gameStarted={gameStarted}
+          roomExpired={roomExpired}
+        />
+
         {/* Week 4 §2.4 — 거시 경보(트리거)는 이슈와 분리된 별도 배너로 노출 */}
         <MacroAlertBanner alerts={activeMacroAlerts} />
         <MacroTriggerPanel alertsByRound={macroAlertsByRound} activeAlerts={activeMacroAlerts} />
-        <IssueTicker events={currentRoundEvents} phase={phase} />
+        <IssueTicker events={marketRoundEvents} phase={phase} />
+        <CorporateRiskTicker events={corporateRiskEvents} assets={assets} phase={phase} />
         {/* Week 3 H — 교사 대시보드: 라운드별 이슈 분석 탭 */}
         <TeacherRoundIssuesPanel
           triggeredEventsByRound={triggeredEventsByRound}
@@ -6772,6 +7293,7 @@ function StudentView({
   playerCount,
   roomFull,
   currentRoundEvents,
+  corporateRiskEvents = [],
   activeMacroAlerts,
   macroAlertsByRound,
   roundResults,
@@ -7054,6 +7576,7 @@ function StudentView({
         <MacroAlertBanner alerts={activeMacroAlerts} compact />
         <MacroTriggerPanel alertsByRound={macroAlertsByRound} activeAlerts={activeMacroAlerts} compact />
         <IssueTicker events={currentRoundEvents} phase={phase} compact />
+        <CorporateRiskTicker events={corporateRiskEvents} assets={assets} phase={phase} compact />
         {/* Week 4 §2.2 Phase B — 인플레이션 체크포인트 카드 (R4·R8·R12 종료 시) */}
         {phase === 'closed' && LEARNING_CHECKPOINT_ROUNDS.includes(round) ? (
           <InflationCheckpointCard
@@ -7532,7 +8055,8 @@ export function App() {
     [selectedAssetId, assets],
   );
   const currentRoundEvents = triggeredEventsByRound[round] ?? [];
-  const publicCurrentRoundEvents = currentRoundEvents.filter((event) => event.published);
+  const publicCurrentRoundEvents = currentRoundEvents.filter((event) => event.published && !isCorporateRiskEvent(event));
+  const publicCorporateRiskEvents = currentRoundEvents.filter((event) => event.published && isCorporateRiskEvent(event));
   const expiresAt = roomCreatedAt + ROOM_TTL_MS;
   const gameFinished = phase === 'ended' || (round === totalRounds && phase === 'closed');
   const teamMode = roomMode === 'team';
@@ -8329,12 +8853,34 @@ export function App() {
 
   async function handleClearIssues() {
     if (phase !== 'setup' || !currentRoundEvents.length) return;
-    setTriggeredEventsByRound((current) => ({ ...current, [round]: [] }));
+    const removableIssues = currentRoundEvents.filter((event) => !isCorporateRiskEvent(event) && !event.published && !event.resolved);
+    if (!removableIssues.length) return;
+    setTriggeredEventsByRound((current) => ({
+      ...current,
+      [round]: (current[round] ?? []).filter((event) => isCorporateRiskEvent(event) || event.published || event.resolved),
+    }));
     if (remoteRoomId) {
       try {
-        await deleteRemoteRoundDraftIssues(remoteRoomId, round);
+        await Promise.all(removableIssues.map((event) => deleteRemoteIssue(remoteRoomId, event)));
       } catch (error) {
         setSyncStatus(`이슈 초기화 실패: ${error.message}`);
+      }
+    }
+  }
+
+  async function handleClearCorporateRisks() {
+    if (phase !== 'setup' || !currentRoundEvents.length) return;
+    const removableRisks = currentRoundEvents.filter((event) => isCorporateRiskEvent(event) && !event.published && !event.resolved);
+    if (!removableRisks.length) return;
+    setTriggeredEventsByRound((current) => ({
+      ...current,
+      [round]: (current[round] ?? []).filter((event) => !isCorporateRiskEvent(event) || event.published || event.resolved),
+    }));
+    if (remoteRoomId) {
+      try {
+        await Promise.all(removableRisks.map((event) => deleteRemoteIssue(remoteRoomId, event)));
+      } catch (error) {
+        setSyncStatus(`기업 리스크 초기화 실패: ${error.message}`);
       }
     }
   }
@@ -8518,7 +9064,8 @@ export function App() {
   }
 
   async function handleRegisterIssue(event, issueOption = null) {
-    if (roomExpired || !gameStarted || currentRoundEvents.length >= MAX_EVENTS_PER_ROUND) return;
+    const marketEventCount = currentRoundEvents.filter((item) => !isCorporateRiskEvent(item)).length;
+    if (roomExpired || !gameStarted || marketEventCount >= MAX_EVENTS_PER_ROUND) return;
 
     const registeredEvent = buildRegisteredIssue({
       event,
@@ -8551,6 +9098,39 @@ export function App() {
     }
   }
 
+  async function handleRegisterCorporateRisk(assetId, riskOption) {
+    const corporateRiskCount = currentRoundEvents.filter(isCorporateRiskEvent).length;
+    if (roomExpired || !gameStarted || phase !== 'setup' || corporateRiskCount >= MAX_CORPORATE_RISKS_PER_ROUND) return;
+    const targetAsset = assets.find((asset) => asset.id === assetId && asset.type === 'stock' && !asset.delisted);
+    if (!targetAsset || !riskOption) return;
+
+    const registeredRisk = buildCorporateRiskEvent({
+      asset: targetAsset,
+      risk: riskOption,
+      round,
+      now: Date.now(),
+    });
+
+    setTriggeredEventsByRound((current) => ({
+      ...current,
+      [round]: [...(current[round] ?? []), registeredRisk],
+    }));
+
+    if (remoteRoomId) {
+      try {
+        const savedRisk = await insertRemoteIssue(remoteRoomId, registeredRisk, round);
+        if (savedRisk) {
+          setTriggeredEventsByRound((current) => ({
+            ...current,
+            [round]: (current[round] ?? []).map((item) => (item.id === registeredRisk.id ? savedRisk : item)),
+          }));
+        }
+      } catch (error) {
+        setSyncStatus(`기업 리스크 저장 실패: ${error.message}`);
+      }
+    }
+  }
+
   async function handleStartRound(startMode = 'normal') {
     if (roomExpired || !gameStarted || phase !== 'setup') return;
     if (!currentRoundEvents.length && startMode === 'normal') {
@@ -8567,9 +9147,15 @@ export function App() {
     }
     if ((pendingMacroAlerts ?? []).length > 0) setPendingMacroAlerts([]);
 
+    const randomStartMode = startMode === 'random' || startMode === 'random-with-corporate';
     let publishedEvents = currentRoundEvents.map((event) => ({ ...event, published: true }));
-    if (startMode === 'random') {
-      publishedEvents = pickRandomRoundIssues({ round, now: Date.now(), count: 3 });
+    if (randomStartMode) {
+      const now = Date.now();
+      const randomIssues = pickRandomRoundIssues({ round, now, count: MAX_EVENTS_PER_ROUND });
+      const randomCorporateRisk = startMode === 'random-with-corporate'
+        ? pickRandomCorporateRisk({ assets, round, now: now + 100 })
+        : null;
+      publishedEvents = randomCorporateRisk ? [...randomIssues, randomCorporateRisk] : randomIssues;
     } else if (startMode === 'none') {
       publishedEvents = [];
     }
@@ -8622,8 +9208,10 @@ export function App() {
       setPlayers(salariedPlayers);
     }
     setPhase('open');
+    const publishedMarketEventCount = publishedEvents.filter((event) => !isCorporateRiskEvent(event)).length;
+    const publishedCorporateRiskCount = publishedEvents.filter(isCorporateRiskEvent).length;
     const startNewsDetail = publishedEvents.length
-      ? `${publishedEvents.length}개 이슈가 공개되었습니다. 생활 소득 ${formatWon(ROUND_SALARY)}이 지급되고 거시 지표가 먼저 움직였습니다.`
+      ? `${publishedMarketEventCount}개 시장 이슈${publishedCorporateRiskCount ? `와 기업 리스크 ${publishedCorporateRiskCount}개` : ''}가 공개되었습니다. 생활 소득 ${formatWon(ROUND_SALARY)}이 지급되고 거시 지표가 먼저 움직였습니다.`
       : `선택 이슈 없이 장이 시작되었습니다. 생활 소득 ${formatWon(ROUND_SALARY)}과 기본 거시 변수만 먼저 반영됩니다.`;
     pushNews(`${round}라운드 장 시작`, startNewsDetail);
     showToast({
@@ -8634,6 +9222,11 @@ export function App() {
     });
     if (remoteRoomId) {
       try {
+        let savedPublishedEvents = null;
+        if (randomStartMode) {
+          await deleteRemoteRoundDraftIssues(remoteRoomId, round);
+          savedPublishedEvents = await Promise.all(publishedEvents.map((event) => insertRemoteIssue(remoteRoomId, event, round)));
+        }
         const remoteUpdates = [
           updateRemoteRoom(remoteRoomId, {
             phase: 'open',
@@ -8647,9 +9240,7 @@ export function App() {
             trigger_cooldowns: triggerCooldowns,
           }),
         ];
-        if (startMode === 'random') {
-          remoteUpdates.push(...publishedEvents.map((event) => insertRemoteIssue(remoteRoomId, event, round)));
-        } else if (publishedEvents.length) {
+        if (!randomStartMode && publishedEvents.length) {
           remoteUpdates.push(updateRemoteIssues(remoteRoomId, publishedEvents, round));
         }
         if (teamMode) {
@@ -8658,6 +9249,9 @@ export function App() {
           remoteUpdates.push(...salariedPlayers.map((player) => upsertRemotePlayer(remoteRoomId, player)));
         }
         await Promise.all(remoteUpdates);
+        if (savedPublishedEvents) {
+          setTriggeredEventsByRound((current) => ({ ...current, [round]: savedPublishedEvents }));
+        }
       } catch (error) {
         setSyncStatus(`라운드 시작 저장 실패: ${error.message}`);
       }
@@ -9798,9 +10392,12 @@ export function App() {
           onRegisterIssue={handleRegisterIssue}
           onCancelIssue={handleCancelIssue}
           onClearIssues={handleClearIssues}
+          onRegisterCorporateRisk={handleRegisterCorporateRisk}
+          onClearCorporateRisks={handleClearCorporateRisks}
           startIssueChoiceOpen={startIssueChoiceOpen}
           onStartWithoutIssues={() => handleStartRound('none')}
           onStartWithRandomIssues={() => handleStartRound('random')}
+          onStartWithRandomIssuesAndCorporateRisk={() => handleStartRound('random-with-corporate')}
           onCloseStartIssueChoice={() => setStartIssueChoiceOpen(false)}
           onCloseSubmissions={handleCloseSubmissions}
           onDownloadSubmissions={handleDownloadSubmissions}
@@ -9839,6 +10436,7 @@ export function App() {
           playerCount={playerCount}
           roomFull={roomFull}
           currentRoundEvents={publicCurrentRoundEvents}
+          corporateRiskEvents={publicCorporateRiskEvents}
           activeMacroAlerts={activeMacroAlerts}
           macroAlertsByRound={macroAlertsByRound}
           roundResults={roundResults}

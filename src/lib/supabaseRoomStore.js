@@ -84,17 +84,22 @@ function toEventRow(roomId, event, round) {
 }
 
 function fromEventRow(row) {
+  const templateId = row.template_id;
+  const impact = row.impact ?? {};
+  const corporateRisk = String(templateId ?? '').startsWith('corp-risk-');
   return {
     id: row.id,
     remoteId: row.id,
     round: row.round,
-    templateId: row.template_id,
+    templateId,
+    corporateRisk,
+    riskTargetAssetId: corporateRisk ? Object.keys(impact)[0] ?? '' : undefined,
     title: row.title,
     detail: row.detail,
     principle: row.principle,
     affectedAssets: row.affected_assets ?? [],
     discussionPrompt: row.discussion_prompt ?? '',
-    impact: row.impact ?? {},
+    impact,
     probability: Number(row.probability ?? 0.75),
     resolved: row.resolved,
     didApply: row.did_apply ?? undefined,

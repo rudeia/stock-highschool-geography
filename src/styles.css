@@ -305,6 +305,7 @@ p {
 
 .projector-preview,
 .event-panel,
+.corporate-risk-panel,
 .market-board,
 .ranking-panel,
 .news-panel,
@@ -1117,6 +1118,7 @@ p {
 }
 
 .event-panel,
+.corporate-risk-panel,
 .market-board,
 .ranking-panel,
 .news-panel,
@@ -1261,6 +1263,7 @@ p {
 .mobile-stock-list button:hover,
 .quick-actions button:hover,
 .issue-options button:hover,
+.risk-option-card button:hover,
 .event-filter-bar button:hover,
 .event-preset-bar button:hover {
   border-color: #2563eb;
@@ -1345,6 +1348,106 @@ p {
 .issue-options button:disabled {
   border-color: #e2e8f0;
   background: #f1f5f9;
+}
+
+.corporate-risk-panel {
+  margin-top: 1rem;
+  border-left: 4px solid #f97316;
+}
+
+.corporate-risk-panel .panel-heading svg,
+.corporate-risk-ticker .panel-heading svg {
+  color: #ea580c;
+}
+
+.draft-issue-list.corporate {
+  background: #fff7ed;
+  border-color: #fed7aa;
+}
+
+.corporate-risk-picker {
+  display: grid;
+  gap: 0.4rem;
+  margin-bottom: 0.85rem;
+  color: #334155;
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+
+.corporate-risk-picker select {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid #d8e0ea;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #172033;
+  padding: 0.55rem 0.7rem;
+  font-size: 0.92rem;
+  font-weight: 850;
+}
+
+.corporate-risk-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.65rem;
+}
+
+.risk-option-card {
+  display: grid;
+  min-height: 156px;
+  gap: 0.7rem;
+  align-content: space-between;
+  border: 1px solid #fed7aa;
+  border-left: 4px solid #f97316;
+  border-radius: 8px;
+  background: #fffaf3;
+  padding: 0.85rem;
+}
+
+.risk-option-card.positive {
+  border-left-color: #16a34a;
+}
+
+.risk-option-card.negative {
+  border-left-color: #dc2626;
+}
+
+.risk-option-card div {
+  display: grid;
+  gap: 0.42rem;
+}
+
+.risk-option-card strong {
+  color: #172033;
+  line-height: 1.35;
+}
+
+.risk-option-card span,
+.risk-option-card small {
+  color: #64748b;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.risk-option-card small {
+  color: #334155;
+  font-weight: 800;
+}
+
+.risk-option-card button {
+  min-height: 36px;
+  border: 1px solid #fdba74;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #9a3412;
+  padding: 0.45rem 0.6rem;
+  font-weight: 950;
+}
+
+.risk-option-card button:disabled {
+  border-color: #e2e8f0;
+  background: #f1f5f9;
+  color: #94a3b8;
 }
 
 .explain-panel {
