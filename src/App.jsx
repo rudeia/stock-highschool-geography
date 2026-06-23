@@ -542,6 +542,45 @@ const assetTypeLabels = {
   forex: '외환',
 };
 
+const assetTypeFilterOptions = [
+  { key: 'all', label: '전체' },
+  { key: 'domestic-stock', label: '국내 주식' },
+  { key: 'overseas-stock', label: '해외 주식' },
+  { key: 'etf', label: 'ETF' },
+  { key: 'bond', label: '채권' },
+  { key: 'futures', label: '선물' },
+  { key: 'property', label: '부동산' },
+  { key: 'forex', label: '외환' },
+];
+
+const assetSortOptions = [
+  { key: 'default', label: '기본 순서' },
+  { key: 'gain', label: '상승률 높은 순' },
+  { key: 'loss', label: '하락률 큰 순' },
+  { key: 'type', label: '상품 종류순' },
+  { key: 'theme', label: '테마순' },
+];
+
+const assetThemeOptions = [
+  { key: 'all', label: '전체 테마', assetIds: null },
+  { key: 'growthTech', label: '기술·성장주', assetIds: ['core', 'dogemars', 'neo', 'sp500', 'bio', 'eco'] },
+  { key: 'rateSensitive', label: '금리 민감', assetIds: ['bank', 'riverbank', 'realty', 'infra', 'metroinfra', 'usBond', 'kospi'] },
+  { key: 'commodityInflation', label: '원자재·인플레이션', assetIds: ['oil', 'oilFut', 'grainFut', 'goldFut', 'food', 'purefood'] },
+  { key: 'fxGlobal', label: '환율·글로벌', assetIds: ['usdKrw', 'sp500', 'core', 'dogemars', 'enter', 'medi', 'argBond'] },
+  { key: 'cyclical', label: '경기민감·소비/여행', assetIds: ['air', 'oceanair', 'enter', 'infra', 'metroinfra', 'kospi'] },
+  { key: 'defensive', label: '방어·안전자산', assetIds: ['usBond', 'goldFut', 'food', 'purefood', 'medi', 'bank'] },
+  { key: 'highVolatility', label: '고위험·고변동성', assetIds: ['argBond', 'oilFut', 'grainFut', 'dogemars', 'bio', 'eco'] },
+];
+
+const assetTypeOrder = {
+  stock: 1,
+  etf: 2,
+  property: 3,
+  futures: 4,
+  forex: 5,
+  bond: 6,
+};
+
 function clampNumber(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
@@ -2534,6 +2573,52 @@ function getChange(asset) {
   const before = asset.history.at(-2) ?? asset.price;
   if (!before) return 0;
   return ((asset.price - before) / before) * 100;
+}
+
+function assetMatchesTypeFilter(asset, filterKey) {
+  if (filterKey === 'domestic-stock') return asset.type === 'stock' && asset.country === '한국';
+  if (filterKey === 'overseas-stock') return asset.type === 'stock' && asset.country !== '한국';
+  if (filterKey === 'property') return asset.type === 'property';
+  if (filterKey === 'all') return true;
+  return asset.type === filterKey;
+}
+
+function assetMatchesThemeFilter(asset, themeKey) {
+  const theme = assetThemeOptions.find((option) => option.key === themeKey);
+  if (!theme || !theme.assetIds) return true;
+  return theme.assetIds.includes(asset.id);
+}
+
+function getPrimaryThemeIndex(asset) {
+  const index = assetThemeOptions.findIndex((option) => option.assetIds?.includes(asset.id));
+  return index === -1 ? assetThemeOptions.length : index;
+}
+
+function getPrimaryThemeLabel(asset) {
+  return assetThemeOptions.find((option) => option.assetIds?.includes(asset.id))?.label ?? '기타';
+}
+
+function getAssetFilterLabel(options, value) {
+  return options.find((option) => option.key === value)?.label ?? '전체';
+}
+
+function getVisibleAssets(assets, { typeFilter = 'all', themeFilter = 'all', sortMode = 'default' } = {}) {
+  const filtered = assets.filter((asset) => assetMatchesTypeFilter(asset, typeFilter) && assetMatchesThemeFilter(asset, themeFilter));
+  return [...filtered].sort((a, b) => {
+    if (sortMode === 'gain') return getChange(b) - getChange(a);
+    if (sortMode === 'loss') return getChange(a) - getChange(b);
+    if (sortMode === 'type') {
+      const typeDiff = (assetTypeOrder[a.type] ?? 99) - (assetTypeOrder[b.type] ?? 99);
+      if (typeDiff !== 0) return typeDiff;
+      return a.name.localeCompare(b.name, 'ko-KR');
+    }
+    if (sortMode === 'theme') {
+      const themeDiff = getPrimaryThemeIndex(a) - getPrimaryThemeIndex(b);
+      if (themeDiff !== 0) return themeDiff;
+      return a.name.localeCompare(b.name, 'ko-KR');
+    }
+    return 0;
+  });
 }
 
 function getDepositRate(baseRate) {
@@ -5141,6 +5226,52 @@ function AppToast({ toast, onDismiss }) {
   );
 }
 
+function AssetListControls({
+  typeFilter,
+  onTypeFilterChange,
+  sortMode,
+  onSortModeChange,
+  themeFilter,
+  onThemeFilterChange,
+  visibleCount,
+  compact = false,
+}) {
+  const typeLabel = getAssetFilterLabel(assetTypeFilterOptions, typeFilter);
+  const themeLabel = getAssetFilterLabel(assetThemeOptions, themeFilter);
+  const sortLabel = getAssetFilterLabel(assetSortOptions, sortMode);
+  return (
+    <div className={compact ? 'asset-list-controls compact' : 'asset-list-controls'} aria-label="상품 조회 설정">
+      <label>
+        종류
+        <select value={typeFilter} onChange={(event) => onTypeFilterChange(event.target.value)} aria-label="상품 종류 선택">
+          {assetTypeFilterOptions.map((option) => (
+            <option value={option.key} key={option.key}>{option.label}</option>
+          ))}
+        </select>
+      </label>
+      <label>
+        정렬
+        <select value={sortMode} onChange={(event) => onSortModeChange(event.target.value)} aria-label="상품 정렬 선택">
+          {assetSortOptions.map((option) => (
+            <option value={option.key} key={option.key}>{option.label}</option>
+          ))}
+        </select>
+      </label>
+      <label>
+        테마
+        <select value={themeFilter} onChange={(event) => onThemeFilterChange(event.target.value)} aria-label="상품 테마 선택">
+          {assetThemeOptions.map((option) => (
+            <option value={option.key} key={option.key}>{option.label}</option>
+          ))}
+        </select>
+      </label>
+      <p>
+        {visibleCount}개 상품 · {typeLabel} · {themeLabel} · {sortLabel}
+      </p>
+    </div>
+  );
+}
+
 function HomeView({ setView, roomPin, round, totalRounds, gameStarted, playerCount, baseRate, exchangeRate, unemploymentRate, expiresAt, roomExpired, syncStatus, studentEntryAllowed, onCreateRoom, hostAuthenticated, studentJoined }) {
   return (
     <main className="home-view">
@@ -5662,7 +5793,18 @@ function HostView({
   function handleDevRecheck() { setDevRecheckTick((v) => v + 1); }
   // Week 4 §3.6 — 교사 대시보드에서도 자산 행을 클릭해 기업·자산 분석을 펼쳐 보도록 추가
   const [hostExpandedAssetId, setHostExpandedAssetId] = useState(null);
+  const [hostAssetTypeFilter, setHostAssetTypeFilter] = useState('all');
+  const [hostAssetSortMode, setHostAssetSortMode] = useState('default');
+  const [hostAssetThemeFilter, setHostAssetThemeFilter] = useState('all');
   const [eventCategory, setEventCategory] = useState('all');
+  const visibleHostAssets = useMemo(
+    () => getVisibleAssets(assets, {
+      typeFilter: hostAssetTypeFilter,
+      sortMode: hostAssetSortMode,
+      themeFilter: hostAssetThemeFilter,
+    }),
+    [assets, hostAssetSortMode, hostAssetThemeFilter, hostAssetTypeFilter],
+  );
   const filteredScenarioEvents = eventCategory === 'all'
     ? scenarioEvents
     : scenarioEvents.filter((event) => getEventCategory(event) === eventCategory);
@@ -5995,8 +6137,17 @@ function HostView({
             <Activity size={22} aria-hidden="true" />
             <h2 id="market-heading">전체 자산 시황판</h2>
           </div>
+          <AssetListControls
+            typeFilter={hostAssetTypeFilter}
+            onTypeFilterChange={setHostAssetTypeFilter}
+            sortMode={hostAssetSortMode}
+            onSortModeChange={setHostAssetSortMode}
+            themeFilter={hostAssetThemeFilter}
+            onThemeFilterChange={setHostAssetThemeFilter}
+            visibleCount={visibleHostAssets.length}
+          />
           <div className="stock-table">
-            {assets.map((asset) => {
+            {visibleHostAssets.map((asset) => {
               const change = getChange(asset);
               const expanded = hostExpandedAssetId === asset.id;
               return (
@@ -6015,7 +6166,7 @@ function HostView({
                       <span style={{ background: asset.color }} />
                       <div>
                         <strong>{asset.name}</strong>
-                        <small>{asset.country} · {assetTypeLabels[asset.type]} · {asset.sector}</small>
+                        <small>{asset.country} · {assetTypeLabels[asset.type]} · {asset.sector} · {getPrimaryThemeLabel(asset)}</small>
                       </div>
                     </div>
                     <Sparkline history={asset.history} color={asset.color} />
@@ -6042,6 +6193,7 @@ function HostView({
                 </div>
               );
             })}
+            {!visibleHostAssets.length ? <p className="empty-note">조건에 맞는 투자 상품이 없습니다.</p> : null}
           </div>
           <p style={{ marginTop: 8, fontSize: 12, color: '#64748b' }}>
             자산 행을 클릭하면 기업·자산 분석(배당 성향·재무 신호·변동 가능성)을 펼쳐 볼 수 있습니다.
@@ -6226,6 +6378,40 @@ function StudentView({
       /* localStorage 비활성 환경 무시 */
     }
   }, [activeTab]);
+
+  const [studentAssetTypeFilter, setStudentAssetTypeFilter] = useState('all');
+  const [studentAssetSortMode, setStudentAssetSortMode] = useState('default');
+  const [studentAssetThemeFilter, setStudentAssetThemeFilter] = useState('all');
+  const visibleStudentAssets = useMemo(
+    () => getVisibleAssets(assets, {
+      typeFilter: studentAssetTypeFilter,
+      sortMode: studentAssetSortMode,
+      themeFilter: studentAssetThemeFilter,
+    }),
+    [assets, studentAssetSortMode, studentAssetThemeFilter, studentAssetTypeFilter],
+  );
+  function syncSelectedAssetToVisibleList(nextFilters = {}) {
+    const nextVisibleAssets = getVisibleAssets(assets, {
+      typeFilter: nextFilters.typeFilter ?? studentAssetTypeFilter,
+      sortMode: nextFilters.sortMode ?? studentAssetSortMode,
+      themeFilter: nextFilters.themeFilter ?? studentAssetThemeFilter,
+    });
+    if (nextVisibleAssets.length && !nextVisibleAssets.some((asset) => asset.id === selectedAssetId)) {
+      setSelectedAssetId(nextVisibleAssets[0].id);
+    }
+  }
+  function handleStudentAssetTypeFilterChange(value) {
+    setStudentAssetTypeFilter(value);
+    syncSelectedAssetToVisibleList({ typeFilter: value });
+  }
+  function handleStudentAssetSortModeChange(value) {
+    setStudentAssetSortMode(value);
+    syncSelectedAssetToVisibleList({ sortMode: value });
+  }
+  function handleStudentAssetThemeFilterChange(value) {
+    setStudentAssetThemeFilter(value);
+    syncSelectedAssetToVisibleList({ themeFilter: value });
+  }
 
   const selectedAsset = assets.find((asset) => asset.id === selectedAssetId) ?? assets[0];
   const holdingsValue = assets.reduce((sum, asset) => sum + (portfolio[asset.id] ?? 0) * asset.price, 0);
@@ -6605,18 +6791,29 @@ function StudentView({
                 <PortfolioDonut cash={cash} deposit={deposit} portfolio={portfolio} assets={assets} />
 
                 <section className="mobile-stock-list" aria-label="투자 상품 목록">
-          {assets.map((asset) => {
+          <AssetListControls
+            typeFilter={studentAssetTypeFilter}
+            onTypeFilterChange={handleStudentAssetTypeFilterChange}
+            sortMode={studentAssetSortMode}
+            onSortModeChange={handleStudentAssetSortModeChange}
+            themeFilter={studentAssetThemeFilter}
+            onThemeFilterChange={handleStudentAssetThemeFilterChange}
+            visibleCount={visibleStudentAssets.length}
+            compact
+          />
+          {visibleStudentAssets.map((asset) => {
             const change = getChange(asset);
             return (
               <button className={selectedAssetId === asset.id ? 'selected' : ''} type="button" key={asset.id} onClick={() => setSelectedAssetId(asset.id)}>
                 <span style={{ background: asset.color }} />
                 <strong>{asset.name}</strong>
-                <small>{asset.country}</small>
+                <small>{asset.country} · {getPrimaryThemeLabel(asset)}</small>
                 <small>{formatAssetPrice(asset)}</small>
                 <em className={change >= 0 ? 'up' : 'down'}>{formatPercent(change)}</em>
               </button>
             );
           })}
+          {!visibleStudentAssets.length ? <p className="empty-note">조건에 맞는 투자 상품이 없습니다.</p> : null}
         </section>
 
                 <AssetLearningPanel asset={selectedAsset} />
@@ -8884,7 +9081,10 @@ export function App() {
     if (!canUseTeamAccount()) return;
     const sourceCash = teamMode ? activeTeam.cash : cash;
     const amount = Math.min(parseAmount(depositAmount), sourceCash);
-    if (amount <= 0) return;
+    if (amount <= 0) {
+      showToast({ title: '예금할 수 없습니다.', message: '입력 금액과 보유 현금을 확인해주세요.', tone: 'error' });
+      return;
+    }
     if (teamMode) {
       updateActiveTeamAccount((team) =>
         releaseTeamTradeLock({
@@ -8899,6 +9099,7 @@ export function App() {
       setDepositPrincipal((current) => current + amount);
     }
     addTradeLog('예금', `${formatWon(amount)} 예치`);
+    showToast({ title: '예금 완료', message: `${formatWon(amount)}을 예금으로 옮겼습니다.`, tone: 'success' });
   }
 
   function handleWithdrawDeposit() {
@@ -8906,7 +9107,10 @@ export function App() {
     if (!canUseTeamAccount()) return;
     const sourceDeposit = teamMode ? activeTeam.deposit : deposit;
     const amount = Math.min(parseAmount(depositAmount), sourceDeposit);
-    if (amount <= 0) return;
+    if (amount <= 0) {
+      showToast({ title: '예금 해지할 수 없습니다.', message: '입력 금액과 예금 잔액을 확인해주세요.', tone: 'error' });
+      return;
+    }
     if (teamMode) {
       updateActiveTeamAccount((team) =>
         releaseTeamTradeLock({
@@ -8925,6 +9129,7 @@ export function App() {
       setCash((current) => current + amount);
     }
     addTradeLog('예금 해지', `${formatWon(amount)} 인출`);
+    showToast({ title: '예금 해지 완료', message: `${formatWon(amount)}을 현금으로 옮겼습니다.`, tone: 'success' });
   }
 
   return (
