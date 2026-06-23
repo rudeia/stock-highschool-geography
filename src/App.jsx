@@ -72,6 +72,7 @@ const INITIAL_UNEMPLOYMENT_RATE = 3.5;
 const MAX_EVENTS_PER_ROUND = 5;
 const EVENT_SUCCESS_PROBABILITY = 0.7;
 const EXPECTATION_WITHIN_SUCCESS_PROBABILITY = 0.3;
+const EXPECTATION_IMPACT_MULTIPLIER = 0.7;
 const DEFAULT_EVENT_PROBABILITY = EVENT_SUCCESS_PROBABILITY;
 const DELISTING_START_ROUND = 9;
 const DELISTING_PROBABILITY = 0.2;
@@ -967,7 +968,7 @@ const scenarioEvents = [
     title: '금리 인상',
     detail: '중앙은행이 물가 안정을 위해 기준금리를 0.5%p 인상했습니다.',
     principle: '금리가 오르면 예금의 매력은 커지지만, 기업의 대출 비용과 부동산 매수 부담은 커집니다.',
-    affectedAssets: ['예금금리 상승', '은행주 상승 압력', '부동산 하락 압력', '성장주 하락 압력'],
+    affectedAssets: ['예금금리 상승', '은행주 상승 압력', '부동산 하락 압력', '성장·기술주 하락 압력'],
     discussionPrompt: '금리 인상기에 모든 돈을 예금으로 옮기는 전략은 항상 좋은 선택일까요?',
     issueOptions: [
       {
@@ -990,14 +991,14 @@ const scenarioEvents = [
       },
     ],
     baseRateDelta: 0.5,
-    impact: { bank: 0.08, riverbank: 0.07, infra: -0.07, metroinfra: -0.09, air: -0.05, oceanair: -0.08, enter: -0.04, dogemars: -0.07, neo: -0.03, realty: -0.08, kospi: -0.03, sp500: -0.02, usBond: -0.06, argBond: -0.05, goldFut: -0.04, usdKrw: -0.02 },
+    impact: { bank: 0.08, riverbank: 0.07, infra: -0.07, metroinfra: -0.09, air: -0.05, oceanair: -0.08, enter: -0.04, core: -0.05, dogemars: -0.07, neo: -0.03, bio: -0.05, realty: -0.08, kospi: -0.03, sp500: -0.02, usBond: -0.06, argBond: -0.05, goldFut: -0.04, usdKrw: -0.02 },
   },
   {
     id: 'rate-down',
     title: '금리 인하',
     detail: '경기 부양을 위해 기준금리가 0.5%p 인하되었습니다.',
     principle: '금리가 내려가면 돈을 빌리는 부담이 줄어 투자와 소비가 늘 수 있지만, 예금의 매력은 낮아집니다.',
-    affectedAssets: ['부동산 상승 압력', '성장주 상승 압력', 'ETF 상승 압력', '은행주 하락 압력'],
+    affectedAssets: ['부동산 상승 압력', '성장·기술주 상승 압력', 'ETF 상승 압력', '은행주 하락 압력'],
     discussionPrompt: '금리가 내려가면 왜 부동산과 성장주가 동시에 좋아질 수 있을까요?',
     issueOptions: [
       {
@@ -1014,7 +1015,7 @@ const scenarioEvents = [
       },
     ],
     baseRateDelta: -0.5,
-    impact: { realty: 0.09, infra: 0.05, metroinfra: 0.07, neo: 0.04, enter: 0.04, dogemars: 0.06, bank: -0.04, riverbank: -0.04, kospi: 0.04, sp500: 0.03, usBond: 0.06, argBond: 0.04, goldFut: 0.04, usdKrw: 0.02 },
+    impact: { realty: 0.09, infra: 0.05, metroinfra: 0.07, neo: 0.04, enter: 0.04, core: 0.05, dogemars: 0.06, bio: 0.05, bank: -0.04, riverbank: -0.04, kospi: 0.04, sp500: 0.03, usBond: 0.06, argBond: 0.04, goldFut: 0.04, usdKrw: 0.02 },
   },
   {
     id: 'deposit-special',
@@ -1427,7 +1428,7 @@ const scenarioEvents = [
     title: '신약 승인 기대',
     detail: '바이오 기업의 임상 결과와 신약 승인 가능성이 부각되며 헬스케어 업종 기대가 커졌습니다.',
     principle: '헬스케어 기업은 생산설비보다 임상 성공과 승인 여부가 미래 매출 기대를 크게 좌우할 수 있습니다.',
-    affectedAssets: ['헬스케어 상승 압력', '성장주 심리 개선 가능성', '국내 지수 일부 상승'],
+    affectedAssets: ['헬스케어·바이오 상승 압력', '성장주 심리 개선 가능성', '국내 지수 일부 상승'],
     discussionPrompt: '바이오 기업은 현재 매출보다 미래 승인 가능성이 더 크게 가격에 반영될 수 있는 이유가 무엇일까요?',
     issueOptions: [
       {
@@ -1443,14 +1444,14 @@ const scenarioEvents = [
         failureDetail: '추가 자료 요청 가능성이 제기되며 승인 기대가 다소 약해졌습니다.',
       },
     ],
-    impact: { medi: 0.16, kospi: 0.02, sp500: 0.01 },
+    impact: { medi: 0.16, bio: 0.18, kospi: 0.02, sp500: 0.01 },
   },
   {
     id: 'drug-setback',
     title: '임상 실패 우려',
     detail: '핵심 신약 후보의 임상 지연과 약가 규제 우려가 겹치며 헬스케어 업종 변동성이 커졌습니다.',
     principle: '바이오 기업은 임상 실패나 약가 부담이 생기면 미래 매출 기대가 빠르게 낮아질 수 있습니다.',
-    affectedAssets: ['헬스케어 하락 압력', '성장주 변동성 확대 가능성', '국내 지수 일부 부담'],
+    affectedAssets: ['헬스케어·바이오 하락 압력', '성장주 변동성 확대 가능성', '국내 지수 일부 부담'],
     discussionPrompt: '바이오 기업은 왜 단일 임상 결과 하나로도 가격 변동 폭이 커질 수 있을까요?',
     issueOptions: [
       {
@@ -1466,7 +1467,7 @@ const scenarioEvents = [
         failureDetail: '정책 논의가 장기 과제로 밀리며 단기 부담은 제한됐습니다.',
       },
     ],
-    impact: { medi: -0.16, kospi: -0.02, sp500: -0.01 },
+    impact: { medi: -0.16, bio: -0.2, kospi: -0.02, sp500: -0.01 },
   },
   {
     id: 'fx-spike',
@@ -1958,7 +1959,7 @@ const scenarioEvents = [
         failureDetail: '중앙은행 구두 개입으로 우려가 잠시 진정됐습니다.',
       },
     ],
-    impact: { realty: -0.12, infra: -0.10, metroinfra: -0.13, neo: -0.08, dogemars: -0.10, bank: -0.05, riverbank: -0.07, argBond: -0.14, usBond: 0.05, goldFut: 0.08, usdKrw: 0.04 },
+    impact: { realty: -0.12, infra: -0.10, metroinfra: -0.13, neo: -0.08, core: -0.06, dogemars: -0.10, bio: -0.12, bank: -0.05, riverbank: -0.07, argBond: -0.14, usBond: 0.05, goldFut: 0.08, usdKrw: 0.04 },
   },
   {
     id: 'liquidity-flood',
@@ -1966,7 +1967,7 @@ const scenarioEvents = [
     title: '초저금리 지속 → 유동성 과잉 경고',
     detail: '기준금리가 1% 아래로 내려가며 시중에 자금이 넘쳐납니다.',
     principle: '금리가 너무 낮으면 자산 가격이 급등하지만, 거품 위험이 함께 쌓입니다.',
-    affectedAssets: ['위험자산 급등', '부동산 과열', '금융주 마진 압박', '안전자산 약세'],
+    affectedAssets: ['위험자산 급등', '성장·기술주 과열', '부동산 과열', '금융주 마진 압박', '안전자산 약세'],
     discussionPrompt: '자산 가격이 빠르게 오르는 것이 모두에게 좋은 일일까요?',
     issueOptions: [
       {
@@ -1976,7 +1977,7 @@ const scenarioEvents = [
         failureDetail: '시장이 향후 긴축을 미리 반영해 반응이 약했습니다.',
       },
     ],
-    impact: { realty: 0.10, neo: 0.09, dogemars: 0.12, enter: 0.07, kospi: 0.06, sp500: 0.05, argBond: 0.06, goldFut: 0.06, usBond: 0.03, bank: -0.04 },
+    impact: { realty: 0.10, neo: 0.09, core: 0.08, dogemars: 0.12, bio: 0.10, enter: 0.07, kospi: 0.06, sp500: 0.05, argBond: 0.06, goldFut: 0.06, usBond: 0.03, bank: -0.04 },
   },
   {
     id: 'fx-intervention',
@@ -2255,8 +2256,8 @@ const eventMacroImpacts = {
   'argentina-reform': { baseRateDelta: 0, propertyMove: -0.01, exchangeMove: 0.025, unemploymentDelta: 0.05 },
   'emergency-stimulus': { baseRateDelta: -0.4, propertyMove: 0.02, exchangeMove: 0.005, unemploymentDelta: -0.3 },
   'wage-spiral': { baseRateDelta: 0.3, propertyMove: -0.01, exchangeMove: -0.005, unemploymentDelta: 0.05 },
-  'credit-crunch': { baseRateDelta: -0.2, propertyMove: -0.04, exchangeMove: 0.01, unemploymentDelta: 0.4 },
-  'liquidity-flood': { baseRateDelta: 0.15, propertyMove: 0.04, exchangeMove: -0.005, unemploymentDelta: -0.1 },
+  'credit-crunch': { baseRateDelta: 0, propertyMove: -0.04, exchangeMove: 0.01, unemploymentDelta: 0.4 },
+  'liquidity-flood': { baseRateDelta: 0, propertyMove: 0.04, exchangeMove: -0.005, unemploymentDelta: -0.1 },
   'fx-intervention': { baseRateDelta: 0, propertyMove: 0, exchangeMove: -0.025, unemploymentDelta: 0 },
   'realty-cooling-policy': { baseRateDelta: 0.05, propertyMove: -0.05, exchangeMove: 0, unemploymentDelta: 0.1 },
 };
@@ -2266,8 +2267,11 @@ function combineEventMacroImpacts(events) {
     (acc, event) => {
       // Week 3 H — 반전 이슈도 매크로 영향 반영 (강도 reverseFactor, 기본 -0.5)
       const isReverse = event.outcomeType === 'reverse';
+      const isExpectation = event.outcomeType === 'expectation';
       if (!event.didApply && !isReverse) return acc;
-      const factor = isReverse ? (event.reverseFactor ?? -0.5) : 1;
+      const factor = isReverse
+        ? (event.reverseFactor ?? -0.5)
+        : (isExpectation ? EXPECTATION_IMPACT_MULTIPLIER : 1);
       const impact = event.macroImpact ?? eventMacroImpacts[getEventKey(event)] ?? {};
       return {
         baseRateDelta: acc.baseRateDelta + (impact.baseRateDelta ?? 0) * factor,
@@ -2305,6 +2309,52 @@ function combineResolvedImpacts(events) {
     });
     return acc;
   }, {});
+}
+
+function getDirectImpactFloorMap(events, assets = []) {
+  const assetMap = Object.fromEntries(assets.map((asset) => [asset.id, asset]));
+  return events.reduce((acc, event) => {
+    const isReverse = event.outcomeType === 'reverse';
+    if ((!event.didApply && !isReverse) || isReverse) return acc;
+    const eventMultiplier = event.outcomeType === 'expectation' ? EXPECTATION_IMPACT_MULTIPLIER : 1;
+
+    Object.entries(event.impact ?? {}).forEach(([assetId, value]) => {
+      if (!value) return;
+      const absoluteImpact = Math.abs(value);
+      if (absoluteImpact < DIRECT_REPEATED_IMPACT_THRESHOLD) return;
+
+      const asset = assetMap[assetId];
+      const bounds = event.repeatedVolatility
+        ? getRepeatedImpactBounds(asset, getRepeatedImpactFloor(event.repeatedCount ?? 2), absoluteImpact)
+        : getImpactBounds(asset, absoluteImpact);
+      const direction = value > 0 ? 1 : -1;
+      const floor = Number((bounds.min * eventMultiplier).toFixed(3));
+      const current = acc[assetId] ?? { signs: new Set(), floorBySign: { 1: 0, '-1': 0 } };
+      current.signs.add(direction);
+      current.floorBySign[direction] = Math.max(current.floorBySign[direction] ?? 0, floor);
+      acc[assetId] = current;
+    });
+
+    return acc;
+  }, {});
+}
+
+function enforceDirectImpactFloors(impactMap = {}, events = [], assets = []) {
+  const floorMap = getDirectImpactFloorMap(events, assets);
+  const nextImpact = { ...impactMap };
+
+  Object.entries(floorMap).forEach(([assetId, { signs, floorBySign }]) => {
+    if (signs.size !== 1) return;
+    const [direction] = [...signs];
+    const floor = floorBySign[direction] ?? 0;
+    const current = nextImpact[assetId] ?? 0;
+    const currentDirection = getMoveDirection(current);
+    if (currentDirection !== 0 && currentDirection !== direction) return;
+    if (Math.abs(current) >= floor) return;
+    nextImpact[assetId] = Number((direction * floor).toFixed(3));
+  });
+
+  return nextImpact;
 }
 
 // 사이즈 팩터: 우량주 vs 중소형주 — 같은 이슈에 다른 진폭으로 반응
@@ -2370,6 +2420,12 @@ function getRandomMacroDelta(max, decimals = 2) {
   return Number(((Math.random() * 2 - 1) * max).toFixed(decimals));
 }
 
+function getMoveDirection(value, threshold = 0) {
+  if (value > threshold) return 1;
+  if (value < -threshold) return -1;
+  return 0;
+}
+
 function createMacroMove({ baseRate, propertyIndex, exchangeRate, unemploymentRate, eventMacroImpact = {}, randomMacroImpact = null }) {
   const randomBaseRateDelta = randomMacroImpact?.baseRateDelta ?? getRandomMacroDelta(0.2, 2);
   const randomPropertyMove = randomMacroImpact?.propertyMove ?? getRandomMacroDelta(0.03, 3);
@@ -2383,33 +2439,40 @@ function createMacroMove({ baseRate, propertyIndex, exchangeRate, unemploymentRa
   const nextPropertyIndex = Math.max(80, Math.round(propertyIndex * (1 + propertyMove)));
   const nextExchangeRate = Math.max(900, Math.round(exchangeRate * (1 + exchangeMove)));
   const nextUnemploymentRate = clampNumber(Number((unemploymentRate + unemploymentDelta).toFixed(2)), 1.5, 14);
+  const rateDirection = getMoveDirection(baseRateDelta);
+  const exchangeDirection = getMoveDirection(exchangeMove);
+  const unemploymentDirection = getMoveDirection(unemploymentDelta);
   const assetImpact = {
-    bank: baseRateDelta > 0 ? 0.03 : -0.03,
-    riverbank: baseRateDelta > 0 ? 0.025 : -0.025,
-    neo: baseRateDelta > 0 ? -0.03 : 0.03,
-    dogemars: baseRateDelta > 0 ? -0.035 : 0.035,
-    enter: baseRateDelta > 0 ? -0.03 : 0.03,
-    realty: propertyMove * 0.8 + (baseRateDelta > 0 ? -0.03 : 0.03),
+    bank: rateDirection > 0 ? 0.03 : rateDirection < 0 ? -0.03 : 0,
+    riverbank: rateDirection > 0 ? 0.025 : rateDirection < 0 ? -0.025 : 0,
+    neo: rateDirection > 0 ? -0.03 : rateDirection < 0 ? 0.03 : 0,
+    core: rateDirection > 0 ? -0.03 : rateDirection < 0 ? 0.03 : 0,
+    dogemars: rateDirection > 0 ? -0.035 : rateDirection < 0 ? 0.035 : 0,
+    bio: rateDirection > 0 ? -0.025 : rateDirection < 0 ? 0.025 : 0,
+    enter: rateDirection > 0 ? -0.03 : rateDirection < 0 ? 0.03 : 0,
+    realty: propertyMove * 0.8 + (rateDirection > 0 ? -0.03 : rateDirection < 0 ? 0.03 : 0),
     infra: propertyMove * 0.5,
     metroinfra: propertyMove * 0.65,
     sp500: exchangeMove * 0.8,
     // KOSPI: 환율 상승 시 외국인 자금 유출로 하락 압력 (정석)
-    kospi: exchangeMove > 0 ? -0.02 : 0.02,
-    air: exchangeMove > 0 ? -0.04 : 0.03,
-    oceanair: exchangeMove > 0 ? -0.05 : 0.035,
-    food: exchangeMove > 0 ? -0.03 : 0.02,
-    purefood: exchangeMove > 0 ? -0.02 : 0.015,
+    kospi: exchangeDirection > 0 ? -0.02 : exchangeDirection < 0 ? 0.02 : 0,
+    air: exchangeDirection > 0 ? -0.04 : exchangeDirection < 0 ? 0.03 : 0,
+    oceanair: exchangeDirection > 0 ? -0.05 : exchangeDirection < 0 ? 0.035 : 0,
+    food: exchangeDirection > 0 ? -0.03 : exchangeDirection < 0 ? 0.02 : 0,
+    purefood: exchangeDirection > 0 ? -0.02 : exchangeDirection < 0 ? 0.015 : 0,
     // 채권: 금리 변동에 선형 비례 직접 충격 (금리 +0.5%p → 채권 -4%)
     usBond: -baseRateDelta * 0.08,
-    argBond: -baseRateDelta * 0.05 + (exchangeMove > 0 ? -0.04 : 0.02),
+    argBond: -baseRateDelta * 0.05 + (exchangeDirection > 0 ? -0.04 : exchangeDirection < 0 ? 0.02 : 0),
     // 금: 실질금리 ↑ 시 약세, 환율 변동성 보호
-    goldFut: -baseRateDelta * 0.04 + (exchangeMove > 0 ? 0.02 : -0.01),
+    goldFut: -baseRateDelta * 0.04 + (exchangeDirection > 0 ? 0.02 : exchangeDirection < 0 ? -0.01 : 0),
     // USD/KRW: 환율 변화 직접 추종
     usdKrw: exchangeMove * 1.0,
   };
-  const unemploymentImpact = unemploymentDelta > 0
+  const unemploymentImpact = unemploymentDirection > 0
     ? { air: -0.03, oceanair: -0.04, enter: -0.03, realty: -0.025, infra: -0.02, metroinfra: -0.03, bank: -0.015, riverbank: -0.02, usBond: 0.02, food: 0.01, purefood: 0.015 }
-    : { air: 0.025, oceanair: 0.03, enter: 0.025, realty: 0.02, infra: 0.018, metroinfra: 0.02, bank: 0.012, riverbank: 0.012, usBond: -0.01 };
+    : unemploymentDirection < 0
+      ? { air: 0.025, oceanair: 0.03, enter: 0.025, realty: 0.02, infra: 0.018, metroinfra: 0.02, bank: 0.012, riverbank: 0.012, usBond: -0.01 }
+      : {};
 
   return {
     baseRateDelta,
@@ -2645,6 +2708,14 @@ function getAssetProfile(asset) {
   };
 }
 
+function getAssetSummaryLine(asset) {
+  if (!asset) return '';
+  const productDetail = getProductLearningDetail(asset);
+  if (productDetail) return productDetail.structure;
+  const profile = getAssetProfile(asset);
+  return profile?.story ?? `${asset.name}은 ${asset.sector} 흐름을 단순화한 가상 자산입니다.`;
+}
+
 // Week 4 §4.9 — ?debug=1 쿼리스트링 감지 훅
 function useDebugMode() {
   const [enabled, setEnabled] = useState(() => {
@@ -2779,6 +2850,63 @@ function runRegressionChecks({ round, phase, gameStarted, salaryPaidRounds, trad
       } else {
         checks.push({ id: 'seed-d', label: '시드 D 일관성', status: 'fail', detail: `초기 ${initialSeedSensitivity.toFixed(3)} → 현재 ${current.toFixed(3)} 불일치` });
       }
+    }
+  }
+
+  // (6) 경제 모델 기본 방향 검사 — 거시 변화가 0이면 방향성 영향도 0이어야 함
+  {
+    const neutralMacro = createMacroMove({
+      baseRate: INITIAL_BASE_RATE,
+      propertyIndex: 250000,
+      exchangeRate: 1350,
+      unemploymentRate: INITIAL_UNEMPLOYMENT_RATE,
+      eventMacroImpact: { baseRateDelta: 0, propertyMove: 0, exchangeMove: 0, unemploymentDelta: 0 },
+      randomMacroImpact: { baseRateDelta: 0, propertyMove: 0, exchangeMove: 0, unemploymentDelta: 0 },
+    });
+    const phantomAssets = Object.entries(neutralMacro.assetImpact ?? {})
+      .filter(([, value]) => Math.abs(value) > 0.0001)
+      .map(([assetId]) => assetId);
+    if (phantomAssets.length === 0) {
+      checks.push({ id: 'macro-zero', label: '거시 0 변화 처리', status: 'ok', detail: '금리·환율·실업률 0 변화에서 추가 방향성 없음' });
+    } else {
+      checks.push({ id: 'macro-zero', label: '거시 0 변화 처리', status: 'fail', detail: `0 변화인데 영향 발생: ${phantomAssets.join(', ')}` });
+    }
+  }
+
+  // (7) 핵심 테마 반응 누락 검사 — 같은 테마의 대표 자산이 이슈에 함께 연결되는지 확인
+  {
+    const eventMap = Object.fromEntries(scenarioEvents.map((event) => [event.id, event]));
+    const missing = [];
+    if (!eventMap['drug-breakthrough']?.impact?.bio) missing.push('신약 승인 기대→제노믹스바이오');
+    if (!eventMap['drug-setback']?.impact?.bio) missing.push('임상 실패 우려→제노믹스바이오');
+    if (!eventMap['rate-up']?.impact?.core) missing.push('금리 인상→코어실리콘');
+    if (!eventMap['rate-down']?.impact?.core) missing.push('금리 인하→코어실리콘');
+    if (missing.length === 0) {
+      checks.push({ id: 'theme-coverage', label: '테마 반응표 핵심 누락', status: 'ok', detail: '바이오·기술주 핵심 반응 연결 확인' });
+    } else {
+      checks.push({ id: 'theme-coverage', label: '테마 반응표 핵심 누락', status: 'warn', detail: `누락: ${missing.join(', ')}` });
+    }
+  }
+
+  // (8) 직접 영향 최소폭 검사 — 대형주 보정·시드 보정 뒤에도 직접 이슈가 너무 작아지지 않는지 확인
+  {
+    const testAssets = assets?.length ? assets : createRandomizedAssets();
+    const actualFloor = enforceDirectImpactFloors(
+      { core: -0.08 },
+      [{ id: 'rate-up-test', didApply: true, outcomeType: 'event', impact: { core: -0.12 }, resolvedImpact: { core: -0.15 } }],
+      testAssets,
+    );
+    const expectationFloor = enforceDirectImpactFloors(
+      { core: -0.07 },
+      [{ id: 'rate-up-test-expectation', didApply: true, outcomeType: 'expectation', impact: { core: -0.12 }, resolvedImpact: { core: -0.105 } }],
+      testAssets,
+    );
+    const actualOk = Math.abs(actualFloor.core ?? 0) >= MIN_EVENT_IMPACT;
+    const expectationOk = Math.abs(expectationFloor.core ?? 0) >= MIN_EVENT_IMPACT * EXPECTATION_IMPACT_MULTIPLIER;
+    if (actualOk && expectationOk) {
+      checks.push({ id: 'direct-floor', label: '직접 영향 최소폭', status: 'ok', detail: `실제 ${formatPercent((actualFloor.core ?? 0) * 100)}, 기대감 ${formatPercent((expectationFloor.core ?? 0) * 100)}` });
+    } else {
+      checks.push({ id: 'direct-floor', label: '직접 영향 최소폭', status: 'fail', detail: `실제 ${actualFloor.core}, 기대감 ${expectationFloor.core}` });
     }
   }
 
@@ -3032,6 +3160,12 @@ function getSimpleExplanation(event) {
     'election-risk': '정치 불확실성 = 정책 방향 예측 어려움',
     'policy-stability': '정책 불확실성 완화 = 투자 계획 세우기 쉬워짐',
     'argentina-reform': '개혁안 충돌 = 국가 신용위험 확대',
+    'emergency-stimulus': '긴급 경기부양 = 정부와 중앙은행이 돈을 풀어 경기 하락을 막으려는 상황',
+    'wage-spiral': '임금-물가 악순환 = 임금 상승이 물가 상승으로 이어지는 상황',
+    'credit-crunch': '신용경색 = 돈 빌리기가 어려워져 기업과 가계가 위축되는 상황',
+    'liquidity-flood': '유동성 과잉 = 시장에 돈이 너무 많이 풀려 자산 가격이 과열되는 상황',
+    'fx-intervention': '외환시장 개입 = 환율 급등을 막기 위해 정부가 달러를 푸는 상황',
+    'realty-cooling-policy': '부동산 과열 억제 = 집값 상승을 막기 위해 대출·규제를 조이는 상황',
   };
 
   return explanations[getEventKey(event)] ?? '뉴스가 투자자의 기대를 바꾸면 가격도 움직일 수 있습니다.';
@@ -3250,7 +3384,7 @@ function ReflectionPrompt({ round, reflection, onReflectionChange, readOnly = fa
   );
 }
 
-function InflationCheckpointCard({ round, totalAsset, investedPrincipal, priceIndex, aggregateReturn, compact = false, roundReflection = null, onRoundReflectionChange = null, macroTimeline = null }) {
+function InflationCheckpointCard({ round, totalAsset, investedPrincipal, priceIndex, aggregateReturn, totalRounds = DEFAULT_TOTAL_ROUNDS, compact = false, roundReflection = null, onRoundReflectionChange = null, macroTimeline = null }) {
   if (!LEARNING_CHECKPOINT_ROUNDS.includes(round)) return null;
   if (priceIndex == null || priceIndex <= 0) return null;
   if (investedPrincipal == null || investedPrincipal <= 0) return null;
@@ -3259,9 +3393,12 @@ function InflationCheckpointCard({ round, totalAsset, investedPrincipal, priceIn
   const nominalReturnPct = ((totalAsset - investedPrincipal) / investedPrincipal) * 100;
   const realNetWorth = totalAsset / priceIndex;
   const realReturnPct = ((realNetWorth - investedPrincipal) / investedPrincipal) * 100;
-  const inflationLoss = realNetWorth - totalAsset; // 음수: 물가로 인해 줄어든 구매력
+  const inflationLoss = Math.max(0, totalAsset - realNetWorth);
   const gapPct = nominalReturnPct - realReturnPct;
   const yearLabel = round === 4 ? '1년' : round === 8 ? '2년' : '3년';
+  const closingMessage = round < totalRounds
+    ? '물가를 이기려면 꾸준히 벌어야 합니다. 남은 라운드에서 따라잡을 수 있어요.'
+    : '최종 결과에서는 통장에 찍힌 숫자와 실제 구매력을 함께 비교해 보세요.';
 
   // 수요견인 코멘트: 방 평균 수익률이 높으면 물가 가속 인식 강화
   const aggregatePct = aggregateReturn != null ? aggregateReturn * 100 : null;
@@ -3297,12 +3434,12 @@ function InflationCheckpointCard({ round, totalAsset, investedPrincipal, priceIn
         </div>
         <div className="inflation-row loss">
           <span>인플레이션 손실</span>
-          <strong className="neg">{formatWon(Math.round(inflationLoss))}</strong>
+          <strong className="neg">{formatWon(inflationLoss)}</strong>
         </div>
       </div>
       <p className="inflation-checkpoint-note">
         명목으로는 {nominalReturnPct >= 0 ? '+' : ''}{nominalReturnPct.toFixed(1)}% 였지만, 물가를 빼면 실질은 {realReturnPct >= 0 ? '+' : ''}{realReturnPct.toFixed(1)}% 였습니다.
-        구매력 기준으로는 <strong>{Math.abs(gapPct).toFixed(1)}%p</strong> 만큼 줄어든 셈입니다. 물가를 이기려면 꾸준히 벌어야합니다. 남은 라운드에서 따 잡을 수 있어요.
+        구매력 기준으로는 <strong>{Math.abs(gapPct).toFixed(1)}%p</strong> 만큼 줄어든 셈입니다. {closingMessage}
       </p>
       {demandPullComment ? <p className="inflation-checkpoint-demand-pull">{demandPullComment}</p> : null}
       {/* Week 4 §4.8 — 체크포인트에서 거시 시계열 라이트 차트 노출 */}
@@ -3496,6 +3633,7 @@ function IssueTicker({ events, phase, compact = false }) {
         {events.map((event) => (
           <article key={event.id}>
             <strong>{event.title}</strong>
+            <small className="friendly-term">{getSimpleExplanation(event)}</small>
             <p>{event.detail}</p>
             {phase === 'open' ? <em>장 마감 후 이 이슈가 실제 가격에 반영됐는지 확인해보세요.</em> : null}
           </article>
@@ -3523,6 +3661,7 @@ function MacroAlertBanner({ alerts, compact = false }) {
         {alerts.map((alert) => (
           <li key={alert.uniqueId ?? alert.id} className="macro-alert-item">
             <strong>{alert.title}</strong>
+            <small className="friendly-term">{getSimpleExplanation(alert)}</small>
             <p>{alert.detail}</p>
           </li>
         ))}
@@ -3548,6 +3687,7 @@ function MacroTriggerPanel({ alertsByRound = {}, activeAlerts = [], compact = fa
         {rows.map((alert, index) => (
           <li className="macro-alert-item" key={`${alert.triggerRound ?? 'active'}-${alert.id}-${index}`}>
             <strong>{alert.triggerRound ? `R${alert.triggerRound} · ` : ''}{alert.title}</strong>
+            <small className="friendly-term">{getSimpleExplanation(alert)}</small>
             <p>{alert.triggerReason ?? alert.detail}</p>
             {alert.affectedAssets?.length ? <span>관련 자산: {alert.affectedAssets.join(' · ')}</span> : null}
           </li>
@@ -3788,6 +3928,135 @@ function getTeamParticipantRows(teamAccounts, assets, players = [], gameStarted 
   });
 }
 
+function buildPortfolioSnapshot(portfolio, assets, totalAsset) {
+  return getHoldingRows(portfolio ?? {}, assets).map(({ asset, shares, value }) => ({
+    assetId: asset.id,
+    name: asset.name,
+    country: asset.country,
+    type: assetTypeLabels[asset.type] ?? asset.type,
+    bucket: getAssetBucket(asset),
+    shares,
+    price: asset.price,
+    value,
+    ratio: totalAsset > 0 ? value / totalAsset : 0,
+  }));
+}
+
+function getRoundTradeLogs(tradeLogs = [], roundNumber) {
+  return (tradeLogs ?? [])
+    .filter((log) => Number(log.round) === Number(roundNumber))
+    .sort((a, b) => String(a.id ?? '').localeCompare(String(b.id ?? '')));
+}
+
+function buildAccountPerformanceSnapshot({
+  cash,
+  deposit,
+  portfolio,
+  assets,
+  investedPrincipal,
+  priceIndex = INITIAL_PRICE_INDEX,
+}) {
+  const safeCash = Number(cash ?? 0);
+  const safeDeposit = Number(deposit ?? 0);
+  const investmentAsset = getPortfolioValue(portfolio ?? {}, assets);
+  const totalAsset = safeCash + safeDeposit + investmentAsset;
+  const safePriceIndex = priceIndex > 0 ? priceIndex : 1;
+  const realNetWorth = totalAsset / safePriceIndex;
+  return {
+    cash: safeCash,
+    deposit: safeDeposit,
+    cashLikeAsset: safeCash + safeDeposit,
+    investmentAsset,
+    totalAsset,
+    investedPrincipal,
+    nominalGain: totalAsset - investedPrincipal,
+    nominalReturnRate: getInvestmentReturnRate(totalAsset, investedPrincipal),
+    realNetWorth,
+    realReturnRate: investedPrincipal > 0 ? ((realNetWorth - investedPrincipal) / investedPrincipal) * 100 : 0,
+    priceIndex: safePriceIndex,
+    portfolioSnapshot: buildPortfolioSnapshot(portfolio, assets, totalAsset),
+  };
+}
+
+function getSnapshotHoldingText(snapshot = []) {
+  return snapshot.length
+    ? snapshot.map((item) => `${item.name} ${Number(item.shares).toLocaleString('ko-KR')}주`).join(', ')
+    : '보유 상품 없음';
+}
+
+function buildFinalResultRows({
+  roomMode,
+  players,
+  teamAccounts,
+  studentStates,
+  assets,
+  gameStarted,
+  round,
+  priceIndex,
+}) {
+  if (roomMode === 'team') {
+    return teamAccounts.map((team) => {
+      const cleanTeam = cleanTeamTradeLock(team);
+      const members = players.filter((player) => player.teamKey === cleanTeam.key);
+      const investedPrincipal = getInvestedPrincipal({
+        gameStarted,
+        round,
+        phase: 'closed',
+        memberCount: Math.max(1, members.length),
+      });
+      const snapshot = buildAccountPerformanceSnapshot({
+        cash: cleanTeam.cash,
+        deposit: cleanTeam.deposit,
+        portfolio: cleanTeam.portfolio,
+        assets,
+        investedPrincipal,
+        priceIndex,
+      });
+      return {
+        id: cleanTeam.key,
+        name: cleanTeam.name,
+        members: members.map((member) => getStudentDisplayName(member.studentNumber, member.name)).join(', '),
+        ...snapshot,
+      };
+    }).sort((a, b) => b.totalAsset - a.totalAsset);
+  }
+
+  const stateByNumber = new Map((studentStates ?? []).map((state) => [Number(state.studentNumber), state]));
+  return (players ?? []).map((player) => {
+    const state = stateByNumber.get(Number(player.studentNumber));
+    const portfolio = state?.portfolio ?? {};
+    const cash = state?.cash ?? player.cash ?? 0;
+    const deposit = state?.deposit ?? player.deposit ?? 0;
+    const investedPrincipal = getInvestedPrincipal({ gameStarted, round, phase: 'closed' });
+    const snapshot = buildAccountPerformanceSnapshot({
+      cash,
+      deposit,
+      portfolio,
+      assets,
+      investedPrincipal,
+      priceIndex,
+    });
+    const totalAsset = state ? snapshot.totalAsset : player.totalAsset ?? snapshot.totalAsset;
+    const adjustedSnapshot = state
+      ? snapshot
+      : {
+          ...snapshot,
+          totalAsset,
+          nominalGain: totalAsset - investedPrincipal,
+          nominalReturnRate: getInvestmentReturnRate(totalAsset, investedPrincipal),
+          realNetWorth: totalAsset / (priceIndex > 0 ? priceIndex : 1),
+          realReturnRate: investedPrincipal > 0 ? (((totalAsset / (priceIndex > 0 ? priceIndex : 1)) - investedPrincipal) / investedPrincipal) * 100 : 0,
+        };
+    return {
+      id: player.id ?? `${player.studentNumber}-${player.name}`,
+      studentNumber: player.studentNumber,
+      name: getStudentDisplayName(player.studentNumber, player.name),
+      members: '',
+      ...adjustedSnapshot,
+    };
+  }).sort((a, b) => b.totalAsset - a.totalAsset);
+}
+
 function getAssetBucket(asset) {
   if (asset.type === 'futures') return '선물';
   if (asset.type === 'bond') return '채권';
@@ -3845,7 +4114,7 @@ function buildFinalSubmissionReport({ nickname, studentNumber = null, mode = 'in
   const realReturnRate = realPrincipal > 0 ? (realNetWorth / realPrincipal) - 1 : 0;
   const nominalGain = totalAsset - investedPrincipal;
   const realGain = realNetWorth - investedPrincipal;
-  const inflationLoss = realNetWorth - totalAsset; // 음수 → 물가로 인한 구매력 손실
+  const inflationLoss = Math.max(0, totalAsset - realNetWorth);
   // 수요견인 비중: 전체 인플레이션 중 demand-pull 누적분이 차지하는 비율
   const demandPullShare = cumulativeInflation > 0
     ? Math.min(1, Math.max(0, demandPullCumulative / cumulativeInflation))
@@ -3947,6 +4216,35 @@ function formatCheckpointReflectionsForExport(roundReflections = {}) {
       return parts.length ? `R${roundNumber} ${parts.join(' · ')}` : '';
     })
     .filter(Boolean)
+    .join(' / ');
+}
+
+function formatRoundReflectionAnswer(roundNumber, answer) {
+  if (!answer) return '';
+  const prompt = REFLECTION_PROMPTS[roundNumber];
+  const selectedText = Number.isInteger(answer.selected)
+    ? prompt?.objective?.options?.[answer.selected] ?? ''
+    : '';
+  const openText = String(answer.open ?? '').trim();
+  return [selectedText ? `선택: ${selectedText}` : '', openText ? `서술: ${openText}` : ''].filter(Boolean).join(' · ');
+}
+
+function formatTradeLogsForExport(tradeLogs = []) {
+  return [...(tradeLogs ?? [])]
+    .sort((a, b) => Number(a.round ?? 0) - Number(b.round ?? 0) || String(a.id ?? '').localeCompare(String(b.id ?? '')))
+    .map((log) => `R${log.round} ${log.type}: ${log.detail}`)
+    .join(' / ');
+}
+
+function formatRoundSnapshotsForExport(roundLogs = []) {
+  return [...(roundLogs ?? [])]
+    .sort((a, b) => Number(a.round ?? 0) - Number(b.round ?? 0))
+    .map((log) => {
+      const snapshotText = getSnapshotHoldingText(log.portfolioSnapshot ?? []);
+      const realReturn = Number(log.realReturnRate ?? 0);
+      const nominalReturn = Number(log.nominalReturnRate ?? getInvestmentReturnRate(log.totalAsset ?? 0, log.investedPrincipal ?? INITIAL_CASH));
+      return `R${log.round}: 총자산 ${formatWon(log.totalAsset ?? 0)}, 명목 ${formatPercent(nominalReturn)}, 실질 ${formatPercent(realReturn)}, 보유 ${snapshotText}`;
+    })
     .join(' / ');
 }
 
@@ -4305,6 +4603,65 @@ function TeacherRankingPanel({ players, submissions, activeStudent, gameFinished
   );
 }
 
+function TeacherFinalResultsModal({ open, rows, roomMode, onClose }) {
+  if (!open) return null;
+
+  const sortedRows = [...rows].sort((a, b) => b.totalAsset - a.totalAsset);
+
+  return (
+    <section className="choice-modal-backdrop final-results-backdrop" aria-label="최종 수익 순위 팝업">
+      <div className="choice-modal final-results-modal">
+        <div className="final-results-header">
+          <div>
+            <p className="eyebrow">최종 라운드 마감</p>
+            <h2>수익 순위와 실질 구매력</h2>
+            <p>
+              {roomMode === 'team'
+                ? '모둠 계좌 기준으로 원금, 현재 자산, 명목 수익, 실질 수익을 비교합니다.'
+                : '학생별 원금, 현재 자산, 보유 상품, 명목 수익, 실질 수익을 비교합니다.'}
+            </p>
+          </div>
+          <button className="command secondary" type="button" onClick={onClose}>
+            닫기
+          </button>
+        </div>
+
+        <div className="final-results-table" role="table" aria-label="최종 수익 순위">
+          <div className="final-results-row head" role="row">
+            <span>순위</span>
+            <span>{roomMode === 'team' ? '모둠' : '학생'}</span>
+            <span>원금</span>
+            <span>현재 가치</span>
+            <span>보유 상품</span>
+            <span>명목 수익</span>
+            <span>실질 수익</span>
+          </div>
+          {sortedRows.length ? sortedRows.map((row, index) => (
+            <div className="final-results-row" role="row" key={row.id ?? row.name}>
+              <strong>{index + 1}위</strong>
+              <div>
+                <b>{row.name}</b>
+                {row.members ? <small>{row.members}</small> : null}
+              </div>
+              <span>{formatWon(row.investedPrincipal ?? INITIAL_CASH)}</span>
+              <span>{formatWon(row.totalAsset ?? 0)}</span>
+              <span className="holdings-cell">{getSnapshotHoldingText(row.portfolioSnapshot ?? [])}</span>
+              <span className={(row.nominalGain ?? 0) >= 0 ? 'up' : 'down'}>
+                {formatWon(row.nominalGain ?? 0)} · {formatPercent(row.nominalReturnRate ?? 0)}
+              </span>
+              <span className={(row.realReturnRate ?? 0) >= 0 ? 'up' : 'down'}>
+                {formatWon(Math.round(row.realNetWorth ?? 0))} 기준 · {formatPercent(row.realReturnRate ?? 0)}
+              </span>
+            </div>
+          )) : (
+            <p className="empty-note">아직 최종 결과로 표시할 참여자가 없습니다.</p>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function EndGameFlowPanel({ finalRoundClosed, submittedCount, participantCount, allSubmissionsComplete, finalReportsDownloaded, phase }) {
   if (phase === 'ended') {
     return (
@@ -4520,7 +4877,8 @@ function FinalReport({
   const reportRoundNotes = submission?.roundNotes ?? roundNotes ?? {};
   const reportRoundReflections = submission?.roundReflections ?? roundReflections ?? {};
   const reportReflection = submission?.reflection ?? reflection;
-  const investorType = submission?.investorType ?? buildFinalSubmissionReport({ nickname, mode, teamName, cash, deposit, depositInterestEarned, investedPrincipal, portfolio, assets, tradeLogs, roundLogs: reportRoundLogs, roundResults: reportRoundResults, roundNotes: reportRoundNotes, roundReflections: reportRoundReflections, reflection: reportReflection, priceIndex, demandPullCumulative }).investorType;
+  const reportTradeLogs = submission?.tradeLogs ?? tradeLogs ?? [];
+  const investorType = submission?.investorType ?? buildFinalSubmissionReport({ nickname, mode, teamName, cash, deposit, depositInterestEarned, investedPrincipal, portfolio, assets, tradeLogs: reportTradeLogs, roundLogs: reportRoundLogs, roundResults: reportRoundResults, roundNotes: reportRoundNotes, roundReflections: reportRoundReflections, reflection: reportReflection, priceIndex, demandPullCumulative }).investorType;
   // Week 4 §2.2 Phase C — 명목 vs 실질 KPI (submission이 있으면 거기서 가져오고, 없으면 즉시 계산)
   const finalPriceIndex = submission?.priceIndex ?? priceIndex;
   const finalDemandPullCumulative = submission?.demandPullCumulative ?? demandPullCumulative;
@@ -4543,6 +4901,13 @@ function FinalReport({
     : (sortedRoundLogs.at(-1)?.round ?? null);
   const selectedRoundLog = sortedRoundLogs.find((log) => log.round === selectedRound) ?? sortedRoundLogs.at(-1) ?? null;
   const selectedRoundSummary = buildRoundSummaryFromLog(selectedRoundLog);
+  const selectedRoundTrades = selectedRoundLog?.tradeLogsThisRound?.length
+    ? selectedRoundLog.tradeLogsThisRound
+    : getRoundTradeLogs(reportTradeLogs, selectedRound);
+  const selectedRoundPortfolio = selectedRoundLog?.portfolioSnapshot ?? [];
+  const selectedRoundNote = selectedRoundLog?.roundNote ?? reportRoundNotes?.[selectedRound] ?? '';
+  const selectedRoundReflection = selectedRoundLog?.checkpointReflection ?? reportRoundReflections?.[selectedRound];
+  const selectedRoundReflectionText = formatRoundReflectionAnswer(selectedRound, selectedRoundReflection);
   const reportMacroAlertsByRound = Object.fromEntries(
     reportRoundResults
       .filter((result) => (result.macroAlerts ?? []).length)
@@ -4649,9 +5014,9 @@ function FinalReport({
 
       <div className="report-section">
         <h3>거래 로그</h3>
-        {tradeLogs.length ? (
+        {reportTradeLogs.length ? (
           <div className="report-list">
-            {tradeLogs.map((log) => (
+            {reportTradeLogs.map((log) => (
               <article key={log.id}>
                 <strong>R{log.round} · {log.type}</strong>
                 <span>{log.detail}</span>
@@ -4691,6 +5056,42 @@ function FinalReport({
                 ) : (
                   <p>이 라운드의 상세 이슈 분석 데이터는 아직 저장되지 않았습니다.</p>
                 )}
+                <div className="round-evidence-grid">
+                  <article>
+                    <strong>라운드 메모</strong>
+                    <p>{selectedRoundNote?.trim() ? selectedRoundNote : '저장된 메모가 없습니다.'}</p>
+                  </article>
+                  <article>
+                    <strong>체크포인트 답변</strong>
+                    <p>{selectedRoundReflectionText || '이 라운드에는 체크포인트 답변이 없습니다.'}</p>
+                  </article>
+                  <article>
+                    <strong>라운드 거래 기록</strong>
+                    {selectedRoundTrades.length ? (
+                      <ul>
+                        {selectedRoundTrades.map((log) => (
+                          <li key={log.id}>{log.type}: {log.detail}</li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p>이 라운드에 기록된 거래가 없습니다.</p>
+                    )}
+                  </article>
+                  <article>
+                    <strong>라운드 마감 포트폴리오</strong>
+                    {selectedRoundPortfolio.length ? (
+                      <ul>
+                        {selectedRoundPortfolio.map((item) => (
+                          <li key={item.assetId}>
+                            {item.name} {Number(item.shares).toLocaleString('ko-KR')}주 · {formatWon(item.value)} · {Math.round((item.ratio ?? 0) * 100)}%
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p>{selectedRoundLog?.holdings ?? '저장된 포트폴리오 스냅샷이 없습니다.'}</p>
+                    )}
+                  </article>
+                </div>
               </div>
             ) : null}
           </div>
@@ -5729,6 +6130,8 @@ function HostView({
   gameFinished,
   finalRoundClosed,
   finalReportsDownloaded,
+  finalResultsOpen,
+  finalResultRows,
   submittedCount,
   participantCount,
   allSubmissionsComplete,
@@ -5760,6 +6163,8 @@ function HostView({
   onCloseStartIssueChoice,
   onCloseSubmissions,
   onDownloadSubmissions,
+  onOpenFinalResults,
+  onCloseFinalResults,
   salaryPaidRounds,
   tradeLogs,
 }) {
@@ -5881,6 +6286,12 @@ function HostView({
             <ChevronRight size={19} aria-hidden="true" />
             다음 라운드 준비
           </button>
+          {finalRoundClosed ? (
+            <button className="command secondary" type="button" onClick={onOpenFinalResults}>
+              <Trophy size={19} aria-hidden="true" />
+              최종 결과 보기
+            </button>
+          ) : null}
           <button className="command secondary" type="button" onClick={onTogglePause}>
             {isPaused ? <Play size={19} aria-hidden="true" /> : <Pause size={19} aria-hidden="true" />}
             {isPaused ? '재개' : '일시 정지'}
@@ -5912,6 +6323,12 @@ function HostView({
             onConfirm={onConfirmReset}
           />
         ) : null}
+        <TeacherFinalResultsModal
+          open={finalResultsOpen}
+          rows={finalResultRows}
+          roomMode={roomMode}
+          onClose={onCloseFinalResults}
+        />
 
         <section className="mode-panel" aria-label="수업 방식 설정">
           <div>
@@ -6026,6 +6443,7 @@ function HostView({
                 <article key={event.id}>
                   <div>
                     <strong>{event.title}</strong>
+                    <small className="friendly-term">{getSimpleExplanation(event)}</small>
                     <span>{event.detail}</span>
                   </div>
                   <button type="button" onClick={() => onCancelIssue(event.id)} disabled={phase !== 'setup'}>
@@ -6053,6 +6471,7 @@ function HostView({
             {filteredScenarioEvents.map((event) => (
               <article className="event-button" key={event.id}>
                 <strong>{event.title}</strong>
+                <em className="friendly-term">{getSimpleExplanation(event)}</em>
                 <span>{event.detail}</span>
                 <small>{event.principle}</small>
                 <div className="issue-options">
@@ -6092,6 +6511,7 @@ function HostView({
                 investedPrincipal={investedPerHead}
                 priceIndex={priceIndex}
                 aggregateReturn={latestRoundSummary?.aggregateReturn}
+                totalRounds={totalRounds}
               />
             );
           })()
@@ -6150,6 +6570,7 @@ function HostView({
             {visibleHostAssets.map((asset) => {
               const change = getChange(asset);
               const expanded = hostExpandedAssetId === asset.id;
+              const assetSummary = getAssetSummaryLine(asset);
               return (
                 <div key={asset.id} style={{ display: 'flex', flexDirection: 'column' }}>
                   <article
@@ -6167,6 +6588,8 @@ function HostView({
                       <div>
                         <strong>{asset.name}</strong>
                         <small>{asset.country} · {assetTypeLabels[asset.type]} · {asset.sector} · {getPrimaryThemeLabel(asset)}</small>
+                        <p className="host-asset-summary">{assetSummary}</p>
+                        <span className="host-asset-detail-hint">{expanded ? '설명 접기' : '설명 보기'}</span>
                       </div>
                     </div>
                     <Sparkline history={asset.history} color={asset.color} />
@@ -6293,6 +6716,7 @@ function RoundNoteHistory({ round, phase, gameFinished, gameStarted, roundNotes,
 function StudentView({
   roomPin,
   round,
+  totalRounds,
   phase,
   roomMode,
   assets,
@@ -6604,6 +7028,7 @@ function StudentView({
             investedPrincipal={getInvestedPrincipal({ gameStarted, round, phase: 'closed', memberCount: 1 })}
             priceIndex={priceIndex}
             aggregateReturn={latestRoundSummary?.aggregateReturn}
+            totalRounds={totalRounds}
             compact
             roundReflection={roundReflections?.[round]}
             onRoundReflectionChange={onRoundReflectionChange}
@@ -7034,6 +7459,7 @@ export function App() {
   const [submissions, setSubmissions] = useState([]);
   const [studentStates, setStudentStates] = useState([]);
   const [finalReportsDownloaded, setFinalReportsDownloaded] = useState(false);
+  const [finalResultsOpen, setFinalResultsOpen] = useState(false);
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
   const [resetPassword, setResetPassword] = useState('');
   const [resetError, setResetError] = useState('');
@@ -7116,6 +7542,16 @@ export function App() {
     investmentAsset: studentHoldingsValue,
     investedPrincipal,
   });
+  const finalResultRows = useMemo(() => buildFinalResultRows({
+    roomMode,
+    players,
+    teamAccounts,
+    studentStates,
+    assets,
+    gameStarted,
+    round,
+    priceIndex,
+  }), [assets, gameStarted, players, priceIndex, roomMode, round, studentStates, teamAccounts]);
   const submittedCount = players.length
     ? players.filter((player) => submissions.some((submission) => submissionMatchesPlayer(submission, player))).length
     : submissions.length;
@@ -7789,6 +8225,7 @@ export function App() {
     const fundedTeams = fundTeamAccounts(teamAccounts.length ? teamAccounts : createDefaultTeamAccounts());
     setGameStarted(true);
     setFinalReportsDownloaded(false);
+    setFinalResultsOpen(false);
     setCash(INITIAL_CASH);
     setInitialCapitalGranted(true);
     setDeposit(0);
@@ -7954,6 +8391,7 @@ export function App() {
     setSubmissions([]);
     setStudentStates([]);
     setFinalReportsDownloaded(false);
+    setFinalResultsOpen(false);
     setResetDialogOpen(false);
     setResetPassword('');
     setResetError('');
@@ -8254,11 +8692,20 @@ export function App() {
       const repeatedCount = appliedEventTypeCounts[getEventKey(event)] ?? 0;
       const repeatedVolatility = event.didApply && repeatedCount >= 2;
       const isReverse = event.outcomeType === 'reverse';
+      const isExpectation = event.outcomeType === 'expectation';
       let resolvedImpact = {};
       if (event.didApply) {
         resolvedImpact = repeatedVolatility
           ? normalizeRepeatedEventImpact(event.impact, repeatedCount, assets)
           : normalizeEventImpact(event.impact, assets);
+        if (isExpectation) {
+          resolvedImpact = Object.fromEntries(
+            Object.entries(resolvedImpact).map(([assetId, value]) => [
+              assetId,
+              Number((value * EXPECTATION_IMPACT_MULTIPLIER).toFixed(3)),
+            ]),
+          );
+        }
       } else if (isReverse) {
         const base = normalizeEventImpact(event.impact, assets);
         const factor = event.reverseFactor ?? -0.5;
@@ -8291,9 +8738,9 @@ export function App() {
     // Week 2 K — 방 생성 시 부여된 이슈 강도 시드 적용 (모든 이슈 impact에 곱연산)
     const issueIntensity = economicSeed?.issueIntensity ?? 1;
     const rawEventImpact = applySizeFactor(combineResolvedImpacts(allResolvedEvents), assets);
-    const eventImpact = Object.fromEntries(
+    const eventImpact = enforceDirectImpactFloors(Object.fromEntries(
       Object.entries(rawEventImpact).map(([assetId, value]) => [assetId, value * issueIntensity]),
-    );
+    ), allResolvedEvents, assets);
     const rawEventMacroImpact = combineEventMacroImpacts(allResolvedEvents);
     const eventMacroImpact = Object.fromEntries(
       Object.entries(rawEventMacroImpact).map(([key, value]) => [key, value * issueIntensity]),
@@ -8465,6 +8912,7 @@ export function App() {
     const mergedExDividend = {};
     const dividendBreakdown = [];
     let localDividendAmount = 0;
+    let localDividendLogsForRound = [];
     let nextStudentStatesAfterDividend = teamMode ? latestStudentStates : latestStudentStates.map((state) => {
       const currentPortfolio = state.portfolio ?? {};
       const alreadyPaid = Number(state.lastDividendRound ?? 0) === round;
@@ -8506,8 +8954,9 @@ export function App() {
     if (!teamMode && joined) {
       const localPayout = lastDividendRound === round
         ? { totalDividend: 0, exDividendByAsset: {}, breakdown: [] }
-        : computeDividendPayout(portfolio, nextAssets, round);
+          : computeDividendPayout(portfolio, nextAssets, round);
       const localDividendLogs = buildDividendLogs(localPayout.breakdown, round, tradeLogs);
+      localDividendLogsForRound = localDividendLogs;
       localDividendAmount = localPayout.totalDividend;
       mergeExDividendDrops(mergedExDividend, localPayout.exDividendByAsset);
       dividendBreakdown.push(...localPayout.breakdown);
@@ -8557,11 +9006,11 @@ export function App() {
     {
       const memberCount = teamMode
         ? Math.max(1, players.length)
-        : Math.max(1, (players ?? []).length);
+        : Math.max(1, (players ?? []).length, nextStudentStatesAfterDividend.length);
       // 누적 원금: INITIAL_CASH + ROUND_SALARY × (생활소득 지급 횟수)
       const investedPerHead = getInvestedPrincipal({ gameStarted: true, round, phase: 'closed' });
       const aggregatePrincipal = investedPerHead * memberCount;
-      // 총 자산: 라운드 종료 시점 가격(nextAssets) 기준 — 솔로는 players.totalAsset, 팀은 cash+deposit+포트폴리오
+      // 총 자산: 라운드 종료 시점 가격 기준 — 개인전은 마감 후 학생 계좌 상태를 우선 사용
       const aggregateNetWorth = teamMode
         ? nextTeamAccountsAfterDividend.reduce((sum, team) => sum + getTotalAsset({
             cash: team.cash ?? 0,
@@ -8569,7 +9018,35 @@ export function App() {
             portfolio: team.portfolio ?? {},
             assets: nextAssetsAfterDividend,
           }), 0)
-        : (players ?? []).reduce((sum, p) => sum + (p.totalAsset ?? INITIAL_CASH), 0);
+        : (() => {
+            const stateByNumber = new Map(
+              nextStudentStatesAfterDividend.map((state) => [Number(state.studentNumber), state]),
+            );
+            const seen = new Set();
+            const playerTotal = (players ?? []).reduce((sum, player) => {
+              const studentNumberKey = Number(player.studentNumber);
+              const state = stateByNumber.get(studentNumberKey);
+              if (state) {
+                seen.add(studentNumberKey);
+                return sum + getTotalAsset({
+                  cash: Number(state.cash ?? 0),
+                  deposit: Number(state.deposit ?? 0),
+                  portfolio: state.portfolio ?? {},
+                  assets: nextAssetsAfterDividend,
+                });
+              }
+              return sum + (player.totalAsset ?? INITIAL_CASH);
+            }, 0);
+            const extraStateTotal = nextStudentStatesAfterDividend
+              .filter((state) => !seen.has(Number(state.studentNumber)))
+              .reduce((sum, state) => sum + getTotalAsset({
+                cash: Number(state.cash ?? 0),
+                deposit: Number(state.deposit ?? 0),
+                portfolio: state.portfolio ?? {},
+                assets: nextAssetsAfterDividend,
+              }), 0);
+            return playerTotal + extraStateTotal;
+          })();
       aggregateReturnForRound = aggregatePrincipal > 0
         ? (aggregateNetWorth / aggregatePrincipal) - 1
         : 0;
@@ -8580,8 +9057,9 @@ export function App() {
       // 이슈 영향 (실제 발생한 inflation-cool / inflation-rebound 만)
       const issueInflationDelta = resolvedEvents.reduce((sum, ev) => {
         if (!ev.didApply) return sum;
-        if (ev.id === 'inflation-cool')    return sum - 0.003;
-        if (ev.id === 'inflation-rebound') return sum + 0.008;
+        const eventKey = getEventKey(ev);
+        if (eventKey === 'inflation-cool') return sum - 0.003;
+        if (eventKey === 'inflation-rebound') return sum + 0.008;
         return sum;
       }, 0);
 
@@ -8651,19 +9129,57 @@ export function App() {
     const logPortfolio = teamMode ? selectedTeamAfterRound.portfolio : portfolio;
     // Week 2 E — 라운드 로그는 배당락 적용 후 자산 가격 기준으로 산정
     const assetsForLog = nextAssetsAfterDividend ?? nextAssets;
-    const buildAccountRoundLog = ({ accountCash, accountDeposit, accountPortfolio }) => buildRoundLog({
+    const buildAccountRoundLog = ({
+      accountCash,
+      accountDeposit,
+      accountPortfolio,
+      accountTradeLogs = [],
+      accountRoundNotes = {},
+      accountRoundReflections = {},
+      memberCount = 1,
+    }) => {
+      const performanceSnapshot = buildAccountPerformanceSnapshot({
+        cash: accountCash,
+        deposit: accountDeposit,
+        portfolio: accountPortfolio,
+        assets: assetsForLog,
+        investedPrincipal: getInvestedPrincipal({
+          gameStarted: true,
+          round,
+          phase: 'closed',
+          memberCount,
+        }),
+        priceIndex: nextPriceIndexValue,
+      });
+      return buildRoundLog({
         round,
         now: Date.now(),
-        totalAsset: getTotalAsset({ cash: accountCash, deposit: accountDeposit, portfolio: accountPortfolio, assets: assetsForLog }),
+        totalAsset: performanceSnapshot.totalAsset,
         holdings: getHoldingSummary(accountPortfolio, assetsForLog),
         events: resolvedEvents.map((event) => `${event.title}: ${getResultLabel(event, false)}`).join(' / '),
+        ...performanceSnapshot,
+        tradeLogsThisRound: getRoundTradeLogs(accountTradeLogs, round),
+        roundNote: accountRoundNotes?.[round] ?? '',
+        checkpointReflection: accountRoundReflections?.[round] ?? null,
         eventAnalysis: resolvedEvents,
         macroAlerts: resolvedMacroAlerts,
         macroMove,
         delistedAssets,
         priceIndex: nextPriceIndexValue,
       });
-    const localRoundLog = buildAccountRoundLog({ accountCash: logCash, accountDeposit: logDeposit, accountPortfolio: logPortfolio });
+    };
+    const localTeamMemberCount = teamMode
+      ? players.filter((player) => player.teamKey === selectedTeamAfterRound.key).length
+      : 1;
+    const localRoundLog = buildAccountRoundLog({
+      accountCash: logCash,
+      accountDeposit: logDeposit,
+      accountPortfolio: logPortfolio,
+      accountTradeLogs: [...localDividendLogsForRound, ...tradeLogs],
+      accountRoundNotes: roundNotes,
+      accountRoundReflections: roundReflections,
+      memberCount: Math.max(1, localTeamMemberCount),
+    });
     setRoundLogs((current) => [
       localRoundLog,
       ...current.filter((item) => item.round !== round),
@@ -8677,6 +9193,12 @@ export function App() {
         accountCash: Number(account.cash ?? 0),
         accountDeposit: Number(account.deposit ?? 0),
         accountPortfolio: account.portfolio ?? {},
+        accountTradeLogs: state.tradeLogs ?? [],
+        accountRoundNotes: state.roundNotes ?? {},
+        accountRoundReflections: state.roundReflections ?? {},
+        memberCount: teamMode
+          ? Math.max(1, players.filter((player) => player.teamKey === account.key).length)
+          : 1,
       });
       return {
         ...state,
@@ -8733,6 +9255,9 @@ export function App() {
       tone: 'success',
       duration: 5000,
     });
+    if (round === totalRounds) {
+      setFinalResultsOpen(true);
+    }
 
     if (remoteRoomId) {
       try {
@@ -8940,7 +9465,7 @@ export function App() {
   function handleDownloadSubmissions() {
     if (!gameFinished || !allSubmissionsComplete) return;
     const rows = [
-      ['순위', '학번', '이름', '제출방식', '투자방식', '모둠', '총자산', '투입원금', '현금성자산', '투자평가금', '예금이자수익', '수익률', '물가지수', '투자성향', '보유자산', '라운드이슈분석', '거시트리거', '라운드메모', '체크포인트답변', '잘한점', '부족한점', '다음계획'],
+      ['순위', '학번', '이름', '제출방식', '투자방식', '모둠', '총자산', '투입원금', '현금성자산', '투자평가금', '예금이자수익', '수익률', '실질수익률', '실질순자산', '물가지수', '투자성향', '보유자산', '라운드별마감포트폴리오', '거래기록', '라운드이슈분석', '거시트리거', '라운드메모', '체크포인트답변', '잘한점', '부족한점', '다음계획'],
       ...[...submissions].sort((a, b) => b.totalAsset - a.totalAsset).map((submission, index) => [
         index + 1,
         submission.studentNumber ?? '',
@@ -8954,9 +9479,13 @@ export function App() {
         submission.investmentAsset,
         submission.depositInterestEarned ?? 0,
         `${submission.returnRate.toFixed(1)}%`,
+        `${((submission.realReturnRate ?? 0) * 100).toFixed(1)}%`,
+        Math.round(submission.realNetWorth ?? 0),
         Number(submission.priceIndex ?? priceIndex).toFixed(3),
         submission.investorType,
         submission.portfolio?.map((item) => `${item.name} ${item.shares}주 ${Math.round((item.ratio ?? 0) * 100)}%`).join(' / ') ?? '',
+        formatRoundSnapshotsForExport(submission.roundLogs),
+        formatTradeLogsForExport(submission.tradeLogs),
         (submission.roundResults ?? []).map((result) => `R${result.round}: ${(result.events ?? []).map((event) => `${event.title}(${getResultLabel(event, false)})`).join(', ') || '선택 이슈 없음'}`).join(' / '),
         (submission.roundResults ?? []).flatMap((result) => (result.macroAlerts ?? []).map((alert) => `R${result.round}: ${alert.title}`)).join(' / '),
         formatRoundNotesForExport(submission.roundNotes),
@@ -9198,6 +9727,8 @@ export function App() {
           gameFinished={gameFinished}
           finalRoundClosed={finalRoundClosed}
           finalReportsDownloaded={finalReportsDownloaded}
+          finalResultsOpen={finalResultsOpen}
+          finalResultRows={finalResultRows}
           submittedCount={submittedCount}
           participantCount={participantCount}
           allSubmissionsComplete={allSubmissionsComplete}
@@ -9239,6 +9770,8 @@ export function App() {
           onCloseStartIssueChoice={() => setStartIssueChoiceOpen(false)}
           onCloseSubmissions={handleCloseSubmissions}
           onDownloadSubmissions={handleDownloadSubmissions}
+          onOpenFinalResults={() => setFinalResultsOpen(true)}
+          onCloseFinalResults={() => setFinalResultsOpen(false)}
           salaryPaidRounds={salaryPaidRounds}
           tradeLogs={tradeLogs}
         />
@@ -9250,6 +9783,7 @@ export function App() {
         <StudentView
           roomPin={roomPin}
           round={round}
+          totalRounds={totalRounds}
           phase={phase}
           roomMode={roomMode}
           assets={assets}
