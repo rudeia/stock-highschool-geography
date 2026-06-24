@@ -6398,6 +6398,7 @@ function HostSetupView({
   totalRounds,
   roomMode,
   volatilityMode,
+  corporateRiskEnabled,
   economicSeed,
   players,
   expiresAt,
@@ -6408,6 +6409,7 @@ function HostSetupView({
   onRoomModeChange,
   onTotalRoundsChange,
   onVolatilityModeChange,
+  onCorporateRiskEnabledChange,
 }) {
   if (!roomReady) {
     return (
@@ -6499,6 +6501,21 @@ function HostSetupView({
                 </button>
                 <button className={volatilityMode === 'volatility' ? 'active' : ''} type="button" onClick={() => onVolatilityModeChange('volatility')} disabled={roomExpired}>
                   변동성 학습 (±8%)
+                </button>
+              </div>
+            </article>
+
+            <article>
+              <div>
+                <strong>기업 리스크 확장팩</strong>
+                <span>특정 기업 하나에만 적용되는 자사주 소각, 경영진 논란, 임상 지연 같은 기업 고유 뉴스를 사용할지 정합니다.</span>
+              </div>
+              <div className="segmented-control">
+                <button className={!corporateRiskEnabled ? 'active' : ''} type="button" onClick={() => onCorporateRiskEnabledChange(false)} disabled={roomExpired}>
+                  사용 안 함
+                </button>
+                <button className={corporateRiskEnabled ? 'active' : ''} type="button" onClick={() => onCorporateRiskEnabledChange(true)} disabled={roomExpired}>
+                  확장팩 사용
                 </button>
               </div>
             </article>
@@ -6621,6 +6638,7 @@ function HostView({
   phase,
   roomMode,
   volatilityMode,
+  corporateRiskEnabled,
   economicSeed,
   gameStarted,
   isPaused,
@@ -6665,6 +6683,7 @@ function HostView({
   onRoomModeChange,
   onTotalRoundsChange,
   onVolatilityModeChange,
+  onCorporateRiskEnabledChange,
   onIssueDraftChange,
   onStartRound,
   onCloseRound,
@@ -6756,6 +6775,7 @@ function HostView({
         totalRounds={totalRounds}
         roomMode={roomMode}
         volatilityMode={volatilityMode}
+        corporateRiskEnabled={corporateRiskEnabled}
         economicSeed={economicSeed}
         players={players}
         expiresAt={expiresAt}
@@ -6766,6 +6786,7 @@ function HostView({
         onRoomModeChange={onRoomModeChange}
         onTotalRoundsChange={onTotalRoundsChange}
         onVolatilityModeChange={onVolatilityModeChange}
+        onCorporateRiskEnabledChange={onCorporateRiskEnabledChange}
       />
     );
   }
@@ -6811,10 +6832,12 @@ function HostView({
             <Shuffle size={19} aria-hidden="true" />
             랜덤 이슈 3개로 장 시작
           </button>
-          <button className="command secondary" type="button" onClick={onStartWithRandomIssuesAndCorporateRisk} disabled={roomExpired || !gameStarted || phase !== 'setup'}>
-            <CircleAlert size={19} aria-hidden="true" />
-            랜덤 이슈 3개 + 기업 리스크
-          </button>
+          {corporateRiskEnabled ? (
+            <button className="command secondary" type="button" onClick={onStartWithRandomIssuesAndCorporateRisk} disabled={roomExpired || !gameStarted || phase !== 'setup'}>
+              <CircleAlert size={19} aria-hidden="true" />
+              랜덤 이슈 3개 + 기업 리스크
+            </button>
+          ) : null}
           <button className="command primary" type="button" onClick={onCloseRound} disabled={roomExpired || phase !== 'open'}>
             <Activity size={19} aria-hidden="true" />
             장 마감
@@ -6897,9 +6920,11 @@ function HostView({
                 <button className="command primary" type="button" onClick={onStartWithRandomIssues}>
                   랜덤 이슈 3개로 장 시작
                 </button>
-                <button className="command primary" type="button" onClick={onStartWithRandomIssuesAndCorporateRisk}>
-                  랜덤 이슈 3개 + 기업 리스크
-                </button>
+                {corporateRiskEnabled ? (
+                  <button className="command primary" type="button" onClick={onStartWithRandomIssuesAndCorporateRisk}>
+                    랜덤 이슈 3개 + 기업 리스크
+                  </button>
+                ) : null}
                 <button className="command secondary" type="button" onClick={onCloseStartIssueChoice}>
                   돌아가기
                 </button>
@@ -7029,25 +7054,27 @@ function HostView({
           </div>
         </section>
 
-        <CorporateRiskPanel
-          assets={assets}
-          corporateRiskEvents={corporateRiskEvents}
-          selectedAssetId={activeCorporateRiskAssetId}
-          onSelectedAssetChange={setCorporateRiskAssetId}
-          onRegisterCorporateRisk={onRegisterCorporateRisk}
-          onCancelIssue={onCancelIssue}
-          onClearCorporateRisks={onClearCorporateRisks}
-          canRegisterCorporateRisk={canRegisterCorporateRisk}
-          phase={phase}
-          gameStarted={gameStarted}
-          roomExpired={roomExpired}
-        />
+        {corporateRiskEnabled ? (
+          <CorporateRiskPanel
+            assets={assets}
+            corporateRiskEvents={corporateRiskEvents}
+            selectedAssetId={activeCorporateRiskAssetId}
+            onSelectedAssetChange={setCorporateRiskAssetId}
+            onRegisterCorporateRisk={onRegisterCorporateRisk}
+            onCancelIssue={onCancelIssue}
+            onClearCorporateRisks={onClearCorporateRisks}
+            canRegisterCorporateRisk={canRegisterCorporateRisk}
+            phase={phase}
+            gameStarted={gameStarted}
+            roomExpired={roomExpired}
+          />
+        ) : null}
 
         {/* Week 4 §2.4 — 거시 경보(트리거)는 이슈와 분리된 별도 배너로 노출 */}
         <MacroAlertBanner alerts={activeMacroAlerts} />
         <MacroTriggerPanel alertsByRound={macroAlertsByRound} activeAlerts={activeMacroAlerts} />
         <IssueTicker events={marketRoundEvents} phase={phase} />
-        <CorporateRiskTicker events={corporateRiskEvents} assets={assets} phase={phase} />
+        {corporateRiskEnabled ? <CorporateRiskTicker events={corporateRiskEvents} assets={assets} phase={phase} /> : null}
         {/* Week 3 H — 교사 대시보드: 라운드별 이슈 분석 탭 */}
         <TeacherRoundIssuesPanel
           triggeredEventsByRound={triggeredEventsByRound}
@@ -7293,6 +7320,7 @@ function StudentView({
   playerCount,
   roomFull,
   currentRoundEvents,
+  corporateRiskEnabled,
   corporateRiskEvents = [],
   activeMacroAlerts,
   macroAlertsByRound,
@@ -7576,7 +7604,7 @@ function StudentView({
         <MacroAlertBanner alerts={activeMacroAlerts} compact />
         <MacroTriggerPanel alertsByRound={macroAlertsByRound} activeAlerts={activeMacroAlerts} compact />
         <IssueTicker events={currentRoundEvents} phase={phase} compact />
-        <CorporateRiskTicker events={corporateRiskEvents} assets={assets} phase={phase} compact />
+        {corporateRiskEnabled ? <CorporateRiskTicker events={corporateRiskEvents} assets={assets} phase={phase} compact /> : null}
         {/* Week 4 §2.2 Phase B — 인플레이션 체크포인트 카드 (R4·R8·R12 종료 시) */}
         {phase === 'closed' && LEARNING_CHECKPOINT_ROUNDS.includes(round) ? (
           <InflationCheckpointCard
@@ -7955,6 +7983,7 @@ export function App() {
   const [roomMode, setRoomMode] = useState('individual');
   // Week 1 M — 패시브 노이즈 모드: 'standard'(±5%) | 'volatility'(±8%)
   const [volatilityMode, setVolatilityMode] = useState('standard');
+  const [corporateRiskEnabled, setCorporateRiskEnabled] = useState(false);
   // Week 2 K — 방 생성 시 부여되는 3가지 난수 시드 (게임마다 약간씩 다른 경제 조건)
   const [economicSeed, setEconomicSeed] = useState(null);
   const [gameStarted, setGameStarted] = useState(false);
@@ -8056,7 +8085,9 @@ export function App() {
   );
   const currentRoundEvents = triggeredEventsByRound[round] ?? [];
   const publicCurrentRoundEvents = currentRoundEvents.filter((event) => event.published && !isCorporateRiskEvent(event));
-  const publicCorporateRiskEvents = currentRoundEvents.filter((event) => event.published && isCorporateRiskEvent(event));
+  const publicCorporateRiskEvents = corporateRiskEnabled
+    ? currentRoundEvents.filter((event) => event.published && isCorporateRiskEvent(event))
+    : [];
   const expiresAt = roomCreatedAt + ROOM_TTL_MS;
   const gameFinished = phase === 'ended' || (round === totalRounds && phase === 'closed');
   const teamMode = roomMode === 'team';
@@ -8173,7 +8204,15 @@ export function App() {
     setTriggerCooldowns(bundle.room.trigger_cooldowns ?? {});
     setPendingMacroAlerts(bundle.room.pending_macro_alerts ?? []);
     setActiveMacroAlerts(bundle.room.active_macro_alerts ?? []);
-    if (bundle.room.economic_seed && Object.keys(bundle.room.economic_seed).length) setEconomicSeed(bundle.room.economic_seed);
+    const remoteEconomicSeed = bundle.room.economic_seed && Object.keys(bundle.room.economic_seed).length
+      ? bundle.room.economic_seed
+      : null;
+    if (remoteEconomicSeed) {
+      setEconomicSeed(remoteEconomicSeed);
+      setCorporateRiskEnabled(Boolean(remoteEconomicSeed.corporateRiskEnabled));
+    } else {
+      setCorporateRiskEnabled(false);
+    }
     setOpenMacroContext(bundle.room.open_macro_context && Object.keys(bundle.room.open_macro_context).length ? bundle.room.open_macro_context : null);
     if (bundle.assets.length) setAssets(bundle.assets);
     setTriggeredEventsByRound(groupedEvents);
@@ -8594,6 +8633,21 @@ export function App() {
     }
   }
 
+  async function handleCorporateRiskEnabledChange(enabled) {
+    if (phase !== 'setup' || gameStarted) return;
+    const nextEnabled = Boolean(enabled);
+    setCorporateRiskEnabled(nextEnabled);
+    const nextSeed = { ...(economicSeed ?? {}), corporateRiskEnabled: nextEnabled };
+    setEconomicSeed((current) => ({ ...(current ?? {}), corporateRiskEnabled: nextEnabled }));
+    if (remoteRoomId) {
+      try {
+        await updateRemoteRoom(remoteRoomId, { economic_seed: nextSeed });
+      } catch (error) {
+        setSyncStatus(`기업 리스크 확장팩 설정 저장 실패: ${error.message}`);
+      }
+    }
+  }
+
   function handleReflectionChange(key, value) {
     setReflection((current) => ({ ...current, [key]: value }));
   }
@@ -8889,8 +8943,9 @@ export function App() {
     const now = Date.now();
     const selectedTotalRounds = totalRounds;
     const selectedRoomMode = roomMode;
+    const selectedCorporateRiskEnabled = corporateRiskEnabled;
     // Week 2 K — 방 생성 시점에 3가지 난수 시드 생성 (모든 방에 적용)
-    const nextEconomicSeed = createEconomicSeed();
+    const nextEconomicSeed = { ...createEconomicSeed(), corporateRiskEnabled: selectedCorporateRiskEnabled };
     const nextAssets = createRandomizedAssets();
     const nextPropertyIndex = getInitialPropertyIndexFromAssets(nextAssets);
     const nextTeams = createDefaultTeamAccounts();
@@ -8914,6 +8969,7 @@ export function App() {
     setTotalRounds(selectedTotalRounds);
     setPhase(nextRoom.phase);
     setRoomMode(selectedRoomMode);
+    setCorporateRiskEnabled(selectedCorporateRiskEnabled);
     setGameStarted(false);
     setIsPaused(nextRoom.isPaused);
     setBaseRate(nextRoom.baseRate);
@@ -9007,6 +9063,7 @@ export function App() {
         setUnemploymentRate(nextEconomicSeed.economicConstitution.unemploymentRate);
         setAssets(nextAssets); // dividendTier·dividendRate 포함된 로컬 자산으로 복원
         setEconomicSeed(nextEconomicSeed);
+        setCorporateRiskEnabled(selectedCorporateRiskEnabled);
       }
     } catch (error) {
       setRoomReady(false);
@@ -9100,7 +9157,7 @@ export function App() {
 
   async function handleRegisterCorporateRisk(assetId, riskOption) {
     const corporateRiskCount = currentRoundEvents.filter(isCorporateRiskEvent).length;
-    if (roomExpired || !gameStarted || phase !== 'setup' || corporateRiskCount >= MAX_CORPORATE_RISKS_PER_ROUND) return;
+    if (!corporateRiskEnabled || roomExpired || !gameStarted || phase !== 'setup' || corporateRiskCount >= MAX_CORPORATE_RISKS_PER_ROUND) return;
     const targetAsset = assets.find((asset) => asset.id === assetId && asset.type === 'stock' && !asset.delisted);
     if (!targetAsset || !riskOption) return;
 
@@ -9152,7 +9209,7 @@ export function App() {
     if (randomStartMode) {
       const now = Date.now();
       const randomIssues = pickRandomRoundIssues({ round, now, count: MAX_EVENTS_PER_ROUND });
-      const randomCorporateRisk = startMode === 'random-with-corporate'
+      const randomCorporateRisk = startMode === 'random-with-corporate' && corporateRiskEnabled
         ? pickRandomCorporateRisk({ assets, round, now: now + 100 })
         : null;
       publishedEvents = randomCorporateRisk ? [...randomIssues, randomCorporateRisk] : randomIssues;
@@ -10325,6 +10382,7 @@ export function App() {
           phase={phase}
           roomMode={roomMode}
           volatilityMode={volatilityMode}
+          corporateRiskEnabled={corporateRiskEnabled}
           economicSeed={economicSeed}
           gameStarted={gameStarted}
           isPaused={isPaused}
@@ -10369,6 +10427,7 @@ export function App() {
           onRoomModeChange={handleRoomModeChange}
           onTotalRoundsChange={handleTotalRoundsChange}
           onVolatilityModeChange={setVolatilityMode}
+          onCorporateRiskEnabledChange={handleCorporateRiskEnabledChange}
           onIssueDraftChange={setIssueDraft}
           onStartRound={handleStartRound}
           onCloseRound={handleCloseRound}
@@ -10436,6 +10495,7 @@ export function App() {
           playerCount={playerCount}
           roomFull={roomFull}
           currentRoundEvents={publicCurrentRoundEvents}
+          corporateRiskEnabled={corporateRiskEnabled}
           corporateRiskEvents={publicCorporateRiskEvents}
           activeMacroAlerts={activeMacroAlerts}
           macroAlertsByRound={macroAlertsByRound}
