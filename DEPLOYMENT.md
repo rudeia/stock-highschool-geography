@@ -47,9 +47,20 @@ VITE_SUPABASE_ANON_KEY=your-supabase-anon-key
 
 1. Supabase에서 새 프로젝트를 만듭니다.
 2. SQL Editor를 엽니다.
-3. `supabase/migrations/20260615000000_initial_market_class_schema.sql` 내용을 붙여넣고 실행합니다.
-4. Project URL과 Publishable key를 Vercel 환경변수에 등록합니다.
-5. Vercel에서 다시 Deploy 합니다.
+3. 아래 마이그레이션을 순서대로 실행합니다.
+
+```text
+1. supabase/migrations/20260615000000_initial_market_class_schema.sql
+2. supabase/migrations/20260616120000_savings_forex_triggers.sql
+3. supabase/migrations/20260717002707_teacher_auth_and_room_ownership.sql
+```
+
+4. Authentication에서 Email과 Anonymous Sign-Ins를 활성화합니다.
+5. Authentication의 Site URL과 Redirect URLs에 로컬·Vercel 주소를 등록합니다.
+6. Project URL과 Publishable key를 Vercel 환경변수에 등록합니다.
+7. Vercel에서 다시 Deploy 합니다.
+
+기존 앱을 회원가입 버전으로 전환할 때는 `회원가입_배포_전환_가이드.md`를 먼저 읽으세요.
 
 ## 5. Supabase 연동 범위
 
@@ -61,10 +72,10 @@ VITE_SUPABASE_ANON_KEY=your-supabase-anon-key
 - 교사가 등록한 라운드별 이슈와 장 마감 판정 결과
 - 학생 닉네임, 현금, 예금, 총자산, 수익률 기반 참여 목록
 
-학생별 상세 거래 로그, 포트폴리오 수량, 최종 회고는 현재 브라우저 화면 중심으로 동작합니다.
-실제 수업에서 학생별 포트폴리오까지 여러 기기에서 완전히 이어서 쓰려면 `portfolios`, `trade_logs`, `round_logs`, `reflections` 테이블 쓰기를 추가로 확장하면 됩니다.
+학생별 상세 거래 로그, 포트폴리오 수량, 메모와 최종 회고는 `student_states`에 저장되어 재접속과 교사 대시보드에서 복원됩니다.
 
 ## 6. 보안 메모
 
-현재 교사 로그인은 프론트엔드 잠금입니다.
-수업용 간단 잠금으로는 충분하지만, 공개 배포 후 더 안전하게 운영하려면 Supabase Auth 또는 서버 검증으로 교사 권한을 분리해야 합니다.
+교사는 Supabase Auth 이메일 계정으로 로그인합니다. 방 소유권과 학생 익명 사용자 ID를 기준으로 RLS가 적용되며, 학생 비밀번호 해시와 세션 토큰은 일반 조회에서 제외됩니다.
+
+학생 실명이나 민감정보는 저장하지 말고, 여러 학교 규모로 확장할 때는 커스텀 SMTP·관리자 권한·감사 로그·계정 삭제 절차를 추가하세요.
