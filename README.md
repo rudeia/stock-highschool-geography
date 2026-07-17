@@ -19,7 +19,8 @@
 
 ### 교사
 
-- 사전 등록된 교사 ID별 독립 방 운영
+- 이메일 회원가입·로그인·비밀번호 재설정
+- 로그인한 교사 계정별 독립 방 운영
 - 6자리 PIN과 학생 접속용 QR 코드 자동 생성
 - 4라운드(1년형) 또는 12라운드(3년형) 선택
 - 개인 투자 또는 모둠 공동 투자 모드 선택
@@ -197,8 +198,11 @@ Supabase Dashboard의 `SQL Editor`에서 아래 파일을 순서대로 실행합
 
 1. `supabase/migrations/20260615000000_initial_market_class_schema.sql`
 2. `supabase/migrations/20260616120000_savings_forex_triggers.sql`
+3. `supabase/migrations/20260717002707_teacher_auth_and_room_ownership.sql`
 
-첫 번째 파일은 방, 학생, 모둠 계좌, 자산, 이슈, 라운드 결과, 학생 상태, 최종 제출 테이블과 Realtime 설정을 만듭니다. 두 번째 파일은 외환 자산, 정기예금, 거시 트리거 필드를 보강합니다.
+첫 번째 파일은 핵심 테이블과 Realtime 설정을 만들고, 두 번째 파일은 외환 자산·정기예금·거시 트리거 필드를 보강합니다. 세 번째 파일은 교사 Auth, 방 소유권, 학생 익명 인증과 RLS 정책을 적용합니다. 적용 전에 Supabase Authentication에서 Email과 Anonymous Sign-Ins를 활성화하고 Site URL·Redirect URL을 설정하세요.
+
+기존 배포를 회원가입 버전으로 바꾸는 경우에는 [회원가입 배포 전환 가이드](./회원가입_배포_전환_가이드.md)를 먼저 읽으세요. 진행 중인 기존 방은 소유자 정보가 없으므로 수업 종료 뒤 전환하고, 로그인한 교사가 새 방을 만들어야 합니다.
 
 ### 5. 개발 서버
 
@@ -253,6 +257,7 @@ VITE_SUPABASE_PUBLISHABLE_KEY
 │   └── lib/
 │       ├── classroomStore.js         # 로컬 방 상태 보조
 │       ├── supabaseClient.js         # Supabase 클라이언트
+│       ├── supabaseAuth.js           # 교사·학생 인증 세션
 │       └── supabaseRoomStore.js      # 방·학생·제출 Realtime 저장
 ├── supabase/
 │   ├── config.toml
@@ -281,6 +286,7 @@ VITE_SUPABASE_PUBLISHABLE_KEY
 | 테이블 | 용도 |
 |---|---|
 | `rooms` | 교사 계정별 방, 라운드, 거시 지표, 만료 시각 |
+| `teacher_profiles` | 교사 Auth 사용자와 표시 이름 |
 | `players` | 학생 식별, 접속 세션, 요약 자산 |
 | `student_states` | 잔고, 포트폴리오, 거래 로그, 메모, 회고 |
 | `team_accounts` | 모둠 공동 계좌, 거래권, 파산 상태 |
@@ -303,14 +309,9 @@ VITE_SUPABASE_PUBLISHABLE_KEY
 
 ## 보안 주의사항
 
-현재 교사 로그인은 프론트엔드에 사전 등록된 ID를 확인하는 **수업용 간이 잠금**입니다. Supabase 정책 또한 프로토타입 수업 운영을 위해 넓은 읽기·쓰기를 허용합니다.
+교사는 Supabase Auth 이메일 계정을 사용하고, 방 소유권과 학생 익명 사용자 ID를 기준으로 RLS가 적용됩니다. 학생 비밀번호 해시와 세션 토큰은 일반 클라이언트 조회에서 제외됩니다.
 
-따라서 이 상태로는 학급 내 제한된 교육용 운영에 적합하며, 공개 서비스·실명 정보·중요 데이터를 다루는 운영에는 적합하지 않습니다. 공개 서비스로 확장할 때는 다음 작업이 필요합니다.
-
-- Supabase Auth 기반 교사 계정과 세션
-- 교사·학생·방 소유권을 반영한 RLS 정책
-- 서버 측 권한 검증
-- 로그 보존, 개인정보 최소화, 관리자 기능
+그래도 교육용 서비스에서 필요한 최소 정보만 저장해야 합니다. 학생 실명 대신 수업용 이름을 권장하며 전화번호, 주소, 상담 기록 같은 민감정보는 저장하지 마세요. 운영 규모가 커지면 커스텀 SMTP, 관리자 권한, 감사 로그, 계정 삭제 절차, 개인정보 보존 기간을 추가로 설계해야 합니다.
 
 ## GitHub에 올릴 파일
 

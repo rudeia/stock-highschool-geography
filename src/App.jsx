@@ -38,15 +38,27 @@ import {
 } from './lib/classroomStore.js';
 import { supabaseConfigured } from './lib/supabaseClient.js';
 import {
+  ensureAnonymousStudentSession,
+  getCurrentAuthSession,
+  getTeacherDisplayName,
+  isTeacherSession,
+  requestTeacherPasswordReset,
+  signInTeacher,
+  signOutCurrentSession,
+  signUpTeacher,
+  subscribeAuthChanges,
+  updateTeacherPassword,
+} from './lib/supabaseAuth.js';
+import {
   createRemoteRoom,
   deleteRemoteIssue,
   deleteRemoteRoundDraftIssues,
-  fetchRemoteActiveRoomByHostId,
+  fetchRemoteActiveRoomByOwnerId,
   fetchRemoteStudentState,
   fetchRemoteStudentStates,
   fetchRemoteSubmissions,
   fetchRemoteRoomById,
-  fetchRemoteRoomByPin,
+  fetchRemoteRoomPreviewByPin,
   groupEventsByRound,
   insertRemoteIssue,
   registerRemotePlayer,
@@ -189,19 +201,12 @@ const ROOM_TTL_MS = 24 * 60 * 60 * 1000;
 const PLAYER_SESSION_TIMEOUT_MS = 90_000;
 const PLAYER_HEARTBEAT_MS = 30_000;
 const EMPTY_PORTFOLIO = Object.freeze({});
-const HOST_PASSWORD = '72727272';
-const HOST_IDS = ['geography', ...Array.from({ length: 20 }, (_, index) => `geography${index + 1}`)];
+const RESET_CONFIRM_TEXT = '초기화';
 const TEAM_TRADE_LOCK_MS = 60_000;
 const teamTemplates = Array.from({ length: 8 }, (_, index) => ({
   key: `team-${index + 1}`,
   name: `${index + 1}모둠`,
 }));
-
-function getAuthorizedHostId(id, password) {
-  const normalizedId = id.trim().toLowerCase();
-  if (password !== HOST_PASSWORD) return '';
-  return HOST_IDS.includes(normalizedId) ? normalizedId : '';
-}
 
 function createStudentSessionToken() {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
@@ -2109,9 +2114,11 @@ function getInitialRoomPin() {
 }
 
 function getInitialView() {
-  if (typeof window === 'undefined') return 'host-login';
+  if (typeof window === 'undefined') return 'entry';
   const params = new URLSearchParams(window.location.search);
-  return params.get('view') === 'student' && params.get('entry') === 'qr' ? 'student' : 'host-login';
+  if (params.get('view') === 'student' && params.get('entry') === 'qr') return 'student';
+  if (params.get('view') === 'host-login') return 'host-login';
+  return 'entry';
 }
 
 function getInitialStudentEntryAllowed() {
@@ -3499,6 +3506,9 @@ function InflationCheckpointCard({ round, totalAsset, investedPrincipal, priceIn
 }
 
 function RoundExplanation({ summary, assets, compact = false }) {
+  const [expandedRound, setExpandedRound] = useState(null);
+  const detailsOpen = Number(expandedRound) === Number(summary?.round);
+
   if (!summary?.events?.length && !summary?.macroAlerts?.length) {
     return (
       <section className="explain-panel muted" aria-label="라운드 해설">
@@ -3511,11 +3521,34 @@ function RoundExplanation({ summary, assets, compact = false }) {
     );
   }
 
+  const events = summary.events ?? [];
+  const directCount = events.filter((event) => event.didApply && event.outcomeType !== 'expectation').length;
+  const expectationCount = events.filter((event) => event.outcomeType === 'expectation').length;
+  const reverseCount = events.filter((event) => event.outcomeType === 'reverse').length;
+  const skippedCount = events.filter((event) => event.didApply === false && event.outcomeType !== 'reverse').length;
+
   return (
     <section className={compact ? 'explain-panel compact' : 'explain-panel'} aria-label="라운드 해설">
-      <div className="panel-heading">
-        <BadgePercent size={22} aria-hidden="true" />
-        <h2>{summary.round}라운드 해설</h2>
+      <div className="panel-heading split">
+        <div className="explanation-title">
+          <BadgePercent size={22} aria-hidden="true" />
+          <h2>{summary.round}라운드 해설</h2>
+        </div>
+        <button
+          className="explanation-toggle"
+          type="button"
+          onClick={() => setExpandedRound(detailsOpen ? null : summary.round)}
+          aria-expanded={detailsOpen}
+        >
+          {detailsOpen ? '핵심만 보기' : '자세히 보기'}
+        </button>
+      </div>
+      <p className="explanation-guide">결과를 먼저 확인한 뒤, 내 자산이 왜 움직였는지 살펴보세요.</p>
+      <div className="explanation-overview" aria-label="라운드 결과 요약">
+        <div><span>직접 반영</span><strong>{directCount}개</strong></div>
+        <div><span>기대 선반영</span><strong>{expectationCount}개</strong></div>
+        <div><span>반대 흐름</span><strong>{reverseCount}개</strong></div>
+        <div><span>미반영</span><strong>{skippedCount}개</strong></div>
       </div>
       <div className="explain-list">
         {summary.macroMove && !compact ? (
@@ -3570,7 +3603,7 @@ function RoundExplanation({ summary, assets, compact = false }) {
             ) : null}
           </article>
         ))}
-        {(summary.events ?? []).map((event, index) => {
+        {events.map((event, index) => {
           const movers = getEventMovers(event, assets);
           const financialLinks = getFinancialLinks(event);
           return (
@@ -3581,30 +3614,41 @@ function RoundExplanation({ summary, assets, compact = false }) {
                 <span>{event.affectedAssets.join(' · ')}</span>
               </div>
               <p className="simple-explain">{getSimpleExplanation(event)}</p>
-              {!compact ? <p>{event.principle}</p> : null}
-              <div className="causal-chain" aria-label={`${event.title} 인과 흐름`}>
-                {getCausalChain(event).map((step) => (
-                  <span key={step}>{step}</span>
-                ))}
-              </div>
-              {!compact ? (
-                <div className="financial-links" aria-label={`${event.title} 연결 지표`}>
-                  <strong>같이 볼 재무·시장 신호</strong>
-                  <div>
-                    {financialLinks.map((link) => (
-                      <span key={link}>{link}</span>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-              {/* Week 3 H — 반전 케이스는 영향 자산도 표시 (부호 반전된 값이 그대로 반영됨) */}
-              {!compact && (event.didApply !== false || event.outcomeType === 'reverse') ? (
-                <div className="impact-chips" aria-label={`${event.title} 영향 자산`}>
-                  {movers.map((mover) => (
+              {(event.didApply !== false || event.outcomeType === 'reverse') && movers.length ? (
+                <div className="impact-chips summary-impact" aria-label={`${event.title} 주요 영향 자산`}>
+                  {movers.slice(0, 3).map((mover) => (
                     <span className={mover.change >= 0 ? 'up-chip' : 'down-chip'} key={mover.name}>
                       {mover.name} {formatPercent(mover.change * 100)}
                     </span>
                   ))}
+                </div>
+              ) : null}
+              {detailsOpen ? (
+                <div className="explanation-details">
+                  <p>{event.principle}</p>
+                  <div className="causal-chain" aria-label={`${event.title} 인과 흐름`}>
+                    {getCausalChain(event).map((step) => (
+                      <span key={step}>{step}</span>
+                    ))}
+                  </div>
+                  <div className="financial-links" aria-label={`${event.title} 연결 지표`}>
+                    <strong>같이 볼 재무·시장 신호</strong>
+                    <div>
+                      {financialLinks.map((link) => (
+                        <span key={link}>{link}</span>
+                      ))}
+                    </div>
+                  </div>
+                  {movers.length > 3 ? (
+                    <div className="impact-chips" aria-label={`${event.title} 추가 영향 자산`}>
+                      {movers.slice(3).map((mover) => (
+                        <span className={mover.change >= 0 ? 'up-chip' : 'down-chip'} key={mover.name}>
+                          {mover.name} {formatPercent(mover.change * 100)}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                  <em>{event.discussionPrompt}</em>
                 </div>
               ) : null}
               {event.outcomeType === 'expectation' ? (
@@ -3638,7 +3682,6 @@ function RoundExplanation({ summary, assets, compact = false }) {
                   <span>상충 이슈 중 이 경향성이 실제로 우세하게 반영되었습니다.</span>
                 </p>
               ) : null}
-              <em>{event.discussionPrompt}</em>
             </article>
           );
         })}
@@ -4552,24 +4595,38 @@ function PortfolioDonut({ cash, deposit, portfolio, assets }) {
   );
 }
 
-function TeacherStudentMonitor({ players, activeStudent, assets }) {
-  const sampleHoldings = {
-    p1: ['core', 'sp500'],
-    p2: ['neo', 'kospi'],
-    p3: ['bank', 'realty'],
-    p4: ['eco', 'food'],
-    p5: ['air', 'infra'],
-  };
-
+function TeacherStudentMonitor({ players, activeStudent, assets, studentStates, roomMode }) {
+  const stateByStudentNumber = new Map(
+    (studentStates ?? []).map((state) => [Number(state.studentNumber), state]),
+  );
   const monitoredStudents = [
     ...(activeStudent.name.includes('(대기)') ? [] : [activeStudent]),
     ...players.map((player) => {
-      const holdingNames = (sampleHoldings[player.id] ?? []).map((id) => assets.find((asset) => asset.id === id)?.name).filter(Boolean);
+      const state = roomMode === 'individual'
+        ? stateByStudentNumber.get(Number(player.studentNumber))
+        : null;
+      const holdingRows = state ? getHoldingRows(state.portfolio ?? {}, assets) : [];
+      const cash = Number(state?.cash ?? player.cash ?? 0);
+      const deposit = Number(state?.deposit ?? player.deposit ?? 0);
+      const totalAsset = state
+        ? getTotalAsset({ cash, deposit, portfolio: state.portfolio ?? {}, assets })
+        : player.totalAsset ?? Math.round(INITIAL_CASH * (1 + player.returnRate / 100));
+      const teamName = roomMode === 'team'
+        ? teamTemplates.find((team) => team.key === player.teamKey)?.name
+        : '';
       return {
         id: player.id,
         name: getStudentDisplayName(player.studentNumber, player.name),
-        totalAsset: player.totalAsset ?? Math.round(INITIAL_CASH * (1 + player.returnRate / 100)),
-        holdings: player.holdings?.length ? player.holdings : holdingNames,
+        totalAsset,
+        holdings: holdingRows.map(({ asset, shares, value }) => ({
+          id: asset.id,
+          label: `${asset.name} ${shares.toLocaleString('ko-KR')}주`,
+          value,
+        })),
+        cash,
+        deposit,
+        teamName,
+        updatedAt: state?.updatedAt ?? null,
         connectionLabel: getPlayerConnectionLabel(player),
       };
     }),
@@ -4588,7 +4645,25 @@ function TeacherStudentMonitor({ players, activeStudent, assets }) {
               <strong>{student.name}</strong>
               <span>{formatWon(student.totalAsset)} · {student.connectionLabel ?? '현재 화면'}</span>
             </div>
-            <p>{student.holdings.length ? student.holdings.join(', ') : '보유 종목 없음'}</p>
+            {roomMode === 'team' ? (
+              <p>{student.teamName ? `${student.teamName} 공동 계좌 · 아래 모둠 계좌 현황에서 확인` : '모둠 배정 대기'}</p>
+            ) : (
+              <>
+                <p>
+                  {student.holdings.length
+                    ? student.holdings.map((holding) => (
+                        typeof holding === 'string'
+                          ? holding
+                          : `${holding.label} (${formatWon(holding.value)})`
+                      )).join(', ')
+                    : '보유 종목 없음'}
+                </p>
+                <small className="student-account-breakdown">
+                  현금 {formatWon(student.cash ?? 0)} · 예금 {formatWon(student.deposit ?? 0)}
+                  {student.updatedAt ? ` · ${formatDateTime(student.updatedAt)} 동기화` : ' · 계좌 동기화 대기'}
+                </small>
+              </>
+            )}
           </article>
         ))}
       </div>
@@ -4855,21 +4930,20 @@ function EndGameFlowPanel({ finalRoundClosed, submittedCount, participantCount, 
 
 function ResetRoomModal({ value, error, onChange, onCancel, onConfirm }) {
   return (
-    <section className="choice-modal-backdrop" aria-label="방 초기화 암호 입력">
+    <section className="choice-modal-backdrop" aria-label="방 초기화 확인 문구 입력">
       <form className="choice-modal reset-modal" onSubmit={onConfirm}>
         <div>
           <p className="eyebrow">방 초기화</p>
-          <h2>초기화 암호를 입력하세요.</h2>
-          <p>현재 방의 라운드, 학생, 제출, 자산 데이터를 지우고 같은 PIN으로 새로 시작합니다.</p>
+          <h2>‘초기화’를 입력하세요.</h2>
+          <p>로그인한 교사 소유의 현재 방 데이터를 지우고 같은 PIN으로 새로 시작합니다.</p>
         </div>
         <label>
-          초기화 암호
+          확인 문구
           <input
-            type="password"
             value={value}
             onChange={(event) => onChange(event.target.value)}
-            placeholder="암호 입력"
-            aria-label="초기화 암호"
+            placeholder="초기화"
+            aria-label="초기화 확인 문구"
           />
         </label>
         {error ? <p className="auth-error">{error}</p> : null}
@@ -4887,38 +4961,158 @@ function ResetRoomModal({ value, error, onChange, onCancel, onConfirm }) {
   );
 }
 
-function HostLoginView({ login, error, onLoginChange, onSubmit }) {
+function HostLoginView({
+  login,
+  mode,
+  error,
+  message,
+  pending,
+  configured,
+  onLoginChange,
+  onModeChange,
+  onSubmit,
+  onLocalPractice,
+}) {
+  const isSignup = mode === 'signup';
+  const isForgot = mode === 'forgot';
+  const isPasswordUpdate = mode === 'update-password';
+  const title = isSignup
+    ? '교사 계정을 만들어보세요.'
+    : isForgot
+      ? '비밀번호 재설정 메일을 받으세요.'
+      : isPasswordUpdate
+        ? '새 비밀번호를 설정하세요.'
+        : '교사용 대시보드에 접속하세요.';
+  const submitLabel = isSignup
+    ? '회원가입'
+    : isForgot
+      ? '재설정 메일 보내기'
+      : isPasswordUpdate
+        ? '새 비밀번호 저장'
+        : '로그인';
+
   return (
     <main className="auth-screen">
       <section className="auth-card">
-        <p className="eyebrow">교사용 로그인</p>
-        <h1>교사용 대시보드에 접속하세요.</h1>
+        <p className="eyebrow">교사용 계정</p>
+        <h1>{title}</h1>
+        {!isForgot && !isPasswordUpdate ? (
+          <div className="auth-mode-switch" role="tablist" aria-label="교사 계정 방식">
+            <button className={mode === 'signin' ? 'active' : ''} type="button" onClick={() => onModeChange('signin')}>로그인</button>
+            <button className={mode === 'signup' ? 'active' : ''} type="button" onClick={() => onModeChange('signup')}>회원가입</button>
+          </div>
+        ) : null}
         <form onSubmit={onSubmit}>
-          <label>
-            아이디
-            <input
-              value={login.id}
-              onChange={(event) => onLoginChange((current) => ({ ...current, id: event.target.value }))}
-              placeholder="아이디"
-              aria-label="교사용 아이디"
-            />
-          </label>
-          <label>
-            비밀번호
-            <input
-              type="password"
-              value={login.password}
-              onChange={(event) => onLoginChange((current) => ({ ...current, password: event.target.value }))}
-              placeholder="비밀번호"
-              aria-label="교사용 비밀번호"
-            />
-          </label>
+          {isSignup ? (
+            <label>
+              교사 이름
+              <input
+                value={login.displayName}
+                onChange={(event) => onLoginChange((current) => ({ ...current, displayName: event.target.value }))}
+                autoComplete="name"
+                placeholder="예: 김지리"
+                aria-label="교사 이름"
+              />
+            </label>
+          ) : null}
+          {!isPasswordUpdate ? (
+            <label>
+              이메일
+              <input
+                type="email"
+                value={login.email}
+                onChange={(event) => onLoginChange((current) => ({ ...current, email: event.target.value }))}
+                autoComplete="email"
+                placeholder="teacher@school.kr"
+                aria-label="교사 이메일"
+              />
+            </label>
+          ) : null}
+          {!isForgot ? (
+            <label>
+              비밀번호
+              <input
+                type="password"
+                value={login.password}
+                onChange={(event) => onLoginChange((current) => ({ ...current, password: event.target.value }))}
+                autoComplete={isSignup ? 'new-password' : 'current-password'}
+                placeholder="영문과 숫자를 포함한 8자리 이상"
+                aria-label={isPasswordUpdate ? '새 비밀번호' : '교사 비밀번호'}
+              />
+            </label>
+          ) : null}
+          {isSignup || isPasswordUpdate ? (
+            <label>
+              비밀번호 확인
+              <input
+                type="password"
+                value={login.confirmPassword}
+                onChange={(event) => onLoginChange((current) => ({ ...current, confirmPassword: event.target.value }))}
+                autoComplete="new-password"
+                placeholder="비밀번호를 한 번 더 입력"
+                aria-label="비밀번호 확인"
+              />
+            </label>
+          ) : null}
           {error ? <p className="auth-error">{error}</p> : null}
-          <button className="command primary wide" type="submit">
+          {message ? <p className="auth-message" role="status">{message}</p> : null}
+          {!configured ? <p className="auth-config-note">현재 기기에는 Supabase 환경변수가 없어 실제 회원가입 대신 로컬 연습만 가능합니다.</p> : null}
+          <button className="command primary wide" type="submit" disabled={pending || !configured}>
             <LogIn size={19} aria-hidden="true" />
-            교사용 대시보드 입장
+            {pending ? '처리 중' : submitLabel}
           </button>
         </form>
+        <div className="auth-link-buttons">
+          {mode === 'signin' ? <button type="button" onClick={() => onModeChange('forgot')}>비밀번호를 잊었나요?</button> : null}
+          {isForgot || isPasswordUpdate ? <button type="button" onClick={() => onModeChange('signin')}>로그인으로 돌아가기</button> : null}
+        </div>
+        {!configured ? (
+          <button className="command secondary wide" type="button" onClick={onLocalPractice}>
+            로컬 연습 모드로 계속
+          </button>
+        ) : null}
+      </section>
+    </main>
+  );
+}
+
+function EntryView({ roomPin, onRoomPinChange, onStudentEntry, onTeacherEntry }) {
+  const validRoomPin = /^[0-9]{6}$/.test(roomPin);
+
+  return (
+    <main className="auth-screen">
+      <section className="auth-card entry-card">
+        <div>
+          <p className="eyebrow">모의 주식 수업</p>
+          <h1>어떻게 입장하시나요?</h1>
+          <p className="entry-intro">학생은 교사가 알려준 방 PIN 6자리를 입력하세요.</p>
+        </div>
+        <form onSubmit={(event) => {
+          event.preventDefault();
+          if (validRoomPin) onStudentEntry();
+        }}>
+          <label>
+            학생 방 PIN
+            <input
+              value={roomPin}
+              onChange={(event) => onRoomPinChange(event.target.value.replace(/[^\d]/g, '').slice(0, 6))}
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={6}
+              placeholder="숫자 6자리"
+              aria-label="학생 방 PIN"
+            />
+          </label>
+          <button className="command primary wide" type="submit" disabled={!validRoomPin}>
+            <LogIn size={19} aria-hidden="true" />
+            학생으로 입장
+          </button>
+        </form>
+        <div className="entry-divider"><span>또는</span></div>
+        <button className="command secondary wide" type="button" onClick={onTeacherEntry}>
+          <School size={19} aria-hidden="true" />
+          교사용 대시보드
+        </button>
       </section>
     </main>
   );
@@ -5752,14 +5946,14 @@ function AssetLearningPanel({ asset }) {
   );
 }
 
-function AppHeader({ setView, hostAuthenticated, studentEntryAllowed }) {
+function AppHeader({ setView, joined, hostAuthenticated, hostId, onTeacherSignOut }) {
   return (
     <header className="topbar">
       <button
         className="brand"
         type="button"
-        onClick={() => setView(studentEntryAllowed ? 'student' : hostAuthenticated ? 'host' : 'host-login')}
-        aria-label={studentEntryAllowed ? '학생 입장 화면으로 이동' : '교사 화면으로 이동'}
+        onClick={() => setView(joined ? 'student' : 'entry')}
+        aria-label={joined ? '학생 화면으로 이동' : '첫 입장 화면으로 이동'}
       >
         <ChartNoAxesCombined size={26} aria-hidden="true" />
         <span>
@@ -5767,7 +5961,12 @@ function AppHeader({ setView, hostAuthenticated, studentEntryAllowed }) {
           <small>한 해 동안의 자산 일기</small>
         </span>
       </button>
-
+      {hostAuthenticated && !joined ? (
+        <div className="teacher-account-chip">
+          <span>{hostId}</span>
+          <button type="button" onClick={onTeacherSignOut}>로그아웃</button>
+        </div>
+      ) : null}
     </header>
   );
 }
@@ -6645,6 +6844,7 @@ function HostView({
   assets,
   teamAccounts,
   players,
+  studentStates,
   rankingPlayers,
   newsFeed,
   baseRate,
@@ -6666,6 +6866,7 @@ function HostView({
   latestRoundSummary,
   submissions,
   syncStatus,
+  roundClosing,
   gameFinished,
   finalRoundClosed,
   finalReportsDownloaded,
@@ -6838,9 +7039,9 @@ function HostView({
               랜덤 이슈 3개 + 기업 리스크
             </button>
           ) : null}
-          <button className="command primary" type="button" onClick={onCloseRound} disabled={roomExpired || phase !== 'open'}>
+          <button className="command primary" type="button" onClick={onCloseRound} disabled={roomExpired || phase !== 'open' || roundClosing}>
             <Activity size={19} aria-hidden="true" />
-            장 마감
+            {roundClosing ? '마감 처리 중' : '장 마감'}
           </button>
           <button className="command secondary" type="button" onClick={onNextRound} disabled={roomExpired || phase !== 'closed' || round >= totalRounds}>
             <ChevronRight size={19} aria-hidden="true" />
@@ -7104,6 +7305,8 @@ function HostView({
           players={players}
           activeStudent={roomMode === 'team' ? buildStudentSnapshot({ id: 'team-mode', name: '모둠 계좌 (대기)', totalAsset: 0, holdings: [] }) : activeStudent}
           assets={assets}
+          studentStates={studentStates}
+          roomMode={roomMode}
         />
         <TeacherTeamPanel
           roomMode={roomMode}
@@ -7297,6 +7500,7 @@ function RoundNoteHistory({ round, phase, gameFinished, gameStarted, roundNotes,
 
 function StudentView({
   roomPin,
+  onRoomPinChange,
   round,
   totalRounds,
   phase,
@@ -7445,7 +7649,15 @@ function StudentView({
           <h1>PIN, 학번, 이름을 입력하세요.</h1>
           <label>
             방 PIN
-            <input value={roomPin} readOnly aria-label="방 PIN" />
+            <input
+              value={roomPin}
+              onChange={(event) => onRoomPinChange(event.target.value.replace(/[^\d]/g, '').slice(0, 6))}
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={6}
+              placeholder="숫자 6자리"
+              aria-label="방 PIN"
+            />
           </label>
           <div className={roomFull ? 'capacity-note full' : 'capacity-note'}>
             <strong>{playerCount}/{MAX_PLAYERS_PER_ROOM}</strong>
@@ -7489,7 +7701,7 @@ function StudentView({
             </div>
           ) : null}
           {studentJoinError ? <p className="auth-error">{studentJoinError}</p> : null}
-          <button className="command primary wide" type="button" onClick={onJoin} disabled={!nickname.trim() || !studentNumber || !/^[0-9]{6}$/.test(studentPasscode) || roomFull}>
+          <button className="command primary wide" type="button" onClick={onJoin} disabled={!/^[0-9]{6}$/.test(roomPin) || !nickname.trim() || !studentNumber || !/^[0-9]{6}$/.test(studentPasscode) || roomFull}>
             <LogIn size={19} aria-hidden="true" />
             {roomFull ? '정원 마감' : '입장하기'}
           </button>
@@ -7968,10 +8180,16 @@ export function App() {
   const [activeMacroAlerts, setActiveMacroAlerts] = useState([]);
   const [macroAlertsByRound, setMacroAlertsByRound] = useState({});
   const [view, setView] = useState(getInitialView);
-  const [studentEntryAllowed] = useState(getInitialStudentEntryAllowed);
+  const [studentEntryAllowed, setStudentEntryAllowed] = useState(getInitialStudentEntryAllowed);
+  const [authSession, setAuthSession] = useState(null);
+  const [authLoading, setAuthLoading] = useState(supabaseConfigured);
+  const [authMode, setAuthMode] = useState('signin');
+  const [authMessage, setAuthMessage] = useState('');
+  const [authPending, setAuthPending] = useState(false);
   const [hostAuthenticated, setHostAuthenticated] = useState(false);
+  const [teacherUserId, setTeacherUserId] = useState('');
   const [hostId, setHostId] = useState('');
-  const [hostLogin, setHostLogin] = useState({ id: '', password: '' });
+  const [hostLogin, setHostLogin] = useState({ displayName: '', email: '', password: '', confirmPassword: '' });
   const [hostLoginError, setHostLoginError] = useState('');
   const [roomPin, setRoomPin] = useState(getInitialRoomPin);
   const [roomReady, setRoomReady] = useState(false);
@@ -8018,6 +8236,7 @@ export function App() {
   const [studentPasscode, setStudentPasscode] = useState('');
   const [studentJoinError, setStudentJoinError] = useState('');
   const [studentPasscodeHash, setStudentPasscodeHash] = useState('');
+  const [studentAuthUserId, setStudentAuthUserId] = useState('');
   const [studentSessionToken, setStudentSessionToken] = useState('');
   const [joined, setJoined] = useState(false);
   const [cash, setCash] = useState(0);
@@ -8053,12 +8272,15 @@ export function App() {
   const [syncStatus, setSyncStatus] = useState(supabaseConfigured ? '실시간 수업 연결 준비 중' : '로컬 연습 모드');
   const [toast, setToast] = useState(null);
   const [tradePending, setTradePending] = useState(false);
+  const [roundClosing, setRoundClosing] = useState(false);
   const remoteRefreshTimer = useRef(null);
   const studentStateSaveTimer = useRef(null);
   const toastTimerRef = useRef(null);
   const shownToastIdsRef = useRef(new Set());
+  const restoredTeacherIdRef = useRef('');
   const remotePhaseRef = useRef({ initialized: false, roomId: '', round: 1, phase: 'setup' });
   const tradeLockRef = useRef(false);
+  const closeRoundLockRef = useRef(false);
   const tradeUnlockTimerRef = useRef(null);
 
   const dismissToast = useCallback(() => {
@@ -8151,6 +8373,7 @@ export function App() {
 
   const applyRemoteRoomBundle = useCallback((bundle) => {
     if (!bundle?.room) return;
+    const isPreview = Boolean(bundle.preview);
     const remoteRound = bundle.room.current_round;
     const groupedEvents = groupEventsByRound(bundle.events);
     const remoteCurrentEvents = groupedEvents[remoteRound] ?? [];
@@ -8159,7 +8382,7 @@ export function App() {
     const isExpired = new Date(bundle.room.expires_at).getTime() <= Date.now() || bundle.room.phase === 'expired';
     const nextPhase = isExpired ? 'expired' : bundle.room.phase;
     const previousRemoteState = remotePhaseRef.current;
-    if (previousRemoteState.initialized && previousRemoteState.roomId === bundle.room.id) {
+    if (!isPreview && previousRemoteState.initialized && previousRemoteState.roomId === bundle.room.id) {
       const transitionId = `${bundle.room.id}:${remoteRound}:${nextPhase}`;
       if (nextPhase === 'open' && (previousRemoteState.phase !== 'open' || previousRemoteState.round !== remoteRound)) {
         showToast({
@@ -8180,9 +8403,11 @@ export function App() {
         });
       }
     }
-    remotePhaseRef.current = { initialized: true, roomId: bundle.room.id, round: remoteRound, phase: nextPhase };
+    if (!isPreview) {
+      remotePhaseRef.current = { initialized: true, roomId: bundle.room.id, round: remoteRound, phase: nextPhase };
+    }
 
-    setRemoteRoomId(bundle.room.id);
+    setRemoteRoomId(isPreview ? null : bundle.room.id);
     setRoomReady(true);
     setRoomPin(bundle.room.pin);
     setHostId((current) => current || bundle.room.host_id || '');
@@ -8215,12 +8440,12 @@ export function App() {
     }
     setOpenMacroContext(bundle.room.open_macro_context && Object.keys(bundle.room.open_macro_context).length ? bundle.room.open_macro_context : null);
     if (bundle.assets.length) setAssets(bundle.assets);
-    setTriggeredEventsByRound(groupedEvents);
+    if (!isPreview) setTriggeredEventsByRound(groupedEvents);
     const remoteRoundResults = bundle.roundResults ?? [];
     const latestResult = [...remoteRoundResults].sort((a, b) => b.round - a.round)[0] ?? null;
-    setRoundResults(remoteRoundResults);
-    setPreviousAggregateReturn(Number(latestResult?.aggregateReturn ?? 0));
-    setMacroTimeline(remoteRoundResults.map((result) => ({
+    if (!isPreview) setRoundResults(remoteRoundResults);
+    if (!isPreview) setPreviousAggregateReturn(Number(latestResult?.aggregateReturn ?? 0));
+    if (!isPreview) setMacroTimeline(remoteRoundResults.map((result) => ({
       round: result.round,
       baseRate: result.macroMove?.nextBaseRate,
       propertyIndex: result.macroMove?.nextPropertyIndex,
@@ -8231,8 +8456,8 @@ export function App() {
       demandPullDelta: result.demandPullDelta,
       hasMacroAlert: Boolean(result.macroAlerts?.length),
     })));
-    setMacroAlertsByRound(Object.fromEntries(remoteRoundResults.filter((result) => result.macroAlerts?.length).map((result) => [result.round, result.macroAlerts])));
-    setLatestRoundSummary(latestResult ? {
+    if (!isPreview) setMacroAlertsByRound(Object.fromEntries(remoteRoundResults.filter((result) => result.macroAlerts?.length).map((result) => [result.round, result.macroAlerts])));
+    if (!isPreview) setLatestRoundSummary(latestResult ? {
       round: latestResult.round,
       events: latestResult.events,
       macroAlerts: latestResult.macroAlerts,
@@ -8241,11 +8466,84 @@ export function App() {
       priceIndex: latestResult.priceIndex,
       aggregateReturn: latestResult.aggregateReturn,
     } : (resolvedCurrentEvents.length ? { round: remoteRound, events: resolvedCurrentEvents, macroAlerts: [], delistedAssets: [] } : null));
-    setPlayers(bundle.players);
-    if (bundle.teams?.length) setTeamAccounts(bundle.teams);
-    setStudentStates(bundle.studentStates ?? []);
-    setSyncStatus('실시간 수업 연결 중');
+    if (!isPreview) {
+      setPlayers(bundle.players);
+      if (bundle.teams?.length) setTeamAccounts(bundle.teams);
+      setStudentStates(bundle.studentStates ?? []);
+    }
+    setSyncStatus(isPreview ? 'PIN 확인 완료 · 이름과 개인 비밀번호를 입력하세요.' : '실시간 수업 연결 중');
   }, [showToast]);
+
+  useEffect(() => {
+    if (!supabaseConfigured) return undefined;
+    let active = true;
+
+    const applySession = (session) => {
+      if (!active) return;
+      const teacherSession = isTeacherSession(session);
+      setAuthSession(session);
+      setHostAuthenticated(teacherSession);
+      setTeacherUserId(teacherSession ? session.user.id : '');
+      setHostId(teacherSession ? getTeacherDisplayName(session.user) : '');
+      setAuthLoading(false);
+    };
+
+    getCurrentAuthSession()
+      .then(applySession)
+      .catch((error) => {
+        if (!active) return;
+        setHostLoginError(`로그인 상태 확인 실패: ${error.message}`);
+        setAuthLoading(false);
+      });
+
+    const unsubscribe = subscribeAuthChanges((event, session) => {
+      applySession(session);
+      if (event === 'PASSWORD_RECOVERY') {
+        setAuthMode('update-password');
+        setView('host-login');
+        setAuthMessage('새 비밀번호를 입력해주세요.');
+      } else if (event === 'SIGNED_IN' && isTeacherSession(session)) {
+        setStudentEntryAllowed(false);
+        setView('host');
+      }
+    });
+
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    const teacher = authSession?.user;
+    if (authLoading || !isTeacherSession(authSession) || !teacher?.id) return undefined;
+    if (restoredTeacherIdRef.current === teacher.id) return undefined;
+    restoredTeacherIdRef.current = teacher.id;
+    let cancelled = false;
+
+    fetchRemoteActiveRoomByOwnerId(teacher.id).then(async (bundle) => {
+      if (cancelled) return;
+      setSyncStatus(`${getTeacherDisplayName(teacher)} 계정의 수업 방을 확인했습니다.`);
+      if (bundle) {
+        applyRemoteRoomBundle(bundle);
+        const remoteSubmissions = await fetchRemoteSubmissions(bundle.room.id);
+        if (cancelled) return;
+        setSubmissions(remoteSubmissions);
+        setSyncStatus(`${getTeacherDisplayName(teacher)} 계정의 기존 방을 불러왔습니다.`);
+      } else {
+        setRoomReady(false);
+        setRemoteRoomId(null);
+        setRoomPin('');
+        setSyncStatus(`${getTeacherDisplayName(teacher)} 계정에 유지 중인 방이 없습니다.`);
+      }
+    }).catch((error) => {
+      if (!cancelled) setSyncStatus(`교사 방 확인 실패: ${error.message}`);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [applyRemoteRoomBundle, authLoading, authSession]);
 
   const refreshRemoteRoom = useCallback(async (roomId = remoteRoomId) => {
     if (!supabaseConfigured || !roomId) return;
@@ -8274,12 +8572,15 @@ export function App() {
     if (!studentEntryAllowed || !supabaseConfigured || !/^[0-9]{6}$/.test(roomPin)) return undefined;
     let cancelled = false;
 
-    fetchRemoteRoomByPin(roomPin)
-      .then(async (bundle) => {
-        if (cancelled || !bundle) return;
+    fetchRemoteRoomPreviewByPin(roomPin)
+      .then((bundle) => {
+        if (cancelled) return;
+        if (!bundle) {
+          setStudentJoinError('해당 PIN의 수업 방을 찾을 수 없습니다. 교사에게 PIN을 확인하세요.');
+          return;
+        }
+        setStudentJoinError('');
         applyRemoteRoomBundle(bundle);
-        const remoteSubmissions = await fetchRemoteSubmissions(bundle.room.id);
-        if (!cancelled) setSubmissions(remoteSubmissions);
       })
       .catch((error) => {
         if (!cancelled) setSyncStatus(`수업 연결 불러오기 실패: ${error.message}`);
@@ -8311,6 +8612,7 @@ export function App() {
     const remotePlayer = {
       name: nickname.trim(),
       studentNumber,
+      authUserId: studentAuthUserId,
       passcodeHash: studentPasscodeHash,
       sessionToken: studentSessionToken,
       lastSeenAt: Date.now(),
@@ -8321,7 +8623,7 @@ export function App() {
       returnRate: getInvestmentReturnRate(studentTotalAsset, investedPrincipal),
     };
     upsertRemotePlayer(remoteRoomId, remotePlayer).catch((error) => setSyncStatus(`학생 정보 저장 실패: ${error.message}`));
-  }, [effectiveCash, effectiveDeposit, investedPrincipal, joined, nickname, remoteRoomId, selectedTeamKey, studentNumber, studentPasscodeHash, studentSessionToken, studentTotalAsset, teamMode]);
+  }, [effectiveCash, effectiveDeposit, investedPrincipal, joined, nickname, remoteRoomId, selectedTeamKey, studentAuthUserId, studentNumber, studentPasscodeHash, studentSessionToken, studentTotalAsset, teamMode]);
 
   useEffect(() => {
     if (!joined || !studentSessionToken || !nickname.trim()) return undefined;
@@ -8340,6 +8642,7 @@ export function App() {
         upsertRemotePlayer(remoteRoomId, {
           name: nickname.trim(),
           studentNumber,
+          authUserId: studentAuthUserId,
           passcodeHash: studentPasscodeHash,
           sessionToken: studentSessionToken,
           lastSeenAt,
@@ -8355,13 +8658,14 @@ export function App() {
     updateHeartbeat();
     const timer = window.setInterval(updateHeartbeat, PLAYER_HEARTBEAT_MS);
     return () => window.clearInterval(timer);
-  }, [effectiveCash, effectiveDeposit, investedPrincipal, joined, nickname, remoteRoomId, selectedTeamKey, studentNumber, studentPasscodeHash, studentSessionToken, studentTotalAsset, teamMode]);
+  }, [effectiveCash, effectiveDeposit, investedPrincipal, joined, nickname, remoteRoomId, selectedTeamKey, studentAuthUserId, studentNumber, studentPasscodeHash, studentSessionToken, studentTotalAsset, teamMode]);
 
   useEffect(() => {
     if (!supabaseConfigured || !remoteRoomId || !joined || !studentPasscodeHash || !nickname.trim()) return undefined;
     const nextState = {
       studentNumber: Number(studentNumber),
       nickname: nickname.trim(),
+      authUserId: studentAuthUserId,
       passcodeHash: studentPasscodeHash,
       teamKey: teamMode ? selectedTeamKey : '',
       cash: effectiveCash,
@@ -8406,7 +8710,7 @@ export function App() {
     }, 100);
 
     return () => window.clearTimeout(studentStateSaveTimer.current);
-  }, [activeTeam.lastDividendRound, depositPrincipal, effectiveCash, effectiveDeposit, effectiveDepositInterestEarned, effectivePortfolio, gameStarted, initialCapitalGranted, joined, lastDividendRound, nickname, phase, reflection, remoteRoomId, roomPin, round, roundLogs, roundNotes, roundReflections, salaryPaidRounds, selectedTeamKey, studentNumber, studentPasscodeHash, teamMode, tradeLogs]);
+  }, [activeTeam.lastDividendRound, depositPrincipal, effectiveCash, effectiveDeposit, effectiveDepositInterestEarned, effectivePortfolio, gameStarted, initialCapitalGranted, joined, lastDividendRound, nickname, phase, reflection, remoteRoomId, roomPin, round, roundLogs, roundNotes, roundReflections, salaryPaidRounds, selectedTeamKey, studentAuthUserId, studentNumber, studentPasscodeHash, teamMode, tradeLogs]);
 
   useEffect(() => {
     if (!joined || !studentNumber) return;
@@ -8491,37 +8795,102 @@ export function App() {
 
   async function handleHostLogin(event) {
     event.preventDefault();
-    const authorizedHostId = getAuthorizedHostId(hostLogin.id, hostLogin.password);
-    if (authorizedHostId) {
-      setHostId(authorizedHostId);
-      setHostAuthenticated(true);
-      setHostLoginError('');
-      setView('host');
-      setRoomReady(false);
-      setRemoteRoomId(null);
-      setRoomPin('');
+    const email = hostLogin.email.trim().toLowerCase();
+    const password = hostLogin.password;
+    const validPassword = password.length >= 8 && /[A-Za-z]/.test(password) && /\d/.test(password);
+    setHostLoginError('');
+    setAuthMessage('');
 
-      if (!supabaseConfigured) {
-        setSyncStatus('로컬 연습 모드 · 새 수업 방을 만들어 주세요.');
-        return;
-      }
-
-      setSyncStatus(`${authorizedHostId} 계정의 수업 방을 확인하는 중입니다.`);
-      try {
-        const bundle = await fetchRemoteActiveRoomByHostId(authorizedHostId);
-        if (bundle) {
-          applyRemoteRoomBundle(bundle);
-          setSubmissions(await fetchRemoteSubmissions(bundle.room.id));
-          setSyncStatus(`${authorizedHostId} 계정의 기존 방을 불러왔습니다.`);
-        } else {
-          setSyncStatus(`${authorizedHostId} 계정에 유지 중인 방이 없습니다.`);
-        }
-      } catch (error) {
-        setSyncStatus(`교사 방 확인 실패: ${error.message}`);
-      }
+    if (authMode !== 'update-password' && !/^\S+@\S+\.\S+$/.test(email)) {
+      setHostLoginError('학교 또는 개인 이메일 주소를 정확히 입력하세요.');
       return;
     }
-    setHostLoginError('아이디 또는 비밀번호가 맞지 않습니다.');
+    if (authMode === 'signup' && hostLogin.displayName.trim().length < 2) {
+      setHostLoginError('교사 이름은 2글자 이상 입력하세요.');
+      return;
+    }
+    if (authMode !== 'forgot' && !validPassword) {
+      setHostLoginError('비밀번호는 영문과 숫자를 포함해 8자리 이상으로 입력하세요.');
+      return;
+    }
+    if ((authMode === 'signup' || authMode === 'update-password') && password !== hostLogin.confirmPassword) {
+      setHostLoginError('비밀번호 확인이 일치하지 않습니다.');
+      return;
+    }
+
+    setAuthPending(true);
+    try {
+      if (authMode === 'signup') {
+        const data = await signUpTeacher({ email, password, displayName: hostLogin.displayName });
+        setHostLogin((current) => ({ ...current, password: '', confirmPassword: '' }));
+        if (data.session) {
+          restoredTeacherIdRef.current = '';
+          setStudentEntryAllowed(false);
+          setView('host');
+        } else {
+          setAuthMode('signin');
+          setAuthMessage('확인 메일을 보냈습니다. 이메일의 가입 확인 링크를 누른 뒤 로그인하세요.');
+        }
+      } else if (authMode === 'forgot') {
+        await requestTeacherPasswordReset(email);
+        setAuthMessage('비밀번호 재설정 메일을 보냈습니다. 받은 편지함을 확인하세요.');
+      } else if (authMode === 'update-password') {
+        await updateTeacherPassword(password);
+        setHostLogin((current) => ({ ...current, password: '', confirmPassword: '' }));
+        setAuthMode('signin');
+        setAuthMessage('새 비밀번호가 저장되었습니다.');
+        setStudentEntryAllowed(false);
+        setView('host');
+      } else {
+        const data = await signInTeacher({ email, password });
+        restoredTeacherIdRef.current = '';
+        setHostLogin((current) => ({ ...current, password: '', confirmPassword: '' }));
+        setHostId(getTeacherDisplayName(data.user));
+        setStudentEntryAllowed(false);
+        setView('host');
+      }
+    } catch (error) {
+      const normalizedMessage = error.message === 'Invalid login credentials'
+        ? '이메일 또는 비밀번호가 맞지 않습니다.'
+        : error.message === 'User already registered'
+          ? '이미 가입된 이메일입니다. 로그인하거나 비밀번호를 재설정하세요.'
+          : error.message;
+      setHostLoginError(normalizedMessage);
+    } finally {
+      setAuthPending(false);
+    }
+  }
+
+  function handleLocalTeacherPractice() {
+    setHostAuthenticated(true);
+    setTeacherUserId('local-teacher');
+    setHostId('로컬 교사');
+    setStudentEntryAllowed(false);
+    setHostLoginError('');
+    setAuthMessage('');
+    setView('host');
+    setRoomReady(false);
+    setRemoteRoomId(null);
+    setRoomPin('');
+    setSyncStatus('로컬 연습 모드 · 새 수업 방을 만들어 주세요.');
+  }
+
+  async function handleTeacherSignOut() {
+    try {
+      await signOutCurrentSession();
+    } catch (error) {
+      showToast({ title: '로그아웃 처리에 실패했습니다.', message: error.message, tone: 'error' });
+      return;
+    }
+    restoredTeacherIdRef.current = '';
+    setAuthSession(null);
+    setHostAuthenticated(false);
+    setTeacherUserId('');
+    setHostId('');
+    setRoomReady(false);
+    setRemoteRoomId(null);
+    setRoomPin('');
+    setView('entry');
   }
 
   function addTradeLog(type, detail) {
@@ -8668,6 +9037,7 @@ export function App() {
     const nextState = {
       studentNumber: Number(studentNumber),
       nickname: nickname.trim(),
+      authUserId: studentAuthUserId,
       passcodeHash: studentPasscodeHash,
       teamKey: teamMode ? selectedTeamKey : '',
       cash: effectiveCash,
@@ -8715,6 +9085,10 @@ export function App() {
     const trimmedName = nickname.trim();
     const parsedNumber = Number(studentNumber);
     const normalizedPasscode = studentPasscode.trim();
+    if (!/^[0-9]{6}$/.test(roomPin)) {
+      setStudentJoinError('교사가 알려준 방 PIN 숫자 6자리를 입력하세요.');
+      return;
+    }
     if (!Number.isInteger(parsedNumber) || parsedNumber < 1 || parsedNumber > MAX_PLAYERS_PER_ROOM) {
       setStudentJoinError(`학번은 1부터 ${MAX_PLAYERS_PER_ROOM} 사이의 숫자로 입력하세요.`);
       return;
@@ -8729,6 +9103,7 @@ export function App() {
     }
 
     try {
+      let studentAuthUser = null;
       let joinRoomId = remoteRoomId;
       let joinPlayers = players;
       let joinRoomMode = teamMode;
@@ -8737,12 +9112,12 @@ export function App() {
       let joinPhase = phase;
 
       if (supabaseConfigured) {
-        const latestBundle = await fetchRemoteRoomByPin(roomPin);
+        studentAuthUser = await ensureAnonymousStudentSession();
+        const latestBundle = await fetchRemoteRoomPreviewByPin(roomPin);
         if (!latestBundle?.room) {
           setStudentJoinError('해당 PIN의 수업 방을 찾을 수 없습니다. 교사에게 PIN을 확인하세요.');
           return;
         }
-        applyRemoteRoomBundle(latestBundle);
         joinRoomId = latestBundle.room.id;
         joinPlayers = latestBundle.players ?? [];
         joinRoomMode = (latestBundle.room.mode ?? 'individual') === 'team';
@@ -8755,15 +9130,15 @@ export function App() {
       const storedSessionToken = getStoredStudentSessionToken(roomPin, parsedNumber);
       const nextSessionToken = storedSessionToken || createStudentSessionToken();
       const existingPlayer = joinPlayers.find((player) => Number(player.studentNumber) === parsedNumber);
-      if (existingPlayer && existingPlayer.passcodeHash !== passcodeHash) {
+      if (!supabaseConfigured && existingPlayer && existingPlayer.passcodeHash !== passcodeHash) {
         setStudentJoinError('이미 사용 중인 학번입니다. 이름과 개인 비밀번호를 확인하세요.');
         return;
       }
-      if (existingPlayer && hasActiveDifferentSession(existingPlayer, nextSessionToken)) {
+      if (!supabaseConfigured && existingPlayer && hasActiveDifferentSession(existingPlayer, nextSessionToken)) {
         setStudentJoinError('해당 학번은 다른 기기에서 접속 중입니다. 기존 화면을 닫고 잠시 후 다시 시도하세요.');
         return;
       }
-      if (!existingPlayer && joinPlayers.length >= MAX_PLAYERS_PER_ROOM) {
+      if (!supabaseConfigured && !existingPlayer && joinPlayers.length >= MAX_PLAYERS_PER_ROOM) {
         setStudentJoinError('정원이 찼습니다.');
         return;
       }
@@ -8774,6 +9149,7 @@ export function App() {
         id: existingPlayer?.id ?? `local-${parsedNumber}`,
         name: resolvedName,
         studentNumber: parsedNumber,
+        authUserId: studentAuthUser?.id ?? '',
         passcodeHash,
         sessionToken: nextSessionToken,
         lastSeenAt: Date.now(),
@@ -8786,17 +9162,21 @@ export function App() {
       };
 
       const savedPlayer = joinRoomId
-        ? await registerRemotePlayer(joinRoomId, nextPlayer)
+        ? await registerRemotePlayer(roomPin, nextPlayer)
         : null;
       const playerToStore = savedPlayer ?? nextPlayer;
+      const resolvedSessionToken = playerToStore.sessionToken || nextSessionToken;
+      if (joinRoomId && savedPlayer) {
+        const fullBundle = await fetchRemoteRoomById(joinRoomId);
+        if (fullBundle) {
+          applyRemoteRoomBundle(fullBundle);
+          joinPlayers = fullBundle.players ?? [];
+        }
+      }
       const remoteSavedState = joinRoomId
         ? await fetchRemoteStudentState(joinRoomId, parsedNumber)
         : studentStates.find((state) => Number(state.studentNumber) === parsedNumber);
       const cachedState = loadCachedStudentState(joinRoomId || roomPin, parsedNumber);
-      if (remoteSavedState?.passcodeHash && remoteSavedState.passcodeHash !== passcodeHash) {
-        setStudentJoinError('저장된 계좌의 개인 비밀번호가 일치하지 않습니다.');
-        return;
-      }
       const validCachedState = cachedState && (!cachedState.passcodeHash || cachedState.passcodeHash === passcodeHash)
         ? cachedState
         : null;
@@ -8813,8 +9193,9 @@ export function App() {
         playerToStore,
       ].sort((a, b) => Number(a.studentNumber ?? 99) - Number(b.studentNumber ?? 99)));
       setStudentPasscodeHash(passcodeHash);
-      setStudentSessionToken(playerToStore.sessionToken ?? nextSessionToken);
-      storeStudentSessionToken(roomPin, parsedNumber, playerToStore.sessionToken ?? nextSessionToken);
+      setStudentAuthUserId(playerToStore.authUserId || studentAuthUser?.id || '');
+      setStudentSessionToken(resolvedSessionToken);
+      storeStudentSessionToken(roomPin, parsedNumber, resolvedSessionToken);
       setStudentNumber(String(parsedNumber));
       setNickname(playerToStore.name ?? resolvedName);
       const restored = savedState ? restoreStudentState({ ...savedState, passcodeHash }) : false;
@@ -9001,6 +9382,7 @@ export function App() {
     setStudentJoinError('');
     setStudentPasscode('');
     setStudentPasscodeHash('');
+    setStudentAuthUserId('');
     setStudentSessionToken('');
     setCash(nextRoom.cash);
     setDeposit(nextRoom.deposit);
@@ -9041,7 +9423,8 @@ export function App() {
       const bundle = await createRemoteRoom({
         pin: nextPin,
         now,
-        hostId: hostId || 'geography',
+        hostId: hostId || '교사',
+        ownerUserId: teacherUserId,
         totalRounds: selectedTotalRounds,
         // Week 4 §4.10 — 시드 기반 거시지표(기준금리/환율/실업률)를 supabase에도 저장해
         //   학생 단말이 join할 때 기본값이 아닌 시드값을 받도록 한다.
@@ -9096,8 +9479,8 @@ export function App() {
 
   async function handleConfirmReset(event) {
     event.preventDefault();
-    if (resetPassword !== HOST_PASSWORD) {
-      setResetError('초기화 암호가 맞지 않습니다.');
+    if (resetPassword.trim() !== RESET_CONFIRM_TEXT) {
+      setResetError('확인 문구로 ‘초기화’를 정확히 입력하세요.');
       return;
     }
     await applyFreshRoom({ nextPin: roomPin, statusMessage: '현재 방 초기화 중' });
@@ -9316,7 +9699,11 @@ export function App() {
   }
 
   async function handleCloseRound() {
-    if (roomExpired || phase !== 'open') return;
+    if (roomExpired || phase !== 'open' || closeRoundLockRef.current) return;
+    closeRoundLockRef.current = true;
+    setRoundClosing(true);
+
+    try {
 
     let latestStudentStates = studentStates;
     if (remoteRoomId) {
@@ -9655,6 +10042,7 @@ export function App() {
           {
             studentNumber: Number(studentNumber),
             nickname: nickname.trim(),
+            authUserId: studentAuthUserId,
             passcodeHash: studentPasscodeHash,
             teamKey: '',
             cash: cash + localPayout.totalDividend,
@@ -9689,15 +10077,30 @@ export function App() {
     let demandPullDeltaForRound;
     let nextDemandPullCumulativeValue;
     {
-      const memberCount = teamMode
-        ? Math.max(1, players.length)
-        : Math.max(1, (players ?? []).length, nextStudentStatesAfterDividend.length);
-      // 누적 원금: INITIAL_CASH + ROUND_SALARY × (생활소득 지급 횟수)
+      const activeTeamAccounts = teamMode
+        ? nextTeamAccountsAfterDividend.filter((team) => players.some((player) => player.teamKey === team.key))
+        : [];
+      const individualStudentNumbers = new Set([
+        ...(players ?? []).map((player) => Number(player.studentNumber)),
+        ...nextStudentStatesAfterDividend.map((state) => Number(state.studentNumber)),
+      ].filter((studentNumberValue) => Number.isInteger(studentNumberValue) && studentNumberValue > 0));
+      const hasParticipants = teamMode ? activeTeamAccounts.length > 0 : individualStudentNumbers.size > 0;
+      // 누적 원금: 개인전은 학생 수 기준, 모둠전은 모둠별 초기자본 + 실제 구성원별 생활소득 기준
       const investedPerHead = getInvestedPrincipal({ gameStarted: true, round, phase: 'closed' });
-      const aggregatePrincipal = investedPerHead * memberCount;
+      const aggregatePrincipal = teamMode
+        ? activeTeamAccounts.reduce((sum, team) => {
+            const teamMemberCount = players.filter((player) => player.teamKey === team.key).length;
+            return sum + getInvestedPrincipal({
+              gameStarted: true,
+              round,
+              phase: 'closed',
+              memberCount: teamMemberCount,
+            });
+          }, 0)
+        : investedPerHead * individualStudentNumbers.size;
       // 총 자산: 라운드 종료 시점 가격 기준 — 개인전은 마감 후 학생 계좌 상태를 우선 사용
       const aggregateNetWorth = teamMode
-        ? nextTeamAccountsAfterDividend.reduce((sum, team) => sum + getTotalAsset({
+        ? activeTeamAccounts.reduce((sum, team) => sum + getTotalAsset({
             cash: team.cash ?? 0,
             deposit: team.deposit ?? 0,
             portfolio: team.portfolio ?? {},
@@ -9732,9 +10135,9 @@ export function App() {
               }), 0);
             return playerTotal + extraStateTotal;
           })();
-      aggregateReturnForRound = aggregatePrincipal > 0
+      aggregateReturnForRound = hasParticipants && aggregatePrincipal > 0
         ? (aggregateNetWorth / aggregatePrincipal) - 1
-        : 0;
+        : (previousAggregateReturn ?? 0);
       const aggregateReturnDelta = aggregateReturnForRound - (previousAggregateReturn ?? 0);
       // 수요견인: 직전 대비 +5% 수익 → +0.5%p 추가 인플레, 손실 라운드에서는 0으로 클램프
       const demandPullInflation = Math.max(0, aggregateReturnDelta) * DEMAND_PULL_COEF;
@@ -9895,16 +10298,19 @@ export function App() {
       };
     });
     setStudentStates(nextStudentStatesAfterDividend);
-    const failedEvents = resolvedEvents.filter((event) => !event.didApply);
+    const reverseEvent = resolvedEvents.find((event) => event.outcomeType === 'reverse');
+    const expectationEvent = resolvedEvents.find((event) => event.outcomeType === 'expectation');
+    const failedEvents = resolvedEvents.filter((event) => !event.didApply && event.outcomeType !== 'reverse');
     if (bankruptedTeams.length) {
       pushNews('모둠 파산 발생', `${bankruptedTeams.join(', ')} 계좌가 2라운드 연속 잔고 문제로 파산 처리되었습니다.`);
     } else if (delistedAssets.length) {
       pushNews('상장폐지 발생', `${delistedAssets.map((asset) => asset.name).join(', ')} 거래가 중단되었습니다. 한 종목 집중 투자의 위험이 현실화됐습니다.`);
+    } else if (reverseEvent) {
+      pushNews(reverseEvent.reverseTitle, reverseEvent.reverseDetail);
+    } else if (expectationEvent) {
+      pushNews(expectationEvent.expectationTitle, expectationEvent.expectationDetail);
     } else if (failedEvents.length) {
       pushNews(failedEvents[0].failureTitle, failedEvents[0].failureDetail);
-    } else if (resolvedEvents.some((event) => event.outcomeType === 'expectation')) {
-      const expectationEvent = resolvedEvents.find((event) => event.outcomeType === 'expectation');
-      pushNews(expectationEvent.expectationTitle, expectationEvent.expectationDetail);
     } else {
       pushNews(`${round}라운드 장 마감`, '등록된 이슈가 실제 이벤트로 확인되어 장 마감 가격에 반영되었습니다.');
     }
@@ -9970,6 +10376,10 @@ export function App() {
       } catch (error) {
         setSyncStatus(`장 마감 저장 실패: ${error.message}`);
       }
+    }
+    } finally {
+      closeRoundLockRef.current = false;
+      setRoundClosing(false);
     }
   }
 
@@ -10080,6 +10490,7 @@ export function App() {
       priceIndex,
       demandPullCumulative,
     });
+    report.authUserId = studentAuthUserId;
 
     setSubmissions((current) => [report, ...current.filter((item) => item.nickname !== report.nickname)]);
     if (remoteRoomId) {
@@ -10348,7 +10759,32 @@ export function App() {
 
   return (
     <div className="app-shell">
-      <AppHeader setView={setView} hostAuthenticated={hostAuthenticated} studentEntryAllowed={studentEntryAllowed} />
+      <AppHeader
+        setView={setView}
+        joined={joined}
+        hostAuthenticated={hostAuthenticated}
+        hostId={hostId}
+        onTeacherSignOut={handleTeacherSignOut}
+      />
+      {view === 'entry' && !joined ? (
+        <EntryView
+          roomPin={roomPin}
+          onRoomPinChange={(value) => {
+            setRoomPin(value);
+            setRemoteRoomId(null);
+            setStudentJoinError('');
+          }}
+          onStudentEntry={() => {
+            setStudentEntryAllowed(true);
+            setStudentJoinError('');
+            setView('student');
+          }}
+          onTeacherEntry={() => {
+            setStudentEntryAllowed(false);
+            setView(hostAuthenticated ? 'host' : 'host-login');
+          }}
+        />
+      ) : null}
       {view === 'home' ? (
         <HomeView
           setView={setView}
@@ -10370,7 +10806,22 @@ export function App() {
         />
       ) : null}
       {view === 'host-login' && !joined ? (
-        <HostLoginView login={hostLogin} error={hostLoginError} onLoginChange={setHostLogin} onSubmit={handleHostLogin} />
+        <HostLoginView
+          login={hostLogin}
+          mode={authMode}
+          error={hostLoginError}
+          message={authMessage}
+          pending={authPending || authLoading}
+          configured={supabaseConfigured}
+          onLoginChange={setHostLogin}
+          onModeChange={(nextMode) => {
+            setAuthMode(nextMode);
+            setHostLoginError('');
+            setAuthMessage('');
+          }}
+          onSubmit={handleHostLogin}
+          onLocalPractice={handleLocalTeacherPractice}
+        />
       ) : null}
       {view === 'host' && hostAuthenticated && !joined ? (
         <HostView
@@ -10389,6 +10840,7 @@ export function App() {
           assets={assets}
           teamAccounts={teamAccounts}
           players={players}
+          studentStates={studentStates}
           rankingPlayers={displayedPlayers}
           newsFeed={newsFeed}
           baseRate={baseRate}
@@ -10410,6 +10862,7 @@ export function App() {
           latestRoundSummary={latestRoundSummary}
           submissions={submissions}
           syncStatus={syncStatus}
+          roundClosing={roundClosing}
           gameFinished={gameFinished}
           finalRoundClosed={finalRoundClosed}
           finalReportsDownloaded={finalReportsDownloaded}
@@ -10467,11 +10920,31 @@ export function App() {
         />
       ) : null}
       {view === 'host' && !hostAuthenticated && !joined ? (
-        <HostLoginView login={hostLogin} error={hostLoginError} onLoginChange={setHostLogin} onSubmit={handleHostLogin} />
+        <HostLoginView
+          login={hostLogin}
+          mode={authMode}
+          error={hostLoginError}
+          message={authMessage}
+          pending={authPending || authLoading}
+          configured={supabaseConfigured}
+          onLoginChange={setHostLogin}
+          onModeChange={(nextMode) => {
+            setAuthMode(nextMode);
+            setHostLoginError('');
+            setAuthMessage('');
+          }}
+          onSubmit={handleHostLogin}
+          onLocalPractice={handleLocalTeacherPractice}
+        />
       ) : null}
       {view === 'student' ? (
         <StudentView
           roomPin={roomPin}
+          onRoomPinChange={(value) => {
+            setRoomPin(value);
+            setRemoteRoomId(null);
+            setStudentJoinError('');
+          }}
           round={round}
           totalRounds={totalRounds}
           phase={phase}

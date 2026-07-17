@@ -1,6 +1,19 @@
 import { supabase, supabaseConfigured } from './supabaseClient.js';
 
-const PLAYER_SESSION_TIMEOUT_MS = 90_000;
+const SAFE_PLAYER_COLUMNS = [
+  'id', 'room_id', 'user_id', 'nickname', 'student_number', 'team_key', 'cash', 'deposit',
+  'total_asset', 'return_rate', 'joined_at', 'updated_at', 'last_seen_at',
+  'time_deposit_balance', 'time_deposit_principal', 'time_deposit_deposited_at_round',
+  'time_deposit_locked_until_round', 'time_deposit_rate',
+].join(',');
+const SAFE_STUDENT_STATE_COLUMNS = [
+  'id', 'room_id', 'user_id', 'student_number', 'nickname', 'team_key', 'cash', 'deposit',
+  'deposit_principal', 'deposit_interest_earned', 'portfolio', 'trade_logs', 'round_logs',
+  'round_notes', 'round_reflections', 'reflection', 'salary_paid_rounds',
+  'initial_capital_granted', 'updated_at', 'time_deposit_balance', 'time_deposit_principal',
+  'time_deposit_deposited_at_round', 'time_deposit_locked_until_round', 'time_deposit_rate',
+  'last_dividend_round',
+].join(',');
 
 function toIso(value) {
   return new Date(value).toISOString();
@@ -116,6 +129,7 @@ function fromEventRow(row) {
 function fromPlayerRow(row) {
   return {
     id: row.id,
+    authUserId: row.user_id ?? '',
     name: row.nickname,
     studentNumber: row.student_number ?? null,
     passcodeHash: row.passcode_hash ?? '',
@@ -133,9 +147,10 @@ function fromPlayerRow(row) {
 function toStudentStateRow(roomId, state) {
   return {
     room_id: roomId,
+    ...(state.authUserId ? { user_id: state.authUserId } : {}),
     student_number: Number(state.studentNumber),
     nickname: state.nickname,
-    passcode_hash: state.passcodeHash ?? '',
+    ...(state.passcodeHash ? { passcode_hash: state.passcodeHash } : {}),
     team_key: state.teamKey ?? '',
     cash: Math.round(state.cash ?? 0),
     deposit: Math.round(state.deposit ?? 0),
@@ -157,6 +172,7 @@ function toStudentStateRow(roomId, state) {
 function fromStudentStateRow(row) {
   return {
     id: row.id,
+    authUserId: row.user_id ?? '',
     studentNumber: row.student_number ?? null,
     nickname: row.nickname,
     passcodeHash: row.passcode_hash ?? '',
@@ -214,6 +230,7 @@ function fromTeamRow(row) {
 function fromSubmissionRow(row) {
   return {
     id: row.id,
+    authUserId: row.user_id ?? '',
     nickname: row.nickname,
     studentNumber: row.student_number ?? null,
     mode: row.mode ?? 'individual',
@@ -283,9 +300,9 @@ async function fetchRoomBundle(query) {
   const [assetsResult, eventsResult, playersResult, teamsResult, statesResult, roundResultsResult] = await Promise.all([
     supabase.from('assets').select('*').eq('room_id', room.id).order('name', { ascending: true }),
     supabase.from('round_events').select('*').eq('room_id', room.id).order('created_at', { ascending: true }),
-    supabase.from('players').select('*').eq('room_id', room.id).order('joined_at', { ascending: true }),
+    supabase.from('players').select(SAFE_PLAYER_COLUMNS).eq('room_id', room.id).order('joined_at', { ascending: true }),
     supabase.from('team_accounts').select('*').eq('room_id', room.id).order('team_key', { ascending: true }),
-    supabase.from('student_states').select('*').eq('room_id', room.id).order('updated_at', { ascending: true }),
+    supabase.from('student_states').select(SAFE_STUDENT_STATE_COLUMNS).eq('room_id', room.id).order('updated_at', { ascending: true }),
     supabase.from('room_round_results').select('*').eq('room_id', room.id).order('round', { ascending: true }),
   ]);
 
@@ -308,16 +325,11 @@ async function fetchRoomBundle(query) {
   };
 }
 
-export async function createRemoteRoom({ pin, now, hostId = 'geography', totalRounds = 12, baseRate, propertyIndex = 250000, exchangeRate = 1350, unemploymentRate = 3.5, economicSeed = {}, assets, mode = 'individual', teams = [] }) {
+export async function createRemoteRoom({ pin, now, hostId = '교사', ownerUserId, totalRounds = 12, baseRate, propertyIndex = 250000, exchangeRate = 1350, unemploymentRate = 3.5, economicSeed = {}, assets, mode = 'individual', teams = [] }) {
   if (!supabaseConfigured) return null;
 
-  const { data: pinOwner, error: pinError } = await supabase.from('rooms').select('id,host_id').eq('pin', pin).maybeSingle();
-  if (pinError) throw pinError;
-  if (pinOwner?.id && pinOwner.host_id !== hostId) {
-    throw new Error('이미 사용 중인 방 PIN입니다. 새 PIN으로 다시 시도하세요.');
-  }
-
-  const { error: previousRoomsError } = await supabase.from('rooms').delete().eq('host_id', hostId);
+  if (!ownerUserId) throw new Error('교사 로그인 세션을 확인할 수 없습니다. 다시 로그인해주세요.');
+  const { error: previousRoomsError } = await supabase.from('rooms').delete().eq('owner_user_id', ownerUserId);
   if (previousRoomsError) throw previousRoomsError;
 
   const { data: room, error } = await supabase
@@ -325,6 +337,7 @@ export async function createRemoteRoom({ pin, now, hostId = 'geography', totalRo
     .insert({
       pin,
       host_id: hostId,
+      owner_user_id: ownerUserId,
       current_round: 1,
       total_rounds: totalRounds,
       phase: 'setup',
@@ -349,6 +362,7 @@ export async function createRemoteRoom({ pin, now, hostId = 'geography', totalRo
     .select()
     .single();
 
+  if (error?.code === '23505') throw new Error('방 PIN이 겹쳤습니다. 새 방 생성을 다시 눌러주세요.');
   if (error) throw error;
 
   const { error: assetsError } = await supabase.from('assets').insert(assets.map((asset) => toAssetRow(room.id, asset)));
@@ -362,18 +376,31 @@ export async function createRemoteRoom({ pin, now, hostId = 'geography', totalRo
   return fetchRemoteRoomById(room.id);
 }
 
-export async function fetchRemoteRoomByPin(pin) {
+export async function fetchRemoteRoomPreviewByPin(pin) {
   if (!supabaseConfigured || !/^[0-9]{6}$/.test(pin)) return null;
-  return fetchRoomBundle(supabase.from('rooms').select('*').eq('pin', pin));
+  const { data, error } = await supabase.rpc('lookup_classroom_by_pin', { p_pin: pin });
+  if (error) throw error;
+  if (!data) return null;
+  return {
+    room: data,
+    assets: [],
+    events: [],
+    players: [],
+    teams: [],
+    studentStates: [],
+    roundResults: [],
+    submissions: [],
+    preview: true,
+  };
 }
 
-export async function fetchRemoteActiveRoomByHostId(hostId) {
-  if (!supabaseConfigured || !hostId) return null;
+export async function fetchRemoteActiveRoomByOwnerId(ownerUserId) {
+  if (!supabaseConfigured || !ownerUserId) return null;
   return fetchRoomBundle(
     supabase
       .from('rooms')
       .select('*')
-      .eq('host_id', hostId)
+      .eq('owner_user_id', ownerUserId)
       .gt('expires_at', new Date().toISOString())
       .neq('phase', 'expired')
       .order('updated_at', { ascending: false })
@@ -455,61 +482,20 @@ export async function deleteRemoteRoundDraftIssues(roomId, round) {
   return true;
 }
 
-export async function registerRemotePlayer(roomId, player) {
-  if (!supabaseConfigured || !roomId || !player?.studentNumber || !player?.name || !player?.passcodeHash) return null;
-  const studentNumber = Number(player.studentNumber);
-  const { data: existing, error: existingError } = await supabase
-    .from('players')
-    .select('*')
-    .eq('room_id', roomId)
-    .eq('student_number', studentNumber)
-    .maybeSingle();
-  if (existingError) throw existingError;
-
-  if (existing) {
-    if (existing.passcode_hash !== player.passcodeHash) {
-      throw new Error('이미 사용 중인 학번입니다. 이름과 개인 비밀번호를 확인하세요.');
-    }
-    const existingLastSeenAt = existing.last_seen_at ? new Date(existing.last_seen_at).getTime() : 0;
-    const activeDifferentSession = existing.session_token
-      && existing.session_token !== player.sessionToken
-      && existingLastSeenAt
-      && Date.now() - existingLastSeenAt < PLAYER_SESSION_TIMEOUT_MS;
-    if (activeDifferentSession) {
-      throw new Error('해당 학번은 다른 기기에서 접속 중입니다. 기존 화면을 닫고 잠시 후 다시 시도하세요.');
-    }
-    const { data, error } = await supabase
-      .from('players')
-      .update({
-        nickname: existing.nickname || player.name,
-        team_key: player.teamKey ?? existing.team_key ?? '',
-        session_token: player.sessionToken ?? existing.session_token ?? '',
-        last_seen_at: toIso(player.lastSeenAt ?? Date.now()),
-      })
-      .eq('id', existing.id)
-      .select()
-      .single();
-    if (error) throw error;
-    return fromPlayerRow(data);
-  }
-
-  const { data, error } = await supabase
-    .from('players')
-    .insert({
-      room_id: roomId,
-      student_number: studentNumber,
-      nickname: player.name,
-      passcode_hash: player.passcodeHash,
-      session_token: player.sessionToken ?? '',
-      last_seen_at: toIso(player.lastSeenAt ?? Date.now()),
-      team_key: player.teamKey ?? '',
-      cash: Math.round(player.cash ?? 0),
-      deposit: Math.round(player.deposit ?? 0),
-      total_asset: Math.round(player.totalAsset ?? 0),
-      return_rate: Number(player.returnRate ?? 0),
-    })
-    .select()
-    .single();
+export async function registerRemotePlayer(roomPin, player) {
+  if (!supabaseConfigured || !roomPin || !player?.studentNumber || !player?.name || !player?.passcodeHash) return null;
+  const { data, error } = await supabase.rpc('claim_student_seat', {
+    p_room_pin: roomPin,
+    p_student_number: Number(player.studentNumber),
+    p_nickname: player.name,
+    p_passcode_hash: player.passcodeHash,
+    p_session_token: player.sessionToken ?? '',
+    p_team_key: player.teamKey ?? '',
+    p_cash: Math.round(player.cash ?? 0),
+    p_deposit: Math.round(player.deposit ?? 0),
+    p_total_asset: Math.round(player.totalAsset ?? 0),
+    p_return_rate: Number(player.returnRate ?? 0),
+  });
   if (error) throw error;
   return fromPlayerRow(data);
 }
@@ -522,10 +508,11 @@ export async function upsertRemotePlayer(roomId, player) {
     .upsert(
       {
         room_id: roomId,
+        ...(player.authUserId ? { user_id: player.authUserId } : {}),
         student_number: player.studentNumber ? Number(player.studentNumber) : null,
         nickname: player.name,
-        passcode_hash: player.passcodeHash ?? '',
-        session_token: player.sessionToken ?? '',
+        ...(player.passcodeHash ? { passcode_hash: player.passcodeHash } : {}),
+        ...(player.sessionToken ? { session_token: player.sessionToken } : {}),
         last_seen_at: toIso(player.lastSeenAt ?? Date.now()),
         team_key: player.teamKey ?? '',
         cash: Math.round(player.cash ?? 0),
@@ -535,7 +522,7 @@ export async function upsertRemotePlayer(roomId, player) {
       },
       { onConflict },
     )
-    .select()
+    .select(SAFE_PLAYER_COLUMNS)
     .single();
   if (error) throw error;
   return fromPlayerRow(data);
@@ -565,7 +552,7 @@ export async function fetchRemoteStudentStates(roomId) {
   if (!supabaseConfigured || !roomId) return [];
   const { data, error } = await supabase
     .from('student_states')
-    .select('*')
+    .select(SAFE_STUDENT_STATE_COLUMNS)
     .eq('room_id', roomId)
     .order('updated_at', { ascending: true });
   if (error) {
@@ -579,7 +566,7 @@ export async function fetchRemoteStudentState(roomId, studentNumber) {
   if (!supabaseConfigured || !roomId || !studentNumber) return null;
   const { data, error } = await supabase
     .from('student_states')
-    .select('*')
+    .select(SAFE_STUDENT_STATE_COLUMNS)
     .eq('room_id', roomId)
     .eq('student_number', Number(studentNumber))
     .maybeSingle();
@@ -591,11 +578,11 @@ export async function fetchRemoteStudentState(roomId, studentNumber) {
 }
 
 export async function upsertRemoteStudentState(roomId, state) {
-  if (!supabaseConfigured || !roomId || !state?.studentNumber || !state?.nickname || !state?.passcodeHash) return null;
+  if (!supabaseConfigured || !roomId || !state?.studentNumber || !state?.nickname) return null;
   const { data, error } = await supabase
     .from('student_states')
     .upsert(toStudentStateRow(roomId, state), { onConflict: 'room_id,student_number' })
-    .select()
+    .select(SAFE_STUDENT_STATE_COLUMNS)
     .single();
   if (error) throw error;
   return fromStudentStateRow(data);
@@ -619,6 +606,7 @@ export async function upsertRemoteSubmission(roomId, report) {
     .upsert(
       {
         room_id: roomId,
+        ...(report.authUserId ? { user_id: report.authUserId } : {}),
         nickname: report.nickname,
         student_number: report.studentNumber == null ? null : Number(report.studentNumber),
         mode: report.mode ?? 'individual',
