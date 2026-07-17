@@ -37,6 +37,7 @@ import {
   getRoomCapacityState,
 } from './lib/classroomStore.js';
 import { supabaseConfigured } from './lib/supabaseClient.js';
+import { isEasterEggTeacherId } from './lib/teacherLoginIdentity.js';
 import {
   ensureAnonymousStudentSession,
   getCurrentAuthSession,
@@ -4976,6 +4977,7 @@ function HostLoginView({
   const isSignup = mode === 'signup';
   const isForgot = mode === 'forgot';
   const isPasswordUpdate = mode === 'update-password';
+  const acceptsTeacherId = mode === 'signin';
   const title = isSignup
     ? '교사 계정을 만들어보세요.'
     : isForgot
@@ -5017,14 +5019,14 @@ function HostLoginView({
           ) : null}
           {!isPasswordUpdate ? (
             <label>
-              이메일
+              {acceptsTeacherId ? '아이디 또는 이메일' : '이메일'}
               <input
-                type="email"
+                type={acceptsTeacherId ? 'text' : 'email'}
                 value={login.email}
                 onChange={(event) => onLoginChange((current) => ({ ...current, email: event.target.value }))}
-                autoComplete="email"
-                placeholder="teacher@school.kr"
-                aria-label="교사 이메일"
+                autoComplete={acceptsTeacherId ? 'username' : 'email'}
+                placeholder={acceptsTeacherId ? '교사 아이디 또는 이메일' : 'teacher@school.kr'}
+                aria-label={acceptsTeacherId ? '교사 아이디 또는 이메일' : '교사 이메일'}
               />
             </label>
           ) : null}
@@ -5036,7 +5038,7 @@ function HostLoginView({
                 value={login.password}
                 onChange={(event) => onLoginChange((current) => ({ ...current, password: event.target.value }))}
                 autoComplete={isSignup ? 'new-password' : 'current-password'}
-                placeholder="영문과 숫자를 포함한 8자리 이상"
+                placeholder={isSignup || isPasswordUpdate ? '영문과 숫자를 포함한 8자리 이상' : '비밀번호'}
                 aria-label={isPasswordUpdate ? '새 비밀번호' : '교사 비밀번호'}
               />
             </label>
@@ -8798,19 +8800,26 @@ export function App() {
     const email = hostLogin.email.trim().toLowerCase();
     const password = hostLogin.password;
     const validPassword = password.length >= 8 && /[A-Za-z]/.test(password) && /\d/.test(password);
+    const easterEggLogin = authMode === 'signin' && isEasterEggTeacherId(email);
     setHostLoginError('');
     setAuthMessage('');
 
-    if (authMode !== 'update-password' && !/^\S+@\S+\.\S+$/.test(email)) {
-      setHostLoginError('학교 또는 개인 이메일 주소를 정확히 입력하세요.');
+    if (authMode !== 'update-password' && !easterEggLogin && !/^\S+@\S+\.\S+$/.test(email)) {
+      setHostLoginError(authMode === 'signin'
+        ? '교사 아이디 또는 이메일 주소를 정확히 입력하세요.'
+        : '학교 또는 개인 이메일 주소를 정확히 입력하세요.');
       return;
     }
     if (authMode === 'signup' && hostLogin.displayName.trim().length < 2) {
       setHostLoginError('교사 이름은 2글자 이상 입력하세요.');
       return;
     }
-    if (authMode !== 'forgot' && !validPassword) {
+    if ((authMode === 'signup' || authMode === 'update-password') && !validPassword) {
       setHostLoginError('비밀번호는 영문과 숫자를 포함해 8자리 이상으로 입력하세요.');
+      return;
+    }
+    if (authMode === 'signin' && !password) {
+      setHostLoginError('비밀번호를 입력하세요.');
       return;
     }
     if ((authMode === 'signup' || authMode === 'update-password') && password !== hostLogin.confirmPassword) {
@@ -8851,7 +8860,7 @@ export function App() {
       }
     } catch (error) {
       const normalizedMessage = error.message === 'Invalid login credentials'
-        ? '이메일 또는 비밀번호가 맞지 않습니다.'
+        ? '아이디·이메일 또는 비밀번호가 맞지 않습니다.'
         : error.message === 'User already registered'
           ? '이미 가입된 이메일입니다. 로그인하거나 비밀번호를 재설정하세요.'
           : error.message;

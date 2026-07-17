@@ -1,4 +1,5 @@
 import { supabase, supabaseConfigured } from './supabaseClient.js';
+import { normalizeTeacherLoginIdentifier } from './teacherLoginIdentity.js';
 
 function getRedirectUrl() {
   if (typeof window === 'undefined') return undefined;
@@ -47,7 +48,10 @@ export async function signUpTeacher({ email, password, displayName }) {
 export async function signInTeacher({ email, password }) {
   if (!supabaseConfigured) throw new Error('Supabase 연결 후 로그인을 사용할 수 있습니다.');
   await clearAnonymousSession();
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email: normalizeTeacherLoginIdentifier(email),
+    password,
+  });
   if (error) throw error;
   if (data.user?.is_anonymous) throw new Error('교사 계정으로 로그인해주세요.');
   return data;
