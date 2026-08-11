@@ -8002,6 +8002,7 @@ function StudentView({
   roundReflections,
   onRoundReflectionChange,
   macroTimeline,
+  studentSaveStatus,
 }) {
   // Week 4 §3.5 사전 작업 — 정보보드/거래보드 탭 분리 (localStorage에 마지막 선택 탭 저장)
   const [activeTab, setActiveTab] = useState(() => {
@@ -8154,6 +8155,10 @@ function StudentView({
           </div>
           <div className="pin-badge">{roomPin}</div>
         </header>
+
+        <p className={`student-save-status ${studentSaveStatus.status}`} role="status" aria-live="polite">
+          {studentSaveStatus.message}
+        </p>
 
         <section className="breaking-news" aria-label="실시간 속보">
           <BellRing size={18} aria-hidden="true" />
@@ -8702,6 +8707,10 @@ export function App() {
   const [resetError, setResetError] = useState('');
   const [remoteRoomId, setRemoteRoomId] = useState(null);
   const [syncStatus, setSyncStatus] = useState(supabaseConfigured ? '실시간 수업 연결 준비 중' : '로컬 연습 모드');
+  const [studentSaveStatus, setStudentSaveStatus] = useState(() => ({
+    status: supabaseConfigured ? 'idle' : 'local',
+    message: supabaseConfigured ? '계좌 저장 준비 중' : '이 기기에서만 연습 기록을 유지합니다.',
+  }));
   const [toast, setToast] = useState(null);
   const [tradePending, setTradePending] = useState(false);
   const [roundClosing, setRoundClosing] = useState(false);
@@ -9126,6 +9135,7 @@ export function App() {
 
     window.clearTimeout(studentStateSaveTimer.current);
     studentStateSaveTimer.current = window.setTimeout(() => {
+      setStudentSaveStatus({ status: 'saving', message: '계좌를 서버에 저장하는 중입니다.' });
       upsertRemoteStudentState(remoteRoomId, nextState)
         .then((savedState) => {
           if (savedState) {
@@ -9136,13 +9146,25 @@ export function App() {
               _roomPhase: phase,
               _pendingRemoteSave: false,
             });
+            const savedAt = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+            setStudentSaveStatus({ status: 'saved', message: `서버 저장 완료 · ${savedAt}` });
           }
         })
-        .catch((error) => setSyncStatus(`학생 계좌 저장 실패: ${error.message}`));
+        .catch((error) => {
+          setSyncStatus(`학생 계좌 저장 실패: ${error.message}`);
+          setStudentSaveStatus({ status: 'error', message: '계좌 저장 실패 · 인터넷 연결을 확인한 뒤 다시 시도하세요.' });
+          showToast({
+            id: 'student-account-save-error',
+            title: '학생 계좌가 서버에 저장되지 않았습니다.',
+            message: '화면을 닫지 말고 인터넷 연결을 확인해주세요.',
+            tone: 'error',
+            duration: 6000,
+          });
+        });
     }, 100);
 
     return () => window.clearTimeout(studentStateSaveTimer.current);
-  }, [activeTeam.lastDividendRound, depositPrincipal, effectiveCash, effectiveDeposit, effectiveDepositInterestEarned, effectivePortfolio, gameStarted, initialCapitalGranted, joined, lastDividendRound, nickname, phase, reflection, remoteRoomId, roomPin, round, roundLogs, roundNotes, roundReflections, salaryPaidRounds, selectedTeamKey, studentAuthUserId, studentNumber, studentPasscodeHash, teamMode, tradeLogs]);
+  }, [activeTeam.lastDividendRound, depositPrincipal, effectiveCash, effectiveDeposit, effectiveDepositInterestEarned, effectivePortfolio, gameStarted, initialCapitalGranted, joined, lastDividendRound, nickname, phase, reflection, remoteRoomId, roomPin, round, roundLogs, roundNotes, roundReflections, salaryPaidRounds, selectedTeamKey, showToast, studentAuthUserId, studentNumber, studentPasscodeHash, teamMode, tradeLogs]);
 
   useEffect(() => {
     if (!joined || !studentNumber) return;
@@ -11485,6 +11507,7 @@ export function App() {
           onRoundNoteSave={handleRoundNoteSave}
           roundReflections={roundReflections}
           onRoundReflectionChange={handleRoundReflectionChange}
+          studentSaveStatus={studentSaveStatus}
         />
       ) : null}
       <AppToast toast={toast} onDismiss={dismissToast} />

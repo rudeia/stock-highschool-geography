@@ -3357,6 +3357,36 @@ input {
   font-size: 1.45rem;
 }
 
+.student-save-status {
+  margin: 0;
+  border: 1px solid #dbe4ee;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #64748b;
+  padding: 0.5rem 0.65rem;
+  font-size: 0.76rem;
+  font-weight: 900;
+  line-height: 1.4;
+}
+
+.student-save-status.saving {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.student-save-status.saved {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+  color: #15803d;
+}
+
+.student-save-status.error {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
 .breaking-news {
   display: flex;
   min-height: 64px;

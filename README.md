@@ -15,7 +15,7 @@
 
 실제 시세 API를 사용하지 않고 앱에 내장된 가상 기업·자산·이슈 데이터로 진행되므로, 수업 목표에 맞게 반복 실험할 수 있습니다.
 
-> 최신 갱신: 2026-08-11 · 이슈 영향 계산 보강, 학생 보유 자산 교사 모니터링, 42개 이슈 뉴스형 취재 노트, 시장 엔진 자동 회귀검사를 반영했습니다.
+> 최신 갱신: 2026-08-11 · 이슈 영향 계산 보강, 학생 보유 자산 교사 모니터링, 42개 이슈 뉴스형 취재 노트, 학생 재접속 서버 복원과 자동 회귀검사를 반영했습니다.
 
 ## 핵심 기능
 
@@ -46,6 +46,7 @@
 - 기사 리드, 시장 현장, 가상 전문가 코멘트, 다음 확인 지표가 포함된 공개 이슈 뉴스
 - 최종 보고서 제출 및 브라우저 인쇄 기능을 이용한 PDF 저장
 - 재접속 시 Supabase에 저장된 잔고, 보유 종목, 로그, 메모 복원
+- 학생 화면에서 계좌의 서버 저장 중·완료·실패 상태 확인
 
 ## 수업 규칙
 
@@ -224,6 +225,7 @@ npm run dev
 npm run lint
 npm run build
 npm run check:market
+npm run check:reconnect
 npm run preview
 ```
 
@@ -290,6 +292,7 @@ VITE_SUPABASE_PUBLISHABLE_KEY
 | `npm run preview` | 빌드 결과 로컬 미리보기 |
 | `npm run lint` | ESLint 정적 검사 |
 | `npm run check:market` | 계산·상충·카드 연결·뉴스 취재 노트 자동 검사 |
+| `npm run check:reconnect` | 학생 접속·계좌 저장의 안전한 INSERT/UPDATE 흐름 검사 |
 
 ## Supabase 저장 구조
 

@@ -506,31 +506,23 @@ export async function registerRemotePlayer(roomPin, player) {
 }
 
 export async function upsertRemotePlayer(roomId, player) {
-  if (!supabaseConfigured || !roomId || !player?.name) return null;
-  const onConflict = player.studentNumber ? 'room_id,student_number' : 'room_id,nickname';
+  if (!supabaseConfigured || !roomId || !player?.studentNumber) return null;
   const { data, error } = await supabase
     .from('players')
-    .upsert(
-      {
-        room_id: roomId,
-        ...(player.authUserId ? { user_id: player.authUserId } : {}),
-        student_number: player.studentNumber ? Number(player.studentNumber) : null,
-        nickname: player.name,
-        ...(player.passcodeHash ? { passcode_hash: player.passcodeHash } : {}),
-        ...(player.sessionToken ? { session_token: player.sessionToken } : {}),
-        last_seen_at: toIso(player.lastSeenAt ?? Date.now()),
-        team_key: player.teamKey ?? '',
-        cash: Math.round(player.cash ?? 0),
-        deposit: Math.round(player.deposit ?? 0),
-        total_asset: Math.round(player.totalAsset ?? 0),
-        return_rate: Number(player.returnRate ?? 0),
-      },
-      { onConflict },
-    )
+    .update({
+      ...(player.sessionToken ? { session_token: player.sessionToken } : {}),
+      last_seen_at: toIso(player.lastSeenAt ?? Date.now()),
+      cash: Math.round(player.cash ?? 0),
+      deposit: Math.round(player.deposit ?? 0),
+      total_asset: Math.round(player.totalAsset ?? 0),
+      return_rate: Number(player.returnRate ?? 0),
+    })
+    .eq('room_id', roomId)
+    .eq('student_number', Number(player.studentNumber))
     .select(SAFE_PLAYER_COLUMNS)
-    .single();
+    .maybeSingle();
   if (error) throw error;
-  return fromPlayerRow(data);
+  return data ? fromPlayerRow(data) : null;
 }
 
 export async function upsertRemoteTeamAccount(roomId, team) {
@@ -584,13 +576,33 @@ export async function fetchRemoteStudentState(roomId, studentNumber) {
 
 export async function upsertRemoteStudentState(roomId, state) {
   if (!supabaseConfigured || !roomId || !state?.studentNumber || !state?.nickname) return null;
-  const { data, error } = await supabase
+  const stateRow = toStudentStateRow(roomId, state);
+  const updateExistingState = () => supabase
     .from('student_states')
-    .upsert(toStudentStateRow(roomId, state), { onConflict: 'room_id,student_number' })
+    .update(stateRow)
+    .eq('room_id', roomId)
+    .eq('student_number', Number(state.studentNumber))
+    .select(SAFE_STUDENT_STATE_COLUMNS)
+    .maybeSingle();
+
+  const { data: updatedState, error: updateError } = await updateExistingState();
+  if (updateError) throw updateError;
+  if (updatedState) return fromStudentStateRow(updatedState);
+
+  const { data: insertedState, error: insertError } = await supabase
+    .from('student_states')
+    .insert(stateRow)
     .select(SAFE_STUDENT_STATE_COLUMNS)
     .single();
-  if (error) throw error;
-  return fromStudentStateRow(data);
+
+  if (!insertError) return fromStudentStateRow(insertedState);
+  if (insertError.code !== '23505') throw insertError;
+
+  // 최초 저장 요청이 겹친 경우, 먼저 생성된 행을 한 번만 다시 갱신한다.
+  const { data: retriedState, error: retryError } = await updateExistingState();
+  if (retryError) throw retryError;
+  if (!retriedState) throw insertError;
+  return fromStudentStateRow(retriedState);
 }
 
 export async function fetchRemoteSubmissions(roomId) {
