@@ -265,7 +265,11 @@ function toRoundResultRow(roomId, result) {
     round: Number(result.round),
     events: result.events ?? [],
     macro_alerts: result.macroAlerts ?? [],
-    macro_move: result.macroMove ?? {},
+    // 기존 JSONB 컬럼을 확장해 스키마 변경 없이 종목별 가격 기여도를 함께 보관한다.
+    macro_move: {
+      ...(result.macroMove ?? {}),
+      impactBreakdown: result.impactBreakdown ?? result.macroMove?.impactBreakdown ?? null,
+    },
     delisted_assets: result.delistedAssets ?? [],
     price_index: Number(result.priceIndex ?? 1),
     aggregate_return: Number(result.aggregateReturn ?? 0),
@@ -281,6 +285,7 @@ function fromRoundResultRow(row) {
     events: row.events ?? [],
     macroAlerts: row.macro_alerts ?? [],
     macroMove: row.macro_move ?? {},
+    impactBreakdown: row.macro_move?.impactBreakdown ?? null,
     delistedAssets: row.delisted_assets ?? [],
     priceIndex: Number(row.price_index ?? 1),
     aggregateReturn: Number(row.aggregate_return ?? 0),

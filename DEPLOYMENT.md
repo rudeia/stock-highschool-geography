@@ -8,6 +8,7 @@
 npm install
 npm run lint
 npm run build
+npm run check:market
 ```
 
 ## 2. GitHub 저장소 준비
@@ -53,6 +54,7 @@ VITE_SUPABASE_ANON_KEY=your-supabase-anon-key
 1. supabase/migrations/20260615000000_initial_market_class_schema.sql
 2. supabase/migrations/20260616120000_savings_forex_triggers.sql
 3. supabase/migrations/20260717002707_teacher_auth_and_room_ownership.sql
+4. supabase/migrations/20260717033030_harden_functions_and_indexes.sql
 ```
 
 4. Authentication에서 Email과 Anonymous Sign-Ins를 활성화합니다.

@@ -92,13 +92,9 @@ const DEFAULT_EVENT_PROBABILITY = EVENT_SUCCESS_PROBABILITY;
 const DELISTING_START_ROUND = 9;
 const DELISTING_PROBABILITY = 0.2;
 const STRONG_NEGATIVE_IMPACT = -0.07;
-const MIN_EVENT_IMPACT = 0.15;
-const MIN_REPEATED_EVENT_IMPACT = 0.5;
-const MIN_TRIPLE_EVENT_IMPACT = 0.7;
-const MIN_EXTREME_EVENT_IMPACT = 0.9;
-const DIRECT_REPEATED_IMPACT_THRESHOLD = 0.08;
-const MIN_INDIRECT_REPEATED_EVENT_IMPACT = 0.05;
-const MAX_INDIRECT_REPEATED_EVENT_IMPACT = 0.12;
+// 한 라운드는 3개월을 뜻한다. 큰 분기 변동은 허용하되, 입력값 7%→8%처럼
+// 작은 차이가 최소 15% 강제로 불연속 확대되지 않도록 모든 이슈를 연속형으로 계산한다.
+const REPEATED_EVENT_MULTIPLIERS = { 1: 1, 2: 1.6, 3: 2.2, 4: 2.7 };
 const PASSIVE_MARKET_MOVE = 0.05;
 // 배당 지급일과 학습 회고 체크포인트는 서로 독립적으로 관리한다.
 const DIVIDEND_ROUNDS = [3, 6, 9, 11];
@@ -1019,7 +1015,6 @@ const scenarioEvents = [
         failureDetail: '세부 통계에서 증가분이 일부 계절 요인으로 확인되며 시장 반응은 크지 않았습니다.',
       },
     ],
-    baseRateDelta: 0.5,
     impact: { bank: 0.08, riverbank: 0.07, infra: -0.07, metroinfra: -0.09, air: -0.05, oceanair: -0.08, enter: -0.04, core: -0.05, dogemars: -0.07, neo: -0.03, bio: -0.05, realty: -0.08, kospi: -0.03, sp500: -0.02, usBond: -0.06, argBond: -0.05, goldFut: -0.04, usdKrw: -0.02 },
   },
   {
@@ -1043,7 +1038,6 @@ const scenarioEvents = [
         failureDetail: '중앙은행 관계자가 당장 금리 인하를 논의하지 않는다고 설명했습니다.',
       },
     ],
-    baseRateDelta: -0.5,
     impact: { realty: 0.09, infra: 0.05, metroinfra: 0.07, neo: 0.04, enter: 0.04, core: 0.05, dogemars: 0.06, bio: 0.05, bank: -0.04, riverbank: -0.04, kospi: 0.04, sp500: 0.03, usBond: 0.06, argBond: 0.04, goldFut: 0.04, usdKrw: 0.02 },
   },
   {
@@ -1067,7 +1061,6 @@ const scenarioEvents = [
         failureDetail: '증시가 빠르게 안정되며 예금 쏠림은 예상보다 강하지 않았습니다.',
       },
     ],
-    baseRateDelta: 0.2,
     impact: { bank: 0.05, riverbank: 0.06, enter: -0.02, dogemars: -0.03, neo: -0.02, realty: -0.03 },
   },
   {
@@ -1342,7 +1335,7 @@ const scenarioEvents = [
     title: '한국 수출 호조',
     detail: '반도체와 자동차 수출 증가로 국내 대표지수가 상승했습니다.',
     principle: '수출이 늘면 기업 매출과 이익 기대가 커지고, 국내 대표지수에도 긍정적으로 작용할 수 있습니다.',
-    affectedAssets: ['KOSPI ETF 상승 압력', '반도체 상승 압력', '전기차 상승 압력', '은행주 일부 상승'],
+    affectedAssets: ['KOSPI ETF 상승 압력', '국내 제조업 상승 압력', '전기차·배터리 상승 압력', '은행주 일부 상승'],
     discussionPrompt: '수출이 늘면 왜 주식시장 전체 분위기가 좋아질 수 있을까요?',
     issueOptions: [
       {
@@ -1358,14 +1351,14 @@ const scenarioEvents = [
         failureDetail: '환율과 물류비 부담이 커지며 수출 증가의 긍정 효과가 약해졌습니다.',
       },
     ],
-    impact: { kospi: 0.09, core: 0.06, neo: 0.03, dogemars: 0.02, bank: 0.02, riverbank: 0.02 },
+    impact: { kospi: 0.09, neo: 0.05, eco: 0.02, bank: 0.02, riverbank: 0.02 },
   },
   {
     id: 'rare',
     title: '희토류 수출 통제',
     detail: '주요 생산국이 희토류 수출 제한을 발표했습니다.',
     principle: '핵심 원재료 공급이 줄면 생산 비용이 오르고, 관련 제조업의 이익 기대가 낮아질 수 있습니다.',
-    affectedAssets: ['반도체 하락 압력', '전기차 하락 압력', '재생에너지 하락 압력', '원자재 관련주 상승 압력'],
+    affectedAssets: ['반도체 하락 압력', '전기차 하락 압력', '재생에너지 하락 압력', '국내 지수 부담'],
     discussionPrompt: '같은 뉴스가 어떤 기업에는 악재이고 어떤 기업에는 호재가 되는 이유는 무엇일까요?',
     issueOptions: [
       {
@@ -1381,14 +1374,14 @@ const scenarioEvents = [
         failureDetail: '재고 물량이 충분하다는 발표가 나오며 가격 급등 우려가 완화됐습니다.',
       },
     ],
-    impact: { core: -0.11, dogemars: -0.1, neo: -0.08, eco: -0.04, oil: 0.04, kospi: -0.03 },
+    impact: { core: -0.11, dogemars: -0.1, neo: -0.08, eco: -0.04, kospi: -0.03 },
   },
   {
     id: 'housing',
     title: '인프라 예산 확대',
     detail: '대규모 도로, 철도, 데이터센터 투자가 확정됐습니다.',
     principle: '정부 지출이 늘면 관련 기업의 수주 기대가 커지고 주변 부동산 가치에도 영향을 줄 수 있습니다.',
-    affectedAssets: ['건설/인프라 상승 압력', '부동산 상승 압력', '반도체 상승 압력', '은행주 일부 상승'],
+    affectedAssets: ['건설/인프라 상승 압력', '부동산 상승 압력', '재생에너지 설비 수요', '은행주 일부 상승'],
     discussionPrompt: '정부의 인프라 투자는 왜 민간 기업의 주가에도 영향을 줄까요?',
     issueOptions: [
       {
@@ -1404,7 +1397,7 @@ const scenarioEvents = [
         failureDetail: '재정 부담 우려로 사업 규모가 조정되며 기대감이 약해졌습니다.',
       },
     ],
-    impact: { infra: 0.16, metroinfra: 0.18, realty: 0.06, core: 0.05, dogemars: 0.04, bank: 0.03, riverbank: 0.02, eco: 0.02 },
+    impact: { infra: 0.16, metroinfra: 0.18, realty: 0.06, bank: 0.03, riverbank: 0.02, eco: 0.02 },
   },
   {
     id: 'green-subsidy',
@@ -1427,7 +1420,7 @@ const scenarioEvents = [
         failureDetail: '정책 협의가 길어지며 전기차 지원 기대가 시장에 크게 이어지지 못했습니다.',
       },
     ],
-    impact: { eco: 0.14, neo: 0.06, dogemars: 0.03, kospi: 0.03, oil: -0.06, oilFut: -0.08 },
+    impact: { eco: 0.14, neo: 0.06, kospi: 0.03, oil: -0.04, oilFut: -0.05 },
   },
   {
     id: 'us-regulation',
@@ -1450,7 +1443,7 @@ const scenarioEvents = [
         failureDetail: '의회 논의가 길어지며 당장 기업 실적에 미치는 영향은 제한적이었습니다.',
       },
     ],
-    impact: { core: -0.1, dogemars: -0.13, enter: -0.08, medi: -0.07, sp500: -0.05, kospi: 0.01 },
+    impact: { core: -0.1, dogemars: -0.13, enter: -0.08, sp500: -0.05, kospi: 0.01 },
   },
   {
     id: 'drug-breakthrough',
@@ -1692,7 +1685,6 @@ const scenarioEvents = [
         failureDetail: '경기 둔화 신호가 나오며 긴축 장기화 전망이 약해졌습니다.',
       },
     ],
-    baseRateDelta: 0.3,
     impact: { usBond: -0.12, sp500: -0.06, core: -0.07, dogemars: -0.11, enter: -0.05, argBond: -0.08, bank: 0.04, riverbank: 0.03 },
   },
   {
@@ -1723,7 +1715,6 @@ const scenarioEvents = [
         failureDetail: '연준 인사들의 매파적 발언으로 채권시장 안도감이 줄었습니다.',
       },
     ],
-    baseRateDelta: -0.2,
     impact: { usBond: 0.14, sp500: 0.06, core: 0.07, dogemars: 0.1, enter: 0.04, argBond: 0.06, bank: -0.03, riverbank: -0.03 },
   },
   {
@@ -2014,7 +2005,7 @@ const scenarioEvents = [
     title: '환율 1,600원 돌파 → 외환당국 시장 개입',
     detail: '원화 약세가 심화되자 외환보유고를 동원한 시장 안정화에 들어갔습니다.',
     principle: '환율이 급등하면 외환당국은 보유한 달러를 풀어 환율을 진정시킵니다.',
-    affectedAssets: ['환율 단기 하락', '항공/수입주 회복', '신흥국 채권 안정', '미국 ETF 환차익 축소'],
+    affectedAssets: ['환율 단기 하락', '항공/수입주 회복', '국내 지수 안정', '미국 ETF 환차익 축소'],
     discussionPrompt: '외환보유고를 사용해 환율을 막는 정책의 한계는 무엇일까요?',
     issueOptions: [
       {
@@ -2024,7 +2015,7 @@ const scenarioEvents = [
         failureDetail: '시장 압력이 강해 개입 효과가 오래가지 않았습니다.',
       },
     ],
-    impact: { usdKrw: -0.05, air: 0.06, oceanair: 0.07, food: 0.03, purefood: 0.03, kospi: 0.02, sp500: -0.03, argBond: -0.04 },
+    impact: { usdKrw: -0.05, air: 0.06, oceanair: 0.07, food: 0.03, purefood: 0.03, kospi: 0.02, sp500: -0.03 },
   },
   {
     id: 'realty-cooling-policy',
@@ -2179,29 +2170,13 @@ function getPassiveMarketMove(asset, volatilityMode = 'standard') {
   return Number(raw.toFixed(3));
 }
 
-function getImpactBounds(asset, absoluteImpact) {
-  const isDirectAsset = absoluteImpact >= DIRECT_REPEATED_IMPACT_THRESHOLD;
-  if (!asset) return { min: isDirectAsset ? MIN_EVENT_IMPACT : 0.03, max: isDirectAsset ? 0.28 : 0.08 };
-  if (asset.type === 'stock' || asset.type === 'futures') {
-    return isDirectAsset ? { min: MIN_EVENT_IMPACT, max: 0.32 } : { min: 0.03, max: 0.08 };
-  }
-  if (asset.type === 'etf') {
-    return isDirectAsset ? { min: 0.05, max: 0.12 } : { min: 0.015, max: 0.055 };
-  }
-  if (asset.type === 'bond' || asset.type === 'property') {
-    return isDirectAsset ? { min: 0.04, max: 0.1 } : { min: 0.015, max: 0.05 };
-  }
-  return { min: 0.03, max: 0.08 };
-}
-
-function getRepeatedImpactBounds(asset, repeatedFloor, absoluteImpact) {
-  const isDirectAsset = absoluteImpact >= DIRECT_REPEATED_IMPACT_THRESHOLD;
-  if (isDirectAsset && (asset?.type === 'stock' || asset?.type === 'futures')) {
-    return { min: repeatedFloor, max: 0.95 };
-  }
-  if (isDirectAsset && asset?.type === 'etf') return { min: 0.08, max: Math.min(0.22, repeatedFloor * 0.28) };
-  if (isDirectAsset && (asset?.type === 'bond' || asset?.type === 'property')) return { min: 0.06, max: Math.min(0.18, repeatedFloor * 0.22) };
-  return { min: MIN_INDIRECT_REPEATED_EVENT_IMPACT, max: MAX_INDIRECT_REPEATED_EVENT_IMPACT };
+function getQuarterlyEventCap(asset, repeated = false) {
+  if (asset?.type === 'stock') return repeated ? 0.65 : 0.4;
+  if (asset?.type === 'futures') return repeated ? 0.8 : 0.5;
+  if (asset?.type === 'etf') return repeated ? 0.3 : 0.18;
+  if (asset?.type === 'bond' || asset?.type === 'property') return repeated ? 0.4 : 0.28;
+  if (asset?.type === 'forex') return repeated ? 0.25 : 0.18;
+  return repeated ? 0.5 : 0.35;
 }
 
 function normalizeEventImpact(impact = {}, assets = []) {
@@ -2211,30 +2186,27 @@ function normalizeEventImpact(impact = {}, assets = []) {
       if (value === 0) return [assetId, 0];
       const direction = value > 0 ? 1 : -1;
       const absoluteImpact = Math.abs(value);
-      const { min, max } = getImpactBounds(assetMap[assetId], absoluteImpact);
-      const adjustedValue = direction * clampNumber(absoluteImpact, min, max);
+      const max = getQuarterlyEventCap(assetMap[assetId]);
+      const adjustedValue = direction * clampNumber(absoluteImpact, 0, max);
       return [assetId, Number(adjustedValue.toFixed(3))];
     }),
   );
 }
 
-function getRepeatedImpactFloor(count) {
-  if (count >= 4) return MIN_EXTREME_EVENT_IMPACT;
-  if (count >= 3) return MIN_TRIPLE_EVENT_IMPACT;
-  return MIN_REPEATED_EVENT_IMPACT;
+function getRepeatedImpactMultiplier(count) {
+  if (count <= 1) return 1;
+  if (REPEATED_EVENT_MULTIPLIERS[count]) return REPEATED_EVENT_MULTIPLIERS[count];
+  return REPEATED_EVENT_MULTIPLIERS[4] + (count - 4) * 0.4;
 }
 
 function normalizeRepeatedEventImpact(impact = {}, repeatedCount = 2, assets = []) {
-  const repeatedFloor = getRepeatedImpactFloor(repeatedCount);
   const assetMap = Object.fromEntries(assets.map((asset) => [asset.id, asset]));
+  const multiplier = getRepeatedImpactMultiplier(repeatedCount);
   return Object.fromEntries(
     Object.entries(impact).map(([assetId, value]) => {
       if (value === 0) return [assetId, 0];
-      const direction = value > 0 ? 1 : -1;
-      const absoluteImpact = Math.abs(value);
-      const { min, max } = getRepeatedImpactBounds(assetMap[assetId], repeatedFloor, absoluteImpact);
-      const adjustedValue = clampNumber(absoluteImpact, min, max);
-      return [assetId, Number((direction * adjustedValue).toFixed(3))];
+      const max = getQuarterlyEventCap(assetMap[assetId], true);
+      return [assetId, Number(clampNumber(value * multiplier, -max, max).toFixed(3))];
     }),
   );
 }
@@ -2249,24 +2221,24 @@ function getAppliedEventTypeCounts(events) {
 }
 
 const eventMacroImpacts = {
-  'rate-up': { baseRateDelta: 0.5, propertyMove: -0.04, exchangeMove: 0.01, unemploymentDelta: 0.1 },
-  'rate-down': { baseRateDelta: -0.5, propertyMove: 0.04, exchangeMove: -0.01, unemploymentDelta: -0.08 },
-  'deposit-special': { baseRateDelta: 0.25, propertyMove: -0.02, exchangeMove: 0, unemploymentDelta: 0.02 },
+  'rate-up': { baseRateDelta: 0.5, propertyMove: -0.04, exchangeMove: -0.01, unemploymentDelta: 0.1 },
+  'rate-down': { baseRateDelta: -0.5, propertyMove: 0.04, exchangeMove: 0.01, unemploymentDelta: -0.08 },
+  'deposit-special': { baseRateDelta: 0, propertyMove: -0.005, exchangeMove: 0, unemploymentDelta: 0 },
   'growth-boom': { baseRateDelta: 0.25, propertyMove: 0.035, exchangeMove: -0.01, unemploymentDelta: -0.18 },
   'recession-risk': { baseRateDelta: -0.15, propertyMove: -0.04, exchangeMove: 0.015, unemploymentDelta: 0.22 },
   'jobs-improve': { baseRateDelta: 0.15, propertyMove: 0.025, exchangeMove: -0.005, unemploymentDelta: -0.25 },
   'unemployment-worse': { baseRateDelta: -0.1, propertyMove: -0.035, exchangeMove: 0.015, unemploymentDelta: 0.3 },
   'inflation-cool': { baseRateDelta: -0.25, propertyMove: 0.02, exchangeMove: -0.01, unemploymentDelta: -0.04 },
   'inflation-rebound': { baseRateDelta: 0.3, propertyMove: -0.025, exchangeMove: 0.015, unemploymentDelta: 0.06 },
-  'fx-stabilize': { baseRateDelta: -0.05, propertyMove: 0.01, exchangeMove: -0.035, unemploymentDelta: -0.04 },
-  'fx-volatility': { baseRateDelta: 0.05, propertyMove: -0.015, exchangeMove: 0.045, unemploymentDelta: 0.06 },
+  'fx-stabilize': { baseRateDelta: 0, propertyMove: 0.01, exchangeMove: -0.035, unemploymentDelta: -0.04 },
+  'fx-volatility': { baseRateDelta: 0, propertyMove: -0.015, exchangeMove: 0.045, unemploymentDelta: 0.06 },
   'property-ease': { baseRateDelta: 0, propertyMove: 0.06, exchangeMove: 0, unemploymentDelta: -0.05 },
   'property-tighten': { baseRateDelta: 0.05, propertyMove: -0.06, exchangeMove: 0.005, unemploymentDelta: 0.06 },
   'us-rally': { baseRateDelta: 0, propertyMove: 0.01, exchangeMove: -0.015, unemploymentDelta: -0.08 },
-  'korea-export': { baseRateDelta: 0.05, propertyMove: 0.01, exchangeMove: -0.01, unemploymentDelta: -0.12 },
+  'korea-export': { baseRateDelta: 0, propertyMove: 0.01, exchangeMove: -0.01, unemploymentDelta: -0.12 },
   rare: { baseRateDelta: 0, propertyMove: -0.01, exchangeMove: 0.02, unemploymentDelta: 0.05 },
   housing: { baseRateDelta: 0, propertyMove: 0.04, exchangeMove: 0, unemploymentDelta: -0.08 },
-  'green-subsidy': { baseRateDelta: -0.05, propertyMove: 0.01, exchangeMove: -0.005, unemploymentDelta: -0.04 },
+  'green-subsidy': { baseRateDelta: 0, propertyMove: 0.01, exchangeMove: -0.005, unemploymentDelta: -0.04 },
   'us-regulation': { baseRateDelta: 0, propertyMove: -0.01, exchangeMove: 0.01, unemploymentDelta: 0.08 },
   'drug-breakthrough': { baseRateDelta: 0, propertyMove: 0, exchangeMove: 0, unemploymentDelta: -0.03 },
   'drug-setback': { baseRateDelta: 0, propertyMove: -0.005, exchangeMove: 0.005, unemploymentDelta: 0.03 },
@@ -2342,50 +2314,23 @@ function combineResolvedImpacts(events) {
   }, {});
 }
 
-function getDirectImpactFloorMap(events, assets = []) {
-  const assetMap = Object.fromEntries(assets.map((asset) => [asset.id, asset]));
-  return events.reduce((acc, event) => {
-    const isReverse = event.outcomeType === 'reverse';
-    if ((!event.didApply && !isReverse) || isReverse) return acc;
-    const eventMultiplier = event.outcomeType === 'expectation' ? EXPECTATION_IMPACT_MULTIPLIER : 1;
-
-    Object.entries(event.impact ?? {}).forEach(([assetId, value]) => {
-      if (!value) return;
-      const absoluteImpact = Math.abs(value);
-      if (absoluteImpact < DIRECT_REPEATED_IMPACT_THRESHOLD) return;
-
-      const asset = assetMap[assetId];
-      const bounds = event.repeatedVolatility
-        ? getRepeatedImpactBounds(asset, getRepeatedImpactFloor(event.repeatedCount ?? 2), absoluteImpact)
-        : getImpactBounds(asset, absoluteImpact);
-      const direction = value > 0 ? 1 : -1;
-      const floor = Number((bounds.min * eventMultiplier).toFixed(3));
-      const current = acc[assetId] ?? { signs: new Set(), floorBySign: { 1: 0, '-1': 0 } };
-      current.signs.add(direction);
-      current.floorBySign[direction] = Math.max(current.floorBySign[direction] ?? 0, floor);
-      acc[assetId] = current;
-    });
-
-    return acc;
-  }, {});
+function getQuarterlyCombinedImpactCap(asset) {
+  if (asset?.type === 'stock') return asset.size === 'small' ? 0.85 : 0.6;
+  if (asset?.type === 'futures') return 0.85;
+  if (asset?.type === 'etf') return 0.4;
+  if (asset?.type === 'bond' || asset?.type === 'property') return 0.45;
+  if (asset?.type === 'forex') return 0.3;
+  return 0.6;
 }
 
-function enforceDirectImpactFloors(impactMap = {}, events = [], assets = []) {
-  const floorMap = getDirectImpactFloorMap(events, assets);
-  const nextImpact = { ...impactMap };
-
-  Object.entries(floorMap).forEach(([assetId, { signs, floorBySign }]) => {
-    if (signs.size !== 1) return;
-    const [direction] = [...signs];
-    const floor = floorBySign[direction] ?? 0;
-    const current = nextImpact[assetId] ?? 0;
-    const currentDirection = getMoveDirection(current);
-    if (currentDirection !== 0 && currentDirection !== direction) return;
-    if (Math.abs(current) >= floor) return;
-    nextImpact[assetId] = Number((direction * floor).toFixed(3));
-  });
-
-  return nextImpact;
+function clampQuarterlyImpactMap(impactMap = {}, assets = []) {
+  const assetMap = Object.fromEntries(assets.map((asset) => [asset.id, asset]));
+  return Object.fromEntries(
+    Object.entries(impactMap).map(([assetId, value]) => {
+      const cap = getQuarterlyCombinedImpactCap(assetMap[assetId]);
+      return [assetId, Number(clampNumber(value, -cap, cap).toFixed(3))];
+    }),
+  );
 }
 
 // 사이즈 팩터: 우량주 vs 중소형주 — 같은 이슈에 다른 진폭으로 반응
@@ -2451,10 +2396,10 @@ function getRandomMacroDelta(max, decimals = 2) {
   return Number(((Math.random() * 2 - 1) * max).toFixed(decimals));
 }
 
-function getMoveDirection(value, threshold = 0) {
-  if (value > threshold) return 1;
-  if (value < -threshold) return -1;
-  return 0;
+function getScaledMacroImpact(value, referenceMove, positiveEffect, negativeEffect = -positiveEffect) {
+  if (!value || !referenceMove) return 0;
+  const scale = clampNumber(Math.abs(value) / referenceMove, 0, 2);
+  return Number(((value > 0 ? positiveEffect : negativeEffect) * scale).toFixed(4));
 }
 
 function createMacroMove({ baseRate, propertyIndex, exchangeRate, unemploymentRate, eventMacroImpact = {}, randomMacroImpact = null }) {
@@ -2470,40 +2415,46 @@ function createMacroMove({ baseRate, propertyIndex, exchangeRate, unemploymentRa
   const nextPropertyIndex = Math.max(80, Math.round(propertyIndex * (1 + propertyMove)));
   const nextExchangeRate = Math.max(900, Math.round(exchangeRate * (1 + exchangeMove)));
   const nextUnemploymentRate = clampNumber(Number((unemploymentRate + unemploymentDelta).toFixed(2)), 1.5, 14);
-  const rateDirection = getMoveDirection(baseRateDelta);
-  const exchangeDirection = getMoveDirection(exchangeMove);
-  const unemploymentDirection = getMoveDirection(unemploymentDelta);
   const assetImpact = {
-    bank: rateDirection > 0 ? 0.03 : rateDirection < 0 ? -0.03 : 0,
-    riverbank: rateDirection > 0 ? 0.025 : rateDirection < 0 ? -0.025 : 0,
-    neo: rateDirection > 0 ? -0.03 : rateDirection < 0 ? 0.03 : 0,
-    core: rateDirection > 0 ? -0.03 : rateDirection < 0 ? 0.03 : 0,
-    dogemars: rateDirection > 0 ? -0.035 : rateDirection < 0 ? 0.035 : 0,
-    bio: rateDirection > 0 ? -0.025 : rateDirection < 0 ? 0.025 : 0,
-    enter: rateDirection > 0 ? -0.03 : rateDirection < 0 ? 0.03 : 0,
-    realty: propertyMove * 0.8 + (rateDirection > 0 ? -0.03 : rateDirection < 0 ? 0.03 : 0),
+    bank: getScaledMacroImpact(baseRateDelta, 0.5, 0.03, -0.03),
+    riverbank: getScaledMacroImpact(baseRateDelta, 0.5, 0.025, -0.025),
+    neo: getScaledMacroImpact(baseRateDelta, 0.5, -0.03, 0.03),
+    core: getScaledMacroImpact(baseRateDelta, 0.5, -0.03, 0.03),
+    dogemars: getScaledMacroImpact(baseRateDelta, 0.5, -0.035, 0.035),
+    bio: getScaledMacroImpact(baseRateDelta, 0.5, -0.025, 0.025),
+    enter: getScaledMacroImpact(baseRateDelta, 0.5, -0.03, 0.03),
+    realty: propertyMove * 0.8 + getScaledMacroImpact(baseRateDelta, 0.5, -0.03, 0.03),
     infra: propertyMove * 0.5,
     metroinfra: propertyMove * 0.65,
     sp500: exchangeMove * 0.8,
-    // KOSPI: 환율 상승 시 외국인 자금 유출로 하락 압력 (정석)
-    kospi: exchangeDirection > 0 ? -0.02 : exchangeDirection < 0 ? 0.02 : 0,
-    air: exchangeDirection > 0 ? -0.04 : exchangeDirection < 0 ? 0.03 : 0,
-    oceanair: exchangeDirection > 0 ? -0.05 : exchangeDirection < 0 ? 0.035 : 0,
-    food: exchangeDirection > 0 ? -0.03 : exchangeDirection < 0 ? 0.02 : 0,
-    purefood: exchangeDirection > 0 ? -0.02 : exchangeDirection < 0 ? 0.015 : 0,
+    // 환율 4% 변화를 기준 충격으로 삼아 작은 변화는 비례 축소한다.
+    kospi: getScaledMacroImpact(exchangeMove, 0.04, -0.02, 0.02),
+    air: getScaledMacroImpact(exchangeMove, 0.04, -0.04, 0.03),
+    oceanair: getScaledMacroImpact(exchangeMove, 0.04, -0.05, 0.035),
+    food: getScaledMacroImpact(exchangeMove, 0.04, -0.03, 0.02),
+    purefood: getScaledMacroImpact(exchangeMove, 0.04, -0.02, 0.015),
     // 채권: 금리 변동에 선형 비례 직접 충격 (금리 +0.5%p → 채권 -4%)
     usBond: -baseRateDelta * 0.08,
-    argBond: -baseRateDelta * 0.05 + (exchangeDirection > 0 ? -0.04 : exchangeDirection < 0 ? 0.02 : 0),
+    // 아르헨티나 국채는 한국 원/달러 환율이 아니라 금리·신용 이슈에 반응한다.
+    argBond: -baseRateDelta * 0.05,
     // 금: 실질금리 ↑ 시 약세, 환율 변동성 보호
-    goldFut: -baseRateDelta * 0.04 + (exchangeDirection > 0 ? 0.02 : exchangeDirection < 0 ? -0.01 : 0),
+    goldFut: -baseRateDelta * 0.04 + getScaledMacroImpact(exchangeMove, 0.04, 0.02, -0.01),
     // USD/KRW: 환율 변화 직접 추종
     usdKrw: exchangeMove * 1.0,
   };
-  const unemploymentImpact = unemploymentDirection > 0
-    ? { air: -0.03, oceanair: -0.04, enter: -0.03, realty: -0.025, infra: -0.02, metroinfra: -0.03, bank: -0.015, riverbank: -0.02, usBond: 0.02, food: 0.01, purefood: 0.015 }
-    : unemploymentDirection < 0
-      ? { air: 0.025, oceanair: 0.03, enter: 0.025, realty: 0.02, infra: 0.018, metroinfra: 0.02, bank: 0.012, riverbank: 0.012, usBond: -0.01 }
-      : {};
+  const unemploymentImpact = unemploymentDelta === 0 ? {} : {
+    air: getScaledMacroImpact(unemploymentDelta, 0.25, -0.03, 0.025),
+    oceanair: getScaledMacroImpact(unemploymentDelta, 0.25, -0.04, 0.03),
+    enter: getScaledMacroImpact(unemploymentDelta, 0.25, -0.03, 0.025),
+    realty: getScaledMacroImpact(unemploymentDelta, 0.25, -0.025, 0.02),
+    infra: getScaledMacroImpact(unemploymentDelta, 0.25, -0.02, 0.018),
+    metroinfra: getScaledMacroImpact(unemploymentDelta, 0.25, -0.03, 0.02),
+    bank: getScaledMacroImpact(unemploymentDelta, 0.25, -0.015, 0.012),
+    riverbank: getScaledMacroImpact(unemploymentDelta, 0.25, -0.02, 0.012),
+    usBond: getScaledMacroImpact(unemploymentDelta, 0.25, 0.02, -0.01),
+    food: getScaledMacroImpact(unemploymentDelta, 0.25, 0.01, 0),
+    purefood: getScaledMacroImpact(unemploymentDelta, 0.25, 0.015, 0),
+  };
 
   return {
     baseRateDelta,
@@ -2532,6 +2483,35 @@ function combineImpacts(...impacts) {
     });
     return acc;
   }, {});
+}
+
+function getDirectlyAffectedAssetIds(events = []) {
+  return new Set(
+    events.flatMap((event) => {
+      const isReverse = event.outcomeType === 'reverse';
+      if (!event.didApply && !isReverse) return [];
+      return Object.entries(event.resolvedImpact ?? {})
+        .filter(([, value]) => Number(value) !== 0)
+        .map(([assetId]) => assetId);
+    }),
+  );
+}
+
+function excludeDirectAssetMacroImpact(macroImpact = {}, directAssetIds = new Set()) {
+  return Object.fromEntries(
+    Object.entries(macroImpact).filter(([assetId, value]) => !directAssetIds.has(assetId) && value !== 0),
+  );
+}
+
+function limitFinancialImpactAgainstDirect(financialImpact = {}, directImpact = {}, directAssetIds = new Set()) {
+  return Object.fromEntries(
+    Object.entries(financialImpact).map(([assetId, value]) => {
+      if (!directAssetIds.has(assetId)) return [assetId, value];
+      const directMagnitude = Math.abs(directImpact[assetId] ?? 0);
+      const cap = Math.max(0.005, directMagnitude * 0.35);
+      return [assetId, Number(clampNumber(value, -cap, cap).toFixed(3))];
+    }),
+  );
 }
 
 function getFinancialSensitivityImpact(asset, macroMove, resolvedEvents) {
@@ -2637,7 +2617,25 @@ function updateAssetFinancials(asset, totalImpact, macroMove) {
   };
 }
 
-function moveAssetsLocally(currentAssets, modifier = {}, delistedIds = [], roundNumber = 1, macroMove = null, negativeStreakByAsset = {}, volatilityMode = 'standard') {
+function buildImpactBreakdown(assets, directImpact, macroImpact, financialImpact, passiveImpact) {
+  return Object.fromEntries(
+    assets.map((asset) => {
+      const direct = Number(directImpact[asset.id] ?? 0);
+      const macro = Number(macroImpact[asset.id] ?? 0);
+      const financial = Number(financialImpact[asset.id] ?? 0);
+      const passive = Number(passiveImpact[asset.id] ?? 0);
+      return [asset.id, {
+        direct,
+        macro,
+        financial,
+        passive,
+        total: Number((direct + macro + financial + passive).toFixed(4)),
+      }];
+    }),
+  );
+}
+
+function moveAssetsLocally(currentAssets, modifier = {}, delistedIds = [], roundNumber = 1, macroMove = null, negativeStreakByAsset = {}, volatilityMode = 'standard', passiveImpactMap = null) {
   return currentAssets.map((asset) => {
     if (asset.delisted) return asset;
     if (delistedIds.includes(asset.id)) {
@@ -2651,7 +2649,7 @@ function moveAssetsLocally(currentAssets, modifier = {}, delistedIds = [], round
       };
     }
     const eventImpact = modifier[asset.id] ?? 0;
-    const marketMove = getPassiveMarketMove(asset, volatilityMode);
+    const marketMove = passiveImpactMap?.[asset.id] ?? getPassiveMarketMove(asset, volatilityMode);
     const nextPrice = Math.max(1000, Math.round((asset.price * (1 + marketMove + eventImpact)) / 100) * 100);
     return {
       ...asset,
@@ -2932,26 +2930,70 @@ function runRegressionChecks({ round, phase, gameStarted, salaryPaidRounds, trad
     }
   }
 
-  // (8) 직접 영향 최소폭 검사 — 대형주 보정·시드 보정 뒤에도 직접 이슈가 너무 작아지지 않는지 확인
+  // (8) 직접 영향 연속성 검사 — 7%와 8% 사이에 비정상적인 최소폭 점프가 없어야 함
   {
     const testAssets = assets?.length ? assets : createRandomizedAssets();
-    const actualFloor = enforceDirectImpactFloors(
-      { core: -0.08 },
-      [{ id: 'rate-up-test', didApply: true, outcomeType: 'event', impact: { core: -0.12 }, resolvedImpact: { core: -0.15 } }],
-      testAssets,
-    );
-    const expectationFloor = enforceDirectImpactFloors(
-      { core: -0.07 },
-      [{ id: 'rate-up-test-expectation', didApply: true, outcomeType: 'expectation', impact: { core: -0.12 }, resolvedImpact: { core: -0.105 } }],
-      testAssets,
-    );
-    const actualOk = Math.abs(actualFloor.core ?? 0) >= MIN_EVENT_IMPACT;
-    const expectationOk = Math.abs(expectationFloor.core ?? 0) >= MIN_EVENT_IMPACT * EXPECTATION_IMPACT_MULTIPLIER;
-    if (actualOk && expectationOk) {
-      checks.push({ id: 'direct-floor', label: '직접 영향 최소폭', status: 'ok', detail: `실제 ${formatPercent((actualFloor.core ?? 0) * 100)}, 기대감 ${formatPercent((expectationFloor.core ?? 0) * 100)}` });
+    const seven = applySizeFactor(normalizeEventImpact({ core: 0.07 }, testAssets), testAssets).core;
+    const eight = applySizeFactor(normalizeEventImpact({ core: 0.08 }, testAssets), testAssets).core;
+    const continuous = eight > seven && Math.abs(eight - seven) <= 0.02;
+    if (continuous) {
+      checks.push({ id: 'impact-continuity', label: '직접 영향 연속성', status: 'ok', detail: `7%→${formatPercent(seven * 100)}, 8%→${formatPercent(eight * 100)}` });
     } else {
-      checks.push({ id: 'direct-floor', label: '직접 영향 최소폭', status: 'fail', detail: `실제 ${actualFloor.core}, 기대감 ${expectationFloor.core}` });
+      checks.push({ id: 'impact-continuity', label: '직접 영향 연속성', status: 'fail', detail: `7%=${seven}, 8%=${eight}` });
     }
+  }
+
+  // (9) 반복 이슈 비례 검사 — 원래 카드 강도를 보존하면서 완만하게 확대되어야 함
+  {
+    const testAssets = assets?.length ? assets : createRandomizedAssets();
+    const once = normalizeEventImpact({ core: 0.12 }, testAssets).core;
+    const twice = normalizeRepeatedEventImpact({ core: 0.12 }, 2, testAssets).core;
+    const triple = normalizeRepeatedEventImpact({ core: 0.12 }, 3, testAssets).core;
+    const proportional = once < twice && twice < triple && twice < 0.5 && triple < 0.7;
+    checks.push({
+      id: 'repeated-proportional',
+      label: '반복 이슈 비례 확대',
+      status: proportional ? 'ok' : 'fail',
+      detail: `1회 ${formatPercent(once * 100)} → 2회 ${formatPercent(twice * 100)} → 3회 ${formatPercent(triple * 100)}`,
+    });
+  }
+
+  // (10) 거시 변화량 비례 검사 — 작은 변화와 큰 변화가 같은 충격을 만들면 안 됨
+  {
+    const macroFor = (baseRateDelta) => createMacroMove({
+      baseRate: INITIAL_BASE_RATE,
+      propertyIndex: 250000,
+      exchangeRate: 1350,
+      unemploymentRate: INITIAL_UNEMPLOYMENT_RATE,
+      eventMacroImpact: { baseRateDelta, propertyMove: 0, exchangeMove: 0, unemploymentDelta: 0 },
+      randomMacroImpact: { baseRateDelta: 0, propertyMove: 0, exchangeMove: 0, unemploymentDelta: 0 },
+    });
+    const small = Math.abs(macroFor(0.05).assetImpact.core ?? 0);
+    const large = Math.abs(macroFor(0.5).assetImpact.core ?? 0);
+    checks.push({
+      id: 'macro-proportional',
+      label: '거시 변화량 비례',
+      status: small > 0 && small < large ? 'ok' : 'fail',
+      detail: `금리 +0.05%p ${formatPercent(small * 100)} / +0.50%p ${formatPercent(large * 100)}`,
+    });
+  }
+
+  // (11) 상충 양쪽 동시 차단 방지 — 겹치는 정책 조합에서도 반대 카드가 모두 사라지면 안 됨
+  {
+    const conflictEvents = [
+      { id: 'test-rate-up', templateId: 'rate-up', title: '금리 인상', impact: { bank: 0.08 }, probability: 0.7 },
+      { id: 'test-rate-down', templateId: 'rate-down', title: '금리 인하', impact: { bank: -0.04 }, probability: 0.7 },
+      { id: 'test-property-ease', templateId: 'property-ease', title: '부동산 완화', impact: { realty: 0.09 }, probability: 0.7 },
+    ];
+    const outcome = getConflictOutcomeMap(conflictEvents);
+    const blockedRateCount = ['test-rate-up', 'test-rate-down'].filter((id) => outcome[id]?.blocked).length;
+    const hasWinnerMetadata = ['test-rate-up', 'test-rate-down'].some((id) => outcome[id] && !outcome[id].blocked);
+    checks.push({
+      id: 'conflict-single-winner',
+      label: '상충 단일 승자 보장',
+      status: blockedRateCount === 1 && hasWinnerMetadata ? 'ok' : 'fail',
+      detail: `금리 카드 차단 ${blockedRateCount}개 · 승자 설명 ${hasWinnerMetadata ? '있음' : '없음'}`,
+    });
   }
 
   return checks;
@@ -3219,6 +3261,331 @@ function getSimpleExplanation(event) {
   return explanations[getEventKey(event)] ?? '뉴스가 투자자의 기대를 바꾸면 가격도 움직일 수 있습니다.';
 }
 
+// 학생 몰입을 위한 수업용 가상 뉴스 취재 노트. 실존 언론사·인물의 보도가 아니며,
+// 등록된 세부 헤드라인과 결합해 학생 화면·교사 화면·라운드 해설에서 함께 사용한다.
+const eventNewsroomDetails = {
+  'rate-up': {
+    dateline: '서울 금융시장',
+    scene: '채권시장에서는 금리 상승을 반영한 매물이 늘었고, 은행 창구에는 예금금리를 묻는 문의가 이어졌습니다. 대출 의존도가 높은 성장기업과 부동산 관련주는 자금조달 부담을 먼저 반영하는 모습입니다.',
+    quote: '이번 결정은 단순히 예금 이자가 오르는 뉴스가 아니라, 기업과 가계가 앞으로 치러야 할 돈의 가격이 높아졌다는 뜻입니다.',
+    watch: '대출금리, 은행 예대마진, 주택 거래량, 성장기업 부채비율',
+  },
+  'rate-down': {
+    dateline: '서울 금융시장',
+    scene: '시장금리 하락 기대가 퍼지며 장기 자금을 많이 쓰는 성장기업과 부동산 관련 자산에 매수세가 유입됐습니다. 반면 은행주는 이자수익 둔화 가능성을 따져보는 분위기입니다.',
+    quote: '금리 인하는 모든 자산에 똑같은 호재가 아닙니다. 빚 부담이 줄어드는 기업과 이자수익이 줄어드는 금융회사의 표정이 다를 수 있습니다.',
+    watch: '기업대출 증가율, 주택담보대출, 은행 순이자마진, 소비심리',
+  },
+  'deposit-special': {
+    dateline: '시중은행 창구',
+    scene: '한정 판매 고금리 상품이 공개되자 만기를 앞둔 예금 자금과 투자 대기자금이 은행으로 이동했습니다. 증권시장에서는 위험자산에 들어올 신규 자금이 줄어들 수 있다는 경계가 나타났습니다.',
+    quote: '은행의 특판은 중앙은행의 기준금리 인상과 다릅니다. 다만 투자자가 비교하는 안전수익률을 높여 주식의 매력을 낮출 수 있습니다.',
+    watch: '특판 한도와 기간, 예금 잔액, 증시 고객예탁금, 은행 조달비용',
+  },
+  'growth-boom': {
+    dateline: '서울 산업·소비 현장',
+    scene: '유통·여행·설비투자 지표가 함께 개선되면서 기업들이 매출 전망을 높이기 시작했습니다. 안전자산보다 경기 회복의 혜택을 직접 받는 업종으로 자금이 옮겨가는 모습입니다.',
+    quote: '호황의 핵심은 뉴스 한 건이 아니라 소비, 고용, 투자가 같은 방향으로 움직이는지에 있습니다.',
+    watch: '소매판매, 설비투자, 기업이익 전망, 장기금리',
+  },
+  'recession-risk': {
+    dateline: '서울 경제부',
+    scene: '기업 주문과 소비 지표가 둔화했다는 소식에 경기민감 업종의 실적 전망이 낮아졌습니다. 투자자들은 현금흐름이 안정적인 자산과 국채로 이동할지를 검토하고 있습니다.',
+    quote: '침체 우려는 현재 매출보다 앞으로 주문이 줄어들 가능성을 먼저 가격에 반영하게 만듭니다.',
+    watch: '제조업 신규주문, 소비심리, 실업률, 기업 현금보유액',
+  },
+  'jobs-improve': {
+    dateline: '고용시장 현장',
+    scene: '채용 공고와 취업자 수가 늘면서 여행·외식·콘텐츠 소비가 회복될 것이란 전망이 나왔습니다. 은행권도 가계의 대출 상환 능력이 개선될지 주목하고 있습니다.',
+    quote: '고용이 늘면 월급을 받는 가구가 많아지고, 그 소득이 다시 소비와 기업 매출로 이어질 수 있습니다.',
+    watch: '취업자 수, 임금상승률, 카드 사용액, 연체율',
+  },
+  'unemployment-worse': {
+    dateline: '고용시장 현장',
+    scene: '채용 축소와 실업률 상승 소식에 소비 관련 기업의 매출 전망이 낮아졌습니다. 금융시장에서는 가계대출 연체와 부동산 거래 위축 가능성까지 함께 점검하는 분위기입니다.',
+    quote: '실업률은 한 사람의 일자리 문제를 넘어 소비, 대출 상환, 기업 매출을 연결하는 경기 신호입니다.',
+    watch: '실업급여 신청, 소매판매, 가계대출 연체율, 주택 거래량',
+  },
+  'inflation-cool': {
+    dateline: '물가·채권시장',
+    scene: '원재료와 서비스 가격 상승세가 둔화했다는 발표 뒤 추가 금리 인상 우려가 낮아졌습니다. 채권과 성장주에서는 미래 이익의 현재가치를 다시 높게 평가하려는 움직임이 나타났습니다.',
+    quote: '물가가 안정되면 기업 원가뿐 아니라 시장이 적용하는 할인율도 낮아질 수 있습니다.',
+    watch: '소비자물가, 근원물가, 국채금리, 원자재 가격',
+  },
+  'inflation-rebound': {
+    dateline: '물가·채권시장',
+    scene: '에너지와 생활물가가 다시 오르면서 기업의 비용 부담과 추가 긴축 우려가 동시에 커졌습니다. 원가를 판매가격에 전가하기 어려운 기업부터 실적 전망이 흔들리고 있습니다.',
+    quote: '물가 재상승은 비용 증가와 높은 금리라는 두 경로로 기업가치를 압박할 수 있습니다.',
+    watch: '에너지 가격, 근원물가, 기준금리 전망, 기업 영업이익률',
+  },
+  'fx-stabilize': {
+    dateline: '서울 외환시장',
+    scene: '원/달러 환율의 급한 움직임이 진정되면서 달러로 원재료를 사는 항공·식품 기업의 비용 불안이 줄었습니다. 외국인 투자자도 환차손 위험을 다시 계산하고 있습니다.',
+    quote: '환율 안정은 방향보다 예측 가능성이 높아졌다는 점이 중요합니다. 기업이 가격과 비용 계획을 세우기 쉬워집니다.',
+    watch: '원/달러 변동폭, 외국인 순매수, 수입단가, 달러 부채',
+  },
+  'fx-volatility': {
+    dateline: '서울 외환시장',
+    scene: '환율이 짧은 시간에 크게 출렁이자 수출기업과 수입기업의 희비가 엇갈렸습니다. 항공·식품업체는 비용 추정이 어려워졌고 외국인 자금 흐름도 불안정해졌습니다.',
+    quote: '환율은 오르느냐 내리느냐뿐 아니라 얼마나 빠르게 움직이느냐도 기업 실적에 영향을 줍니다.',
+    watch: '환율 일중 변동폭, 외국인 자금, 수출비중, 원재료 수입비중',
+  },
+  'property-ease': {
+    dateline: '주택·건설시장',
+    scene: '대출과 거래 규제 완화 기대에 매수 문의가 늘고 건설사의 신규 사업 전망도 개선됐습니다. 은행권은 주택담보대출 수요가 실제 계약으로 이어질지 살피고 있습니다.',
+    quote: '규제 완화 발표만으로 가격이 오를 수 있지만, 거래량과 대출 실행이 뒤따라야 흐름이 오래갑니다.',
+    watch: '주택 거래량, 미분양, 주택담보대출, 건설사 수주잔고',
+  },
+  'property-tighten': {
+    dateline: '주택·건설시장',
+    scene: '대출 한도 축소와 세금 부담 우려로 매수자들이 계약을 미루기 시작했습니다. 건설·인프라 기업은 분양과 신규 수주가 늦어질 가능성을 반영하고 있습니다.',
+    quote: '부동산 규제는 가격보다 거래량을 먼저 줄일 수 있고, 그 충격이 건설과 금융으로 이어질 수 있습니다.',
+    watch: '거래량, 미분양, 대출 승인액, 건설사 현금흐름',
+  },
+  'us-rally': {
+    dateline: '뉴욕 증시 마감',
+    scene: '미국 대형 기술주에 매수세가 몰리며 대표지수가 강세를 보였고, 아시아 시장에도 위험자산 선호가 번졌습니다. 다만 상승이 일부 대형 종목에 집중됐는지가 변수로 남았습니다.',
+    quote: '지수가 올랐다는 사실과 시장 전체 기업의 실적이 좋아졌다는 것은 같은 말이 아닙니다.',
+    watch: '상승 종목 수, 대형 기술주 비중, 미국 국채금리, 원/달러 환율',
+  },
+  'korea-export': {
+    dateline: '부산항·수출 산업',
+    scene: '반도체·자동차·배터리 수출 주문이 늘었다는 소식에 국내 제조업의 매출 회복 기대가 커졌습니다. 물동량 증가가 은행 대출과 설비투자로 이어질지도 관심입니다.',
+    quote: '수출 금액뿐 아니라 판매량, 환율, 원가를 함께 봐야 기업의 실제 이익 증가를 판단할 수 있습니다.',
+    watch: '수출 물량, 무역수지, 원/달러 환율, 제조업 영업이익률',
+  },
+  rare: {
+    dateline: '글로벌 공급망',
+    scene: '핵심 광물의 수출 허가가 늦어지면서 반도체·전기차·재생에너지 기업들이 재고 확보에 나섰습니다. 대체 공급처를 구하지 못한 기업은 생산 차질과 원가 상승을 동시에 걱정하고 있습니다.',
+    quote: '작은 비중의 원재료라도 대체가 어렵다면 완제품 생산 전체를 멈추게 할 수 있습니다.',
+    watch: '핵심 광물 재고, 대체 공급 계약, 소재 가격, 기업 원자재 의존도',
+  },
+  housing: {
+    dateline: '정부 예산·건설 현장',
+    scene: '도로·철도·데이터센터 사업 일정이 공개되자 관련 건설사와 설비기업의 수주 기대가 높아졌습니다. 시장은 발표된 예산이 실제 발주와 공사로 이어지는 속도를 살피고 있습니다.',
+    quote: '예산 발표는 출발점입니다. 기업 실적에는 수주, 착공, 대금 지급이 차례로 확인돼야 합니다.',
+    watch: '예산 집행률, 신규 수주, 착공 일정, 원자재·인건비',
+  },
+  'green-subsidy': {
+    dateline: '친환경 산업 현장',
+    scene: '전기차와 재생에너지 지원 확대 논의에 설비·배터리 수요 기대가 커졌습니다. 반대로 화석연료 관련 기업은 장기 수요 감소 가능성을 가격에 반영하기 시작했습니다.',
+    quote: '보조금은 수요를 앞당길 수 있지만, 지원 기간과 기업의 원가 경쟁력이 함께 확인돼야 합니다.',
+    watch: '지원 대상과 기간, 전기차 판매량, 설비 수주, 정책 종료 후 수익성',
+  },
+  'us-regulation': {
+    dateline: '워싱턴·뉴욕',
+    scene: '반독점과 AI 규제 논의가 확대되자 미국 기술기업의 법률 비용과 사업 확장 속도에 대한 우려가 커졌습니다. 투자자들은 법안의 적용 대상과 시행 시점을 구분해 보고 있습니다.',
+    quote: '규제 논의와 실제 시행 사이에는 시간이 있습니다. 어떤 기업의 어떤 사업이 대상인지가 주가 반응을 가릅니다.',
+    watch: '법안 적용 대상, 시행 시점, 규제 대응 비용, 미국 기술주 비중',
+  },
+  'drug-breakthrough': {
+    dateline: '바이오 연구 현장',
+    scene: '임상 데이터와 승인 기대가 알려지자 아직 매출이 크지 않은 바이오 기업에 매수세가 몰렸습니다. 시장은 보도자료 제목보다 환자 수와 부작용, 통계적 유의성을 확인하려 하고 있습니다.',
+    quote: '신약 뉴스는 성공 확률과 성공했을 때의 시장 규모가 동시에 가격에 반영됩니다.',
+    watch: '임상 단계, 환자 수, 효능·부작용, 승인 일정과 현금보유액',
+  },
+  'drug-setback': {
+    dateline: '바이오 연구 현장',
+    scene: '임상 일정 지연과 안전성 우려가 나오며 미래 매출 기대가 빠르게 낮아졌습니다. 추가 시험 비용이 늘 경우 기업이 새 자금을 조달해야 할 가능성도 제기됐습니다.',
+    quote: '매출이 아직 없는 바이오 기업은 한 번의 임상 결과가 기업가치 대부분을 바꿀 수 있습니다.',
+    watch: '실패 원인, 추가 임상 비용, 현금 소진 속도, 대체 후보물질',
+  },
+  'fx-spike': {
+    dateline: '서울 외환시장 긴급판',
+    scene: '원/달러 환율이 급등하자 달러 매출이 많은 수출기업과 달러 비용이 큰 항공·식품기업의 주가가 엇갈렸습니다. 해외자산의 원화 환산가치도 빠르게 변했습니다.',
+    quote: '환율 급등은 수출기업에 무조건 호재가 아닙니다. 원재료와 달러 부채까지 함께 계산해야 합니다.',
+    watch: '달러 매출·비용, 외화부채, 항공유 가격, 외국인 자금 유출',
+  },
+  'korea-us-chip-tension': {
+    dateline: '서울·워싱턴 공급망',
+    scene: '반도체 장비와 보조금 조건을 둘러싼 갈등으로 기업들의 투자 일정이 불투명해졌습니다. 어느 국가의 생산시설과 고객에 노출돼 있는지에 따라 종목별 반응이 달라졌습니다.',
+    quote: '반도체 갈등은 기술력뿐 아니라 생산지역, 장비 공급, 정부 보조금 조건을 함께 봐야 합니다.',
+    watch: '수출 제한 품목, 생산지역, 장비 조달, 보조금 조건',
+  },
+  'oil-supply-shock': {
+    dateline: '국제 원유시장',
+    scene: '산유국 감산과 운송 차질 우려로 원유 선물 매수세가 강해졌습니다. 정유사는 판매가격 상승 가능성과 원유 조달비용 증가를 함께 계산하고, 항공사는 유류비 부담을 경계하고 있습니다.',
+    quote: '유가 상승은 에너지 기업의 매출을 높일 수 있지만 모든 관련 기업의 이익을 자동으로 늘리지는 않습니다.',
+    watch: '산유국 생산량, 원유 재고, 운송로, 정제마진과 항공유 가격',
+  },
+  'oil-supply-relief': {
+    dateline: '국제 원유시장',
+    scene: '증산과 재고 증가 소식에 공급 부족 우려가 낮아지며 원유 가격이 안정됐습니다. 항공·식품기업은 비용 부담 완화를 기대하지만 정유사는 판매가격과 마진 하락을 살피고 있습니다.',
+    quote: '유가 하락은 소비기업에는 비용 호재지만 에너지 생산·정유기업에는 수익성 부담이 될 수 있습니다.',
+    watch: '원유 재고, 증산 이행률, 정제마진, 운송·포장 비용',
+  },
+  'grain-shock': {
+    dateline: '글로벌 곡물시장',
+    scene: '가뭄·수출 제한·운송 차질 우려로 밀과 옥수수 선물 가격이 뛰었습니다. 식품기업은 재고가 소진된 뒤 높아진 원가가 제품가격에 반영될 가능성을 점검하고 있습니다.',
+    quote: '곡물 가격 충격은 선물시장에서 시작해 식품 원가와 소비자물가로 시차를 두고 전달됩니다.',
+    watch: '작황, 수출 제한, 비료 가격, 식품기업 원재료 재고',
+  },
+  'grain-relief': {
+    dateline: '글로벌 곡물시장',
+    scene: '강수량 개선과 수출 정상화 소식에 곡물 공급 우려가 완화됐습니다. 식품기업은 낮아진 선물가격이 실제 구매계약 단가에 반영되는 시점을 기다리고 있습니다.',
+    quote: '원재료 가격이 내려도 기존에 비싸게 사둔 재고가 남아 있으면 기업 이익은 천천히 회복될 수 있습니다.',
+    watch: '수확량 전망, 수출 물량, 구매계약 가격, 재고 회전기간',
+  },
+  'us-yield-spike': {
+    dateline: '뉴욕 채권시장',
+    scene: '미국 장기 국채 매물이 늘며 금리가 급등했고, 미래 이익 비중이 큰 성장주와 고위험 채권의 할인율 부담이 커졌습니다. 은행주는 금리 수익과 보유채권 평가손실을 함께 따지고 있습니다.',
+    quote: '국채금리는 전 세계 자산가격이 비교하는 기준 수익률이어서 미국 밖의 자산에도 영향을 줍니다.',
+    watch: '10년물 금리, 국채 입찰, 미국 물가, 성장주 밸류에이션',
+  },
+  'us-yield-cooldown': {
+    dateline: '뉴욕 채권시장',
+    scene: '물가 둔화와 재정 우려 완화로 미국 장기 금리가 안정되자 채권 가격이 회복됐습니다. 성장기업도 미래 이익에 적용되는 할인율 부담이 낮아졌다는 평가를 받았습니다.',
+    quote: '금리 안정이 지속되려면 한 번의 지표보다 물가와 재정 흐름이 같은 방향을 보여야 합니다.',
+    watch: '10년물 금리, 근원물가, 재정적자, 연준 발언',
+  },
+  'em-credit-stress': {
+    dateline: '신흥국 채권시장',
+    scene: '저신용 국가의 상환 능력에 의문이 커지며 고금리 채권에서 자금이 빠져나갔습니다. 투자자들은 높은 쿠폰 이자가 원금 손실 위험을 보상할 수 있는지 다시 계산하고 있습니다.',
+    quote: '높은 이자는 선물이 아니라 높은 상환 위험을 감수하는 대가일 수 있습니다.',
+    watch: '외환보유액, 국가부채, 신용등급, IMF 협상과 만기 일정',
+  },
+  'em-credit-relief': {
+    dateline: '신흥국 채권시장',
+    scene: '국제기구 협상과 재정 개선 신호에 고위험 채권의 상환 불안이 낮아졌습니다. 다만 단기 유동성 지원이 장기 재정 문제까지 해결했는지는 의견이 엇갈립니다.',
+    quote: '신용 회복은 발표보다 실제 외화 유입과 재정수지 개선으로 확인해야 합니다.',
+    watch: '외환보유액, 재정수지, 신용등급 전망, 다음 채권 만기',
+  },
+  'war-risk': {
+    dateline: '국제 분쟁지역·시장',
+    scene: '군사적 긴장과 운송로 차질 우려로 원유·곡물 가격이 오르고 항공·물류기업의 비용 부담이 커졌습니다. 투자자들은 위험자산을 줄이고 국채 등 안전자산을 찾기 시작했습니다.',
+    quote: '전쟁 뉴스는 실제 공급 차질과 투자심리 위축이라는 두 경로로 시장을 움직입니다.',
+    watch: '운송로 통제, 원유·곡물 공급, 항공편, 휴전 협상',
+  },
+  'peace-progress': {
+    dateline: '국제 외교·시장',
+    scene: '휴전 협상과 운송 정상화 기대가 커지며 항공·물류 비용 부담이 낮아졌습니다. 전쟁 프리미엄이 붙었던 원유와 안전자산에서는 일부 차익실현 움직임이 나타났습니다.',
+    quote: '긴장 완화 보도는 합의 서명, 현장 이행, 운송 정상화가 확인될 때 신뢰도가 높아집니다.',
+    watch: '휴전 이행, 운송로 재개, 원유 공급, 난민·물류 정상화',
+  },
+  'election-risk': {
+    dateline: '정치·정책 현장',
+    scene: '선거 결과에 따라 세금·규제·재정지출 방향이 달라질 수 있다는 전망에 정책 민감 업종의 변동성이 커졌습니다. 기업들은 투자 결정을 미루며 결과를 기다리고 있습니다.',
+    quote: '시장은 어느 후보가 좋은지보다 정책이 얼마나 크게 바뀌고 예측하기 어려운지를 가격에 반영합니다.',
+    watch: '공약의 재원, 규제 대상, 의회 구성, 정책 시행 가능성',
+  },
+  'policy-stability': {
+    dateline: '정치·정책 현장',
+    scene: '세금과 규제 방향이 명확해지면서 기업들이 보류했던 투자계획을 다시 검토하기 시작했습니다. 은행·건설 등 정책 민감 업종의 불확실성 할인도 완화되는 모습입니다.',
+    quote: '기업은 유리한 정책뿐 아니라 예측 가능한 정책에서도 투자 결정을 내리기 쉬워집니다.',
+    watch: '법안 통과 일정, 예산 확보, 기업 투자계획, 정책 연속성',
+  },
+  'argentina-reform': {
+    dateline: '부에노스아이레스 채권시장',
+    scene: '재정 개혁안과 통화 안정 정책을 둘러싼 갈등으로 국채 상환 능력에 대한 우려가 커졌습니다. 높은 이자보다 외화 확보와 정치적 실행력이 더 중요한 변수로 떠올랐습니다.',
+    quote: '국가채권은 정부가 세금과 외화를 확보해 약속한 돈을 갚을 수 있는지를 보는 투자입니다.',
+    watch: '의회 표결, 외환보유액, IMF 협상, 신용등급과 통화가치',
+  },
+  'emergency-stimulus': {
+    dateline: '정부·중앙은행 긴급 브리핑',
+    scene: '실업률 급등에 정부 지출과 금리 인하가 동시에 발표되며 위험자산이 단기 반등했습니다. 시장은 부양책 규모보다 실제 고용과 소비가 회복되는지를 기다리고 있습니다.',
+    quote: '긴급 부양책은 추락 속도를 늦출 수 있지만 경기 회복을 즉시 보장하지는 않습니다.',
+    watch: '재정 집행 속도, 기준금리, 신규 고용, 소비 회복',
+  },
+  'wage-spiral': {
+    dateline: '노동·물가 긴급판',
+    scene: '구인난으로 임금이 빠르게 오르자 서비스 가격과 기업 인건비가 함께 상승했습니다. 중앙은행이 추가 긴축에 나설 수 있다는 전망도 커졌습니다.',
+    quote: '임금 상승이 생산성 개선보다 빠르면 가계소득 호재가 기업 비용과 물가 부담으로 바뀔 수 있습니다.',
+    watch: '임금상승률, 생산성, 서비스물가, 기업 인건비 비중',
+  },
+  'credit-crunch': {
+    dateline: '금융시장 비상 점검',
+    scene: '높은 금리와 부실 우려로 은행과 채권투자자가 대출·투자를 줄이면서 기업 자금조달이 막히기 시작했습니다. 부채가 많은 기업과 고위험 채권부터 매물이 늘었습니다.',
+    quote: '신용경색은 돈의 가격이 높은 단계를 넘어, 돈을 빌리고 싶어도 빌릴 수 없는 상황입니다.',
+    watch: '대출 승인율, 회사채 금리, 연체율, 기업 만기 부채',
+  },
+  'liquidity-flood': {
+    dateline: '자산시장 과열 경보',
+    scene: '낮은 금리로 풀린 자금이 성장주와 부동산에 몰리며 가격이 실적보다 빠르게 올랐습니다. 시장에서는 추가 상승 기대와 거품 붕괴 우려가 동시에 커지고 있습니다.',
+    quote: '유동성은 가격을 올릴 수 있지만 기업의 실제 이익까지 자동으로 늘려 주지는 않습니다.',
+    watch: '신용융자, 거래대금, 기업이익 대비 주가, 부동산 거래량',
+  },
+  'fx-intervention': {
+    dateline: '외환당국 긴급 브리핑',
+    scene: '환율 급등을 막기 위한 달러 매도 개입이 시작되자 원/달러 환율이 단기 하락하고 항공·수입기업의 비용 불안이 줄었습니다. 시장은 외환보유액을 계속 사용할 수 있는지 주목하고 있습니다.',
+    quote: '시장 개입은 급한 움직임을 늦출 수 있지만 경제의 근본적인 달러 수급까지 바꾸지는 못할 수 있습니다.',
+    watch: '외환보유액, 개입 지속 기간, 외국인 자금, 무역수지',
+  },
+  'realty-cooling-policy': {
+    dateline: '정부 부동산 대책 발표',
+    scene: '집값 과열에 대출 규제와 세금 강화가 발표되면서 부동산·건설·은행 관련 자산이 조정을 받았습니다. 시장은 실수요와 투기수요 중 어느 쪽이 더 크게 줄어들지 살피고 있습니다.',
+    quote: '과열 억제 정책은 가격보다 대출과 거래량을 먼저 움직이며 금융권에도 영향을 줄 수 있습니다.',
+    watch: '대출 한도, 거래량, 미분양, 은행 주택대출 연체율',
+  },
+};
+
+function getNewsDeskLabel(event) {
+  if (isCorporateRiskEvent(event)) return '기업 단독';
+  const key = getEventKey(event);
+  if (['rate-up', 'rate-down', 'deposit-special', 'us-yield-spike', 'us-yield-cooldown', 'credit-crunch'].includes(key)) return '금융·채권';
+  if (['fx-stabilize', 'fx-volatility', 'fx-spike', 'fx-intervention'].includes(key)) return '외환';
+  if (['oil-supply-shock', 'oil-supply-relief', 'grain-shock', 'grain-relief', 'rare'].includes(key)) return '원자재·공급망';
+  if (['war-risk', 'peace-progress', 'election-risk', 'policy-stability'].includes(key)) return '국제·정책';
+  if (['property-ease', 'property-tighten', 'housing', 'realty-cooling-policy'].includes(key)) return '부동산·정책';
+  if (['drug-breakthrough', 'drug-setback', 'us-regulation', 'korea-us-chip-tension', 'green-subsidy'].includes(key)) return '산업·기술';
+  if (['em-credit-stress', 'em-credit-relief', 'argentina-reform'].includes(key)) return '글로벌 채권';
+  return '경제·시장';
+}
+
+function getNewsArticleData(event) {
+  const key = getEventKey(event);
+  const newsroom = eventNewsroomDetails[key];
+  const corporateTarget = event.affectedAssets?.[0] ?? '선택 기업';
+  const fallback = isCorporateRiskEvent(event)
+    ? {
+        dateline: `${corporateTarget} 기업 현장`,
+        scene: `${corporateTarget}에 발생한 기업 고유 뉴스가 알려지며 투자자들이 매출, 비용, 현금흐름에 미칠 영향을 다시 계산하고 있습니다. 같은 업종의 다른 기업보다 해당 기업에 직접적인 주가 반응이 나타날 수 있습니다.`,
+        quote: event.principle ?? '기업 고유 뉴스는 시장 전체보다 해당 기업의 미래 현금흐름과 신뢰도에 직접 영향을 줍니다.',
+        watch: (event.financialLinks ?? ['매출', '영업이익률', '현금흐름', '부채비율']).join(', '),
+      }
+    : {
+        dateline: '경제와시장 뉴스룸',
+        scene: `${event.detail} 투자자들은 이 변화가 실제 기업 실적과 자산 수급으로 이어지는지 확인하고 있습니다.`,
+        quote: event.principle ?? getSimpleExplanation(event),
+        watch: (event.affectedAssets ?? ['관련 시장 지표']).join(', '),
+      };
+  const article = newsroom ?? fallback;
+  return {
+    ...article,
+    desk: getNewsDeskLabel(event),
+    badge: event.triggered ? '긴급 경보' : isCorporateRiskEvent(event) ? '기업 단독' : '시장 속보',
+    edition: event.round ? `R${event.round} · 3개월 시장` : '분기 시장 프리뷰',
+  };
+}
+
+function NewsArticleContent({ event, compact = false, showLead = true }) {
+  const article = getNewsArticleData(event);
+  return (
+    <div className={compact ? 'news-article-content compact' : 'news-article-content'}>
+      <div className="news-article-meta">
+        <b>{article.badge}</b>
+        <span>경제와시장 뉴스룸 · {article.desk} · {article.edition}</span>
+      </div>
+      {showLead ? <p className="news-article-lead"><strong>{article.dateline}</strong> — {event.detail}</p> : null}
+      <p className="news-market-scene"><strong>시장 현장</strong>{article.scene}</p>
+      <blockquote>
+        <strong>가상 전문가 코멘트</strong>
+        “{article.quote}”
+      </blockquote>
+      <p className="news-watch-point"><strong>다음 확인 지표</strong>{article.watch}</p>
+      <small className="news-fiction-notice">수업용 가상 뉴스 · 실제 언론 보도나 투자 권유가 아닙니다.</small>
+    </div>
+  );
+}
+
+function NewsArticlePreview({ event }) {
+  return (
+    <details className="news-article-preview">
+      <summary>기사 미리보기</summary>
+      <NewsArticleContent event={event} compact />
+    </details>
+  );
+}
+
 function getCausalChain(event) {
   const chains = {
     'rate-up': ['이자가 오름', '대출 부담 증가', '부동산·성장주 부담'],
@@ -3331,6 +3698,58 @@ function getEventMovers(event, assets) {
     .filter(Boolean)
     .sort((a, b) => Math.abs(b.change) - Math.abs(a.change))
     .slice(0, 4);
+}
+
+function getImpactBreakdownRows(summary, assets) {
+  const breakdown = summary?.impactBreakdown ?? summary?.macroMove?.impactBreakdown ?? {};
+  const assetMap = new Map(assets.map((asset) => [asset.id, asset]));
+  return Object.entries(breakdown)
+    .map(([assetId, impact]) => {
+      const asset = assetMap.get(assetId);
+      return asset ? { asset, ...impact } : null;
+    })
+    .filter((row) => row && Math.abs(row.total ?? 0) >= 0.001)
+    .sort((a, b) => Math.abs(b.total) - Math.abs(a.total));
+}
+
+const impactContributionLabels = [
+  ['direct', '이슈'],
+  ['macro', '거시'],
+  ['financial', '재무'],
+  ['passive', '시장'],
+];
+
+function ImpactBreakdown({ rows, limit = 6 }) {
+  return (
+    <article className="impact-breakdown-summary">
+      <div className="explain-head">
+        <strong>종목별 최종 변동 계산</strong>
+        <b className="result-badge expectation">분기 기여도</b>
+        <span>이슈·거시·재무·기본 시장 변동의 합계입니다.</span>
+      </div>
+      <div className="impact-breakdown-list">
+        {rows.slice(0, limit).map((row) => (
+          <div className="impact-breakdown-row" key={row.asset.id}>
+            <div>
+              <strong>{row.asset.name}</strong>
+              <b className={(row.total ?? 0) >= 0 ? 'impact-total positive' : 'impact-total negative'}>
+                {formatPercent((row.total ?? 0) * 100)}
+              </b>
+            </div>
+            <div className="impact-contributions">
+              {impactContributionLabels.map(([key, label]) => (
+                Math.abs(row[key] ?? 0) >= 0.0005 ? (
+                  <span className={(row[key] ?? 0) >= 0 ? 'positive' : 'negative'} key={key}>
+                    {label} {formatPercent((row[key] ?? 0) * 100)}
+                  </span>
+                ) : null
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </article>
+  );
 }
 
 function formatAssetPrice(asset) {
@@ -3527,6 +3946,7 @@ function RoundExplanation({ summary, assets, compact = false }) {
   const expectationCount = events.filter((event) => event.outcomeType === 'expectation').length;
   const reverseCount = events.filter((event) => event.outcomeType === 'reverse').length;
   const skippedCount = events.filter((event) => event.didApply === false && event.outcomeType !== 'reverse').length;
+  const impactBreakdownRows = getImpactBreakdownRows(summary, assets);
 
   return (
     <section className={compact ? 'explain-panel compact' : 'explain-panel'} aria-label="라운드 해설">
@@ -3574,6 +3994,9 @@ function RoundExplanation({ summary, assets, compact = false }) {
               </span>
             </div>
           </article>
+        ) : null}
+        {detailsOpen && impactBreakdownRows.length ? (
+          <ImpactBreakdown rows={impactBreakdownRows} limit={compact ? 4 : 8} />
         ) : null}
         {summary.delistedAssets?.length ? (
           <article className="delist-summary">
@@ -3626,6 +4049,7 @@ function RoundExplanation({ summary, assets, compact = false }) {
               ) : null}
               {detailsOpen ? (
                 <div className="explanation-details">
+                  <NewsArticleContent event={event} compact showLead={false} />
                   <p>{event.principle}</p>
                   <div className="causal-chain" aria-label={`${event.title} 인과 흐름`}>
                     {getCausalChain(event).map((step) => (
@@ -3718,7 +4142,7 @@ function IssueTicker({ events, phase, compact = false }) {
           <article key={event.id}>
             <strong>{event.title}</strong>
             <small className="friendly-term">{getSimpleExplanation(event)}</small>
-            <p>{event.detail}</p>
+            <NewsArticleContent event={event} compact={compact} />
             {phase === 'open' ? <em>장 마감 후 이 이슈가 실제 가격에 반영됐는지 확인해보세요.</em> : null}
           </article>
         ))}
@@ -3746,7 +4170,7 @@ function CorporateRiskTicker({ events, assets, phase, compact = false }) {
             <article key={event.id}>
               <strong>{event.title}</strong>
               <small className="friendly-term">{targetAsset?.name ?? event.affectedAssets?.[0] ?? '선택 기업'} 직접 영향</small>
-              <p>{event.detail}</p>
+              <NewsArticleContent event={event} compact={compact} />
               {phase === 'open' ? <em>장 마감 후 실제 기업가치에 반영됐는지 확인해보세요.</em> : null}
             </article>
           );
@@ -3825,7 +4249,7 @@ function CorporateRiskPanel({
               <div>
                 <strong>{event.title}</strong>
                 <small className="friendly-term">{getSimpleExplanation(event)}</small>
-                <span>{event.detail}</span>
+                <NewsArticleContent event={event} compact />
               </div>
               <button type="button" onClick={() => onCancelIssue(event.id)} disabled={phase !== 'setup'}>
                 취소
@@ -3872,7 +4296,7 @@ function MacroAlertBanner({ alerts, compact = false }) {
           <li key={alert.uniqueId ?? alert.id} className="macro-alert-item">
             <strong>{alert.title}</strong>
             <small className="friendly-term">{getSimpleExplanation(alert)}</small>
-            <p>{alert.detail}</p>
+            <NewsArticleContent event={alert} compact={compact} />
           </li>
         ))}
       </ul>
@@ -3898,7 +4322,7 @@ function MacroTriggerPanel({ alertsByRound = {}, activeAlerts = [], compact = fa
           <li className="macro-alert-item" key={`${alert.triggerRound ?? 'active'}-${alert.id}-${index}`}>
             <strong>{alert.triggerRound ? `R${alert.triggerRound} · ` : ''}{alert.title}</strong>
             <small className="friendly-term">{getSimpleExplanation(alert)}</small>
-            <p>{alert.triggerReason ?? alert.detail}</p>
+            <NewsArticleContent event={{ ...alert, detail: alert.triggerReason ?? alert.detail }} compact />
             {alert.affectedAssets?.length ? <span>관련 자산: {alert.affectedAssets.join(' · ')}</span> : null}
           </li>
         ))}
@@ -3989,10 +4413,7 @@ function TeacherRoundIssuesPanel({ triggeredEventsByRound, totalRounds }) {
                       </strong>
                       <span style={{ fontSize: 11, color: statusColor, fontWeight: 600 }}>{status}</span>
                     </div>
-                    <p style={{ margin: '4px 0', fontSize: 12, color: '#374151' }}>{event.detail}</p>
-                    {event.principle ? (
-                      <p style={{ margin: 0, fontSize: 11, color: '#6b7280' }}>{event.principle}</p>
-                    ) : null}
+                    <NewsArticleContent event={event} compact />
                   </article>
                 );
               })
@@ -4375,6 +4796,7 @@ function buildRoundSummaryFromLog(log) {
     events: log.eventAnalysis,
     macroAlerts: log.macroAlerts ?? [],
     macroMove: log.macroMove ?? null,
+    impactBreakdown: log.impactBreakdown ?? log.macroMove?.impactBreakdown ?? null,
     delistedAssets: log.delistedAssets ?? [],
   };
 }
@@ -4393,6 +4815,7 @@ function mergeRoundResultsIntoLogs(roundLogs = [], roundResults = []) {
       eventAnalysis: result.events ?? existing.eventAnalysis ?? [],
       macroAlerts: result.macroAlerts ?? existing.macroAlerts ?? [],
       macroMove: result.macroMove ?? existing.macroMove ?? null,
+      impactBreakdown: result.impactBreakdown ?? result.macroMove?.impactBreakdown ?? existing.impactBreakdown ?? null,
       delistedAssets: result.delistedAssets ?? existing.delistedAssets ?? [],
       priceIndex: result.priceIndex ?? existing.priceIndex,
     });
@@ -6155,7 +6578,6 @@ const eventConflictGroups = [
   { label: '물가 방향 충돌', sides: [['inflation-cool'], ['inflation-rebound']] },
   { label: '환율 안정성과 불안 충돌', sides: [['fx-stabilize'], ['fx-volatility', 'fx-spike']] },
   { label: '부동산 정책 방향 충돌', sides: [['property-ease'], ['property-tighten']] },
-  { label: '부동산 완화와 금리 긴축 충돌', sides: [['property-ease'], ['rate-up']] },
   { label: '원유 공급 충격과 안정 충돌', sides: [['oil-supply-shock'], ['oil-supply-relief']] },
   { label: '곡물 공급 충격과 안정 충돌', sides: [['grain-shock'], ['grain-relief']] },
   { label: '미국 채권시장 불안과 안정 충돌', sides: [['us-yield-spike'], ['us-yield-cooldown']] },
@@ -6163,7 +6585,6 @@ const eventConflictGroups = [
   { label: '전쟁 위험과 긴장 완화 충돌', sides: [['war-risk'], ['peace-progress']] },
   { label: '정치 불확실성과 정책 안정 충돌', sides: [['election-risk'], ['policy-stability']] },
   { label: '바이오 기대와 차질 충돌', sides: [['drug-breakthrough'], ['drug-setback']] },
-  { label: '위험자산 선호와 위험 회피 충돌', sides: [['us-rally', 'peace-progress', 'policy-stability'], ['war-risk', 'election-risk', 'us-regulation']] },
   { label: '수출 호재와 공급망 갈등 충돌', sides: [['korea-export'], ['korea-us-chip-tension']] },
 ];
 
@@ -6174,7 +6595,8 @@ function getEventTemplateKey(event) {
 function getConflictWeight(event) {
   const impactValues = Object.values(event.impact ?? {}).map((value) => Math.abs(Number(value) || 0));
   const averageImpact = impactValues.length ? impactValues.reduce((sum, value) => sum + value, 0) / impactValues.length : 0.06;
-  return Number(((event.probability ?? DEFAULT_EVENT_PROBABILITY) + averageImpact * 3).toFixed(3));
+  // 발생 확률은 이미 앞 단계에서 판정됐다. 실제 발생한 카드끼리는 충격 강도만 비교한다.
+  return Number(averageImpact.toFixed(3));
 }
 
 function getConflictOutcomeMap(events) {
@@ -6197,11 +6619,19 @@ function getConflictOutcomeMap(events) {
         if (b.score !== a.score) return b.score - a.score;
         if (b.eventCount !== a.eventCount) return b.eventCount - a.eventCount;
         if (b.strongestWeight !== a.strongestWeight) return b.strongestWeight - a.strongestWeight;
-        return Math.random() - 0.5;
+        return a.index - b.index;
       });
 
     const winningSide = rankedSides[0];
     const winnerTitle = winningSide.matchedEvents.map((event) => event.title).join(', ');
+
+    winningSide.matchedEvents.forEach((event) => {
+      outcome[event.id] = {
+        blocked: false,
+        label: group.label,
+        winnerTitle,
+      };
+    });
 
     rankedSides.slice(1).forEach((side) => {
       side.matchedEvents.forEach((event) => {
@@ -7212,7 +7642,7 @@ function HostView({
                   <div>
                     <strong>{event.title}</strong>
                     <small className="friendly-term">{getSimpleExplanation(event)}</small>
-                    <span>{event.detail}</span>
+                    <NewsArticleContent event={event} compact />
                   </div>
                   <button type="button" onClick={() => onCancelIssue(event.id)} disabled={phase !== 'setup'}>
                     취소
@@ -7240,12 +7670,12 @@ function HostView({
               <article className="event-button" key={event.id}>
                 <strong>{event.title}</strong>
                 <em className="friendly-term">{getSimpleExplanation(event)}</em>
-                <span>{event.detail}</span>
-                <small>{event.principle}</small>
+                <NewsArticlePreview event={event} />
                 <div className="issue-options">
                   {event.issueOptions.map((issue) => (
                     <button type="button" key={issue.title} onClick={() => onRegisterIssue(event, issue)} disabled={!canRegisterIssue}>
-                      {issue.title}
+                      <strong>{issue.title}</strong>
+                      <span>{issue.detail}</span>
                     </button>
                   ))}
                   <button type="button" onClick={() => onRegisterIssue(event)} disabled={!canRegisterIssue || !issueDraft.trim()}>
@@ -9725,10 +10155,16 @@ export function App() {
     }
 
     const eventsForResolution = currentRoundEvents.filter((event) => event.published);
-    const conflictOutcomeMap = getConflictOutcomeMap(eventsForResolution);
-    const initialResolvedEvents = eventsForResolution.map((event) => {
+    // 먼저 실제 발생 여부를 판정하고, 실제로 발생한 카드 사이에서만 상충을 해결한다.
+    // 그래야 패배 카드를 막은 뒤 승자까지 확률 실패해 양쪽이 모두 사라지는 일이 없다.
+    const probabilityResolvedEvents = eventsForResolution.map((event) => ({
+      ...event,
+      didApply: Math.random() < (event.probability ?? DEFAULT_EVENT_PROBABILITY),
+    }));
+    const conflictOutcomeMap = getConflictOutcomeMap(probabilityResolvedEvents.filter((event) => event.didApply));
+    const initialResolvedEvents = probabilityResolvedEvents.map((event) => {
       const conflictOutcome = conflictOutcomeMap[event.id];
-      const didApply = conflictOutcome?.blocked ? false : Math.random() < (event.probability ?? DEFAULT_EVENT_PROBABILITY);
+      const didApply = event.didApply && !conflictOutcome?.blocked;
       const outcomeType = didApply
         ? (Math.random() < EXPECTATION_WITHIN_SUCCESS_PROBABILITY ? 'expectation' : 'event')
         : 'failed';
@@ -9741,8 +10177,8 @@ export function App() {
         conflictWinnerTitle: conflictOutcome?.winnerTitle,
         expectationTitle: `${event.title} 실제 발표 전 기대감 선반영`,
         expectationDetail: '실제 이벤트가 확정되지는 않았지만, 투자자들이 가능성을 먼저 반영하면서 가격이 움직였습니다.',
-        failureTitle: conflictOutcome && !didApply ? `${event.title} 상충 이슈로 영향 제한` : event.failureTitle,
-        failureDetail: conflictOutcome && !didApply
+        failureTitle: conflictOutcome?.blocked ? `${event.title} 상충 이슈로 영향 제한` : event.failureTitle,
+        failureDetail: conflictOutcome?.blocked
           ? `${conflictOutcome.label} 상황에서 '${conflictOutcome.winnerTitle}' 쪽 경향성이 더 강하게 확인되어 이 이슈는 가격에 반영되지 않았습니다.`
           : event.failureDetail,
       };
@@ -9819,9 +10255,9 @@ export function App() {
     // Week 2 K — 방 생성 시 부여된 이슈 강도 시드 적용 (모든 이슈 impact에 곱연산)
     const issueIntensity = economicSeed?.issueIntensity ?? 1;
     const rawEventImpact = applySizeFactor(combineResolvedImpacts(allResolvedEvents), assets);
-    const eventImpact = enforceDirectImpactFloors(Object.fromEntries(
+    const eventImpact = clampQuarterlyImpactMap(Object.fromEntries(
       Object.entries(rawEventImpact).map(([assetId, value]) => [assetId, value * issueIntensity]),
-    ), allResolvedEvents, assets);
+    ), assets);
     const rawEventMacroImpact = combineEventMacroImpacts(allResolvedEvents);
     const eventMacroImpact = Object.fromEntries(
       Object.entries(rawEventMacroImpact).map(([key, value]) => [key, value * issueIntensity]),
@@ -9845,8 +10281,13 @@ export function App() {
       randomMacroImpact: macroBaseline.randomMacroImpact,
     });
     const nextBaseRate = macroMove.nextBaseRate;
-    const financialImpact = getFinancialImpactMap(assets, macroMove, allResolvedEvents);
-    const combinedImpact = combineImpacts(eventImpact, macroMove.assetImpact, financialImpact);
+    // 카드에 직접 지정된 종목에는 같은 카드에서 파생된 거시 충격을 다시 얹지 않는다.
+    // 재무 민감도는 기업별 차이를 남기되 직접 충격의 35%를 넘지 않도록 제한한다.
+    const directAssetIds = getDirectlyAffectedAssetIds(allResolvedEvents);
+    const appliedMacroAssetImpact = excludeDirectAssetMacroImpact(macroMove.assetImpact, directAssetIds);
+    const rawFinancialImpact = getFinancialImpactMap(assets, macroMove, allResolvedEvents);
+    const financialImpact = limitFinancialImpactAgainstDirect(rawFinancialImpact, eventImpact, directAssetIds);
+    const combinedImpact = combineImpacts(eventImpact, appliedMacroAssetImpact, financialImpact);
     const directNegativeCounts = allResolvedEvents.reduce((acc, event) => {
       if (!event.didApply) return acc;
       Object.entries(event.impact ?? {}).forEach(([assetId, value]) => {
@@ -9919,7 +10360,26 @@ export function App() {
           .map((asset) => ({ id: asset.id, name: asset.name }))
       : [];
 
-    const nextAssets = moveAssetsLocally(assets, combinedImpact, delistedAssets.map((asset) => asset.id), round, macroMove, negativeStreakByAsset, volatilityMode);
+    const passiveImpact = Object.fromEntries(
+      assets.map((asset) => [asset.id, asset.delisted ? 0 : getPassiveMarketMove(asset, volatilityMode)]),
+    );
+    const impactBreakdown = buildImpactBreakdown(
+      assets,
+      eventImpact,
+      appliedMacroAssetImpact,
+      financialImpact,
+      passiveImpact,
+    );
+    const nextAssets = moveAssetsLocally(
+      assets,
+      combinedImpact,
+      delistedAssets.map((asset) => asset.id),
+      round,
+      macroMove,
+      negativeStreakByAsset,
+      volatilityMode,
+      passiveImpact,
+    );
     const depositInterest = Math.round(deposit * (getDepositRate(nextBaseRate) / 100 / 4));
     const nextDeposit = deposit + depositInterest;
     // 팀 모드: 팀별 채권 이자 로그를 수집하기 위한 컨테이너
@@ -10189,6 +10649,7 @@ export function App() {
       macroAlerts: resolvedMacroAlerts,
       delistedAssets,
       macroMove,
+      impactBreakdown,
       priceIndex: nextPriceIndexValue,
       aggregateReturn: aggregateReturnForRound,
       demandPullDelta: demandPullDeltaForRound,
@@ -10261,6 +10722,7 @@ export function App() {
         eventAnalysis: resolvedEvents,
         macroAlerts: resolvedMacroAlerts,
         macroMove,
+        impactBreakdown,
         delistedAssets,
         priceIndex: nextPriceIndexValue,
       });
